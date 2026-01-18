@@ -180,7 +180,7 @@ const registerStudentSchema = Joi.object({
   student_year: Joi.number()
     .integer()
     .min(1)
-    .max(4)
+    .max(5)
     .required()
     .messages({
       'number.base': 'Student year must be a number',
