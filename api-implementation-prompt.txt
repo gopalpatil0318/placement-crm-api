@@ -10,6 +10,7 @@
  * - Transaction handling
  * - Single database model (All colleges in one DB)
  * - Production-grade enterprise practices
+ * - Remove all SonarQube warnings
  * ============================================================================
  */
 
