@@ -1,5 +1,6 @@
 const swaggerJSDoc = require('swagger-jsdoc');
 const authSwagger = require('../SwaggerUi/systemAdmin.js');
+const student = require('../SwaggerUi/student.js');
 
 const swaggerDefinition = {
   openapi: '3.0.0',
@@ -20,6 +21,7 @@ const swaggerDefinition = {
   ],
    paths: {
     ...authSwagger.paths,
+    ...student.paths,
    
   },
   components: {
