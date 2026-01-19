@@ -21,7 +21,8 @@ const {
   createCollegeSchema,
   updateCollegeSchema,
   updateCollegeFeaturesSchema,
-  listCollegeSchema
+  listCollegeSchema,
+  forgotPasswordSchema
 } = require('../validators/collegeValidators');
 const { ROLES } = require('../config/constants');
 
@@ -51,6 +52,16 @@ router.get(
   validate(listCollegeSchema),
   collegeController.listColleges
 );
+
+//forget password route
+router.put(
+  '/admin/forgot-password',
+  authMiddleware,
+  requireRole(ROLES.ADMIN),
+  apiLimiter,
+  validate(forgotPasswordSchema),
+  collegeController.forgotCollegeAdminPassword
+)
 
 // ============================================================================
 // GET /api/v1/colleges/:collegeId

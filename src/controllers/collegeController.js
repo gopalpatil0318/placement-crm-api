@@ -19,6 +19,7 @@ const {
   SUCCESS_MESSAGES,
   ROLES
 } = require('../config/constants');
+const { Logform } = require('winston');
 
 /**
  * POST /api/v1/colleges
@@ -105,6 +106,61 @@ async function createCollege(req, res) {
     }
 
     return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  }
+}
+
+//forget password function
+async function forgotCollegeAdminPassword(req,res){
+  const startTime = Date.now()
+
+  logger.info(
+    `${LOG.API_START_PREFIX} PUT /api/v1/colleges/admin/forgot-password`,
+    {
+      user_id:req.user.id,
+      college_id:req.user.college_id,
+    }
+  )
+  try{
+    const {new_password} = req.validated;
+
+    await collegeService.resetCollegeAdminPassword(
+      req.user.id,
+      req.user.college_id,
+      new_password
+    )
+    const duration = Date.now() - startTime
+
+    logger.info(
+      `${LOG.API_END_PREFIX} PUT /api/v1/colleges/admin/forgot-password`,
+      {duration_ms:duration}
+    )
+
+    return success(
+      res,
+      null,
+      'Password updated successfully',
+      HTTP_STATUS.OK
+    )
+  }
+  catch(err){
+    const duration = Date.now() - startTime
+
+    logger.error(
+      `${LOG.API_ERROR_PREFIX} PUT /api/v1/colleges/forgot-password`,
+      {
+        error: err.message, duration_ms: duration
+      }
+    )
+
+    if (err.message.includes('not found')) {
+      return error(res, err.message, HTTP_STATUS.NOT_FOUND);
+    }
+
+    return error(
+      res,
+      ERROR_MESSAGES.SERVER_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
   }
 }
 
@@ -377,6 +433,7 @@ async function updateCollegeFeatures(req, res) {
 
 module.exports = {
   createCollege,
+  forgotCollegeAdminPassword,
   listColleges,
   getCollege,
   updateCollege,

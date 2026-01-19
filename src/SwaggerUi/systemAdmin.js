@@ -120,6 +120,59 @@ module.exports = {
   }
 },
 
+'/api/colleges/admin/forgot-password': {
+  put: {
+    tags: ['CollegeAdmin'],
+    summary: 'Reset college admin password',
+    description: 'Allows college admin to reset password using new and confirm password',
+    security: [{ BearerAuth: [] }],
+
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['new_password', 'confirm_password'],
+            properties: {
+              new_password: {
+                type: 'string',
+                example: 'Admin@1234'
+              },
+              confirm_password: {
+                type: 'string',
+                example: 'Admin@1234'
+              }
+            }
+          }
+        }
+      }
+    },
+
+    responses: {
+      200: {
+        description: 'Password updated successfully'
+      },
+      400: {
+        description: 'Passwords do not match or invalid input'
+      },
+      401: {
+        description: 'Unauthorized'
+      },
+      403: {
+        description: 'Forbidden – Admin only'
+      },
+      404: {
+        description: 'Admin not found'
+      },
+      500: {
+        description: 'Server error'
+      }
+    }
+  }
+}
+,
+
 '/api/colleges/{collegeId}': {
       get: {
         tags: ['SystemAdmin'],
