@@ -18,6 +18,6 @@ const router = express.Router();
 router.use('/auth', authRoutes);
 router.use('/sysadmin', collegeRoutes);
 router.use('/students', studentRoutes);
-router.use('/users', userRoutes);
+router.use('/college', userRoutes);
 
 module.exports = router;
