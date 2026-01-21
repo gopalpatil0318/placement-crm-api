@@ -16,7 +16,7 @@ const userRoutes = require('./user.routes');
 const router = express.Router();
 
 router.use('/auth', authRoutes);
-router.use('/colleges', collegeRoutes);
+router.use('/sysadmin', collegeRoutes);
 router.use('/students', studentRoutes);
 router.use('/users', userRoutes);
 

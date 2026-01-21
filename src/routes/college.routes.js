@@ -1,13 +1,18 @@
 /**
  * ============================================================================
- * COLLEGE ROUTES - College Management
+ * COLLEGE ROUTES - SYSADMIN & COLLEGE ADMIN
  * ============================================================================
- * Single Database Architecture
- * - POST /colleges - Create college (sysadmin only)
- * - GET /colleges - List colleges (sysadmin only)
- * - GET /colleges/:collegeId - Get single college (sysadmin only)
- * - PUT /colleges/:collegeId - Update college (sysadmin only)
- * - PUT /colleges/:collegeId/features - Update college features (sysadmin only)
+ *
+ * SYSADMIN ROUTES
+ * - POST /api/sysadmin/create-college
+ * - GET  /api/sysadmin/colleges
+ * - GET  /api/sysadmin/colleges/:collegeId
+ * - PUT  /api/sysadmin/update-college/:collegeId
+ * - PUT  /api/sysadmin/colleges/:collegeId/features
+ *
+ * COLLEGE ADMIN ROUTES
+ * - PUT  /api/admin/colleges/forgot-password
+ * ============================================================================
  */
 
 const express = require('express');
@@ -17,21 +22,24 @@ const collegeController = require('../controllers/collegeController');
 const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validateRequest');
 const { apiLimiter } = require('../config/rateLimiter');
+
 const {
   createCollegeSchema,
   updateCollegeSchema,
   updateCollegeFeaturesSchema,
-  listCollegeSchema
+  listCollegeSchema,
+  forgotPasswordSchema
 } = require('../validators/collegeValidators');
+
 const { ROLES } = require('../config/constants');
 
 // ============================================================================
-// POST /api/v1/colleges
-// Create new college (sysadmin only)
-// Sets enabled_features to ["core"] by default
+// SYSADMIN: Create College
+// POST /api/sysadmin/create-college
 // ============================================================================
+// POST /api/systemadmin/create-college
 router.post(
-  '/',
+  '/create-college',
   authMiddleware,
   requireRole(ROLES.SYSADMIN),
   apiLimiter,
@@ -40,11 +48,11 @@ router.post(
 );
 
 // ============================================================================
-// GET /api/v1/colleges
-// List all colleges with pagination (sysadmin only)
+// SYSADMIN: List Colleges
+// GET /api/sysadmin/colleges
 // ============================================================================
 router.get(
-  '/',
+  '/colleges',
   authMiddleware,
   requireRole(ROLES.SYSADMIN),
   apiLimiter,
@@ -53,22 +61,22 @@ router.get(
 );
 
 // ============================================================================
-// GET /api/v1/colleges/:collegeId
-// Get single college by ID (sysadmin only)
+// SYSADMIN: Get College by ID
+// GET /api/sysadmin/colleges/:collegeId
 // ============================================================================
 router.get(
-  '/:collegeId',
+  '/colleges/:collegeId',
   authMiddleware,
   requireRole(ROLES.SYSADMIN),
   collegeController.getCollege
 );
 
 // ============================================================================
-// PUT /api/v1/colleges/:collegeId
-// Update college (name, subdomain, status) (sysadmin only)
+// SYSADMIN: Update College
+// PUT /api/sysadmin/update-college/:collegeId
 // ============================================================================
 router.put(
-  '/:collegeId',
+  '/update-college/:collegeId',
   authMiddleware,
   requireRole(ROLES.SYSADMIN),
   apiLimiter,
@@ -77,17 +85,29 @@ router.put(
 );
 
 // ============================================================================
-// PUT /api/v1/colleges/:collegeId/features
-// Update college enabled features (sysadmin only)
-// Core feature cannot be removed
+// SYSADMIN: Update College Features
+// PUT /api/sysadmin/colleges/:collegeId/features
 // ============================================================================
 router.put(
-  '/:collegeId/features',
+  '/colleges/:collegeId/features',
   authMiddleware,
   requireRole(ROLES.SYSADMIN),
   apiLimiter,
   validate(updateCollegeFeaturesSchema),
   collegeController.updateCollegeFeatures
+);
+
+// ============================================================================
+// COLLEGE ADMIN: Forgot Password
+// PUT /api/admin/colleges/forgot-password
+// ============================================================================
+router.put(
+  '/colleges/forgot-password',
+  authMiddleware,
+  requireRole(ROLES.ADMIN),
+  apiLimiter,
+  validate(forgotPasswordSchema),
+  collegeController.forgotCollegeAdminPassword
 );
 
 module.exports = router;

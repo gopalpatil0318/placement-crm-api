@@ -30,7 +30,7 @@ const {
 async function registerStudent(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/students/register`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/students/register`, {
     ip: req.ip,
     college_id: req.validated?.college_id
   });
@@ -58,7 +58,7 @@ async function registerStudent(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/students/register`,
+      `${LOG.API_END_PREFIX} POST /api/students/register`,
       {
         student_id: newStudent.student_id,
         student_email: newStudent.student_email,
@@ -82,7 +82,7 @@ async function registerStudent(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/students/register`,
+      `${LOG.API_ERROR_PREFIX} POST /api/students/register`,
       {
         error: err.message,
         college_id: req.validated?.college_id,
@@ -121,7 +121,7 @@ async function registerStudent(req, res) {
 async function bulkRegisterStudents(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/students/bulk`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/students/bulk-register`, {
     user_id: req.user?.id,
     user_role: req.user?.role,
     college_id: req.user?.college_id,
@@ -153,7 +153,7 @@ async function bulkRegisterStudents(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/students/bulk`,
+      `${LOG.API_END_PREFIX} POST /api/students/bulk-register`,
       {
         total: students.length,
         success: results.success.length,
@@ -174,7 +174,7 @@ async function bulkRegisterStudents(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/students/bulk`,
+      `${LOG.API_ERROR_PREFIX} POST /api/students/bulk-register`,
       {
         error: err.message,
         user_id: req.user?.id,
@@ -198,7 +198,7 @@ async function bulkRegisterStudents(req, res) {
 async function loginStudent(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/students/login`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/students/login`, {
     ip: req.ip,
     student_email: req.validated?.student_email
   });
@@ -216,7 +216,7 @@ async function loginStudent(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/students/login`,
+      `${LOG.API_END_PREFIX} POST /api/students/login`,
       {
         student_id: authResult.student.student_id,
         college_id: authResult.student.college_id,
@@ -241,7 +241,7 @@ async function loginStudent(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/students/login`,
+      `${LOG.API_ERROR_PREFIX} POST /api/students/login`,
       {
         error: err.message,
         ip: req.ip,
@@ -280,7 +280,7 @@ async function loginStudent(req, res) {
 async function logoutStudent(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/students/logout`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/students/logout`, {
     student_id: req.user?.id,
     ip: req.ip
   });
@@ -289,7 +289,7 @@ async function logoutStudent(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/students/logout`,
+      `${LOG.API_END_PREFIX} POST /api/students/logout`,
       {
         student_id: req.user?.id,
         duration_ms: duration
@@ -307,7 +307,7 @@ async function logoutStudent(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/students/logout`,
+      `${LOG.API_ERROR_PREFIX} POST /api/students/logout`,
       {
         error: err.message,
         student_id: req.user?.id,
@@ -330,7 +330,7 @@ async function logoutStudent(req, res) {
 async function updatePassword(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/v1/students/password`, {
+  logger.info(`${LOG.API_START_PREFIX} PUT /api/students/update-password`, {
     student_id: req.user?.id,
     ip: req.ip
   });
@@ -345,7 +345,7 @@ async function updatePassword(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} PUT /api/v1/students/password`,
+      `${LOG.API_END_PREFIX} PUT /api/students/update-password`,
       {
         student_id: student_id,
         duration_ms: duration
@@ -363,7 +363,7 @@ async function updatePassword(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} PUT /api/v1/students/password`,
+      `${LOG.API_ERROR_PREFIX} PUT /api/students/update-password`,
       {
         error: err.message,
         student_id: req.user?.id,
@@ -394,7 +394,7 @@ async function updatePassword(req, res) {
 async function updateProfile(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/v1/students/:studentId/profile`, {
+  logger.info(`${LOG.API_START_PREFIX} PUT /api/students/:studentId/profile`, {
     student_id: req.params.studentId,
     updated_by: req.user?.id,
     user_role: req.user?.role,
@@ -424,7 +424,7 @@ async function updateProfile(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} PUT /api/v1/students/:studentId/profile`,
+      `${LOG.API_END_PREFIX} PUT /api/students/:studentId/profile`,
       {
         student_id: updatedStudent.student_id,
         college_id: req.user.college_id,
@@ -444,7 +444,7 @@ async function updateProfile(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} PUT /api/v1/students/:studentId/profile`,
+      `${LOG.API_ERROR_PREFIX} PUT /api/students/:studentId/profile`,
       {
         error: err.message,
         target_student: req.params.studentId,
