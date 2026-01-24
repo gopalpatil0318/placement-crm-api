@@ -23,11 +23,14 @@ const app = express();
 // ============================================================================
 // SECURITY & PARSING
 // ============================================================================
+app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(cors({
-  origin: 'http://localhost:5173', 
-  credentials: true
+  origin: 'http://localhost:5173', // REPLACE with your exact frontend URL (no trailing slash)
+  credentials: true, // This allows cookies to be sent/received
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
