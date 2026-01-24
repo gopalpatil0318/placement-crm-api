@@ -28,7 +28,7 @@ const {
 async function login(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/auth/login`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/auth/login`, {
     ip: req.ip
   });
 
@@ -50,7 +50,7 @@ async function login(req, res) {
       const duration = Date.now() - startTime;
 
       logger.info(
-        `${LOG.API_END_PREFIX} POST /api/v1/auth/login`,
+        `${LOG.API_END_PREFIX} POST /api/auth/login`,
         {
           email: email,
           role: ROLES.SYSADMIN,
@@ -82,7 +82,7 @@ async function login(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/auth/login`,
+      `${LOG.API_END_PREFIX} POST /api/auth/login`,
       {
         user_id: authResult.user.user_id,
         role: authResult.user.user_role,
@@ -110,7 +110,7 @@ async function login(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/auth/login`,
+      `${LOG.API_ERROR_PREFIX} POST /api/auth/login`,
       {
         error: err.message,
         ip: req.ip,
@@ -140,7 +140,7 @@ async function login(req, res) {
 async function logout(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/auth/logout`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/auth/logout`, {
     user_id: req.user?.id,
     user_role: req.user?.role,
     ip: req.ip
@@ -150,7 +150,7 @@ async function logout(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/auth/logout`,
+      `${LOG.API_END_PREFIX} POST /api/auth/logout`,
       {
         user_id: req.user?.id,
         duration_ms: duration
@@ -168,7 +168,7 @@ async function logout(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/auth/logout`,
+      `${LOG.API_ERROR_PREFIX} POST /api/auth/logout`,
       {
         error: err.message,
         user_id: req.user?.id,
@@ -187,7 +187,7 @@ async function logout(req, res) {
 async function verifyToken(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} GET /api/v1/auth/verify`, {
+  logger.info(`${LOG.API_START_PREFIX} GET /api/auth/verify`, {
     user_id: req.user?.id,
     user_role: req.user?.role
   });
@@ -198,7 +198,7 @@ async function verifyToken(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} GET /api/v1/auth/verify`,
+      `${LOG.API_END_PREFIX} GET /api/auth/verify`,
       {
         user_id: user?.id,
         duration_ms: duration
@@ -222,7 +222,7 @@ async function verifyToken(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} GET /api/v1/auth/verify`,
+      `${LOG.API_ERROR_PREFIX} GET /api/auth/verify`,
       {
         error: err.message,
         duration_ms: duration

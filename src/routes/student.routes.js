@@ -45,7 +45,7 @@ router.post(
  * Bulk register students (admin only)
  */
 router.post(
-  '/bulk',
+  '/bulk-register',
   authMiddleware,
   requireRole(ROLES.ADMIN),
   apiLimiter,

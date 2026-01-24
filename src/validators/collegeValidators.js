@@ -67,6 +67,31 @@ const createCollegeSchema = Joi.object({
     })
 });
 
+//forgot password validator
+const forgotPasswordSchema = Joi.object({
+  new_password: Joi.string()
+    .min(VALIDATION.PASSWORD_MIN_LENGTH)
+    .max(VALIDATION.PASSWORD_MAX_LENGTH)
+    .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+    .required()
+    .messages({
+      'string.empty': 'New password is required',
+      'string.min': `Password must be at least ${VALIDATION.PASSWORD_MIN_LENGTH} characters`,
+      'string.max': `Password cannot exceed ${VALIDATION.PASSWORD_MAX_LENGTH} characters`,
+      'string.pattern.base': 'Password must contain uppercase, lowercase, and numeric characters',
+      'any.required': 'New password is required'
+    }),
+
+  confirm_password: Joi.string()
+    .required()
+    .valid(Joi.ref('new_password'))
+    .messages({
+      'any.only': 'Passwords do not match',
+      'any.required': 'Confirm password is required'
+    })
+});
+
+
 const updateCollegeSchema = Joi.object({
   college_name: Joi.string()
     .min(VALIDATION.STRING_MIN_LENGTH)
@@ -180,7 +205,7 @@ const registerStudentSchema = Joi.object({
   student_year: Joi.number()
     .integer()
     .min(1)
-    .max(4)
+    .max(5)
     .required()
     .messages({
       'number.base': 'Student year must be a number',
@@ -352,6 +377,7 @@ const updateCollegeFeaturesSchema = Joi.object({
 module.exports = {
   createCollegeSchema,
   updateCollegeSchema,
+  forgotPasswordSchema,
   listCollegeSchema,
   registerStudentSchema,
   bulkRegisterStudentsSchema,

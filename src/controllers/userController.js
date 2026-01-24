@@ -28,7 +28,7 @@ const {
 async function createUser(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/users`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/college/create-user`, {
     user_id: req.user?.id,
     user_role: req.user?.role,
     college_id: req.user?.college_id,
@@ -68,7 +68,7 @@ async function createUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/users`,
+      `${LOG.API_END_PREFIX} POST /api/college/create-user`,
       {
         user_id: newUser.user_id,
         user_email: newUser.user_email,
@@ -90,7 +90,7 @@ async function createUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/users`,
+      `${LOG.API_ERROR_PREFIX} POST /api/college/create-user`,
       {
         error: err.message,
         user_id: req.user?.id,
@@ -118,7 +118,7 @@ async function createUser(req, res) {
 async function listUsers(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} GET /api/v1/users`, {
+  logger.info(`${LOG.API_START_PREFIX} GET /api/college`, {
     user_id: req.user?.id,
     user_role: req.user?.role,
     college_id: req.user?.college_id,
@@ -150,7 +150,7 @@ async function listUsers(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} GET /api/v1/users`,
+      `${LOG.API_END_PREFIX} GET /api/college`,
       {
         total: result.pagination.total,
         page: page,
@@ -171,7 +171,7 @@ async function listUsers(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} GET /api/v1/users`,
+      `${LOG.API_ERROR_PREFIX} GET /api/college`,
       {
         error: err.message,
         college_id: req.user?.college_id,
@@ -190,7 +190,7 @@ async function listUsers(req, res) {
 async function getUser(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} GET /api/v1/users/:userId`, {
+  logger.info(`${LOG.API_START_PREFIX} GET /api/college/user/:userId`, {
     user_id: req.params.userId,
     requested_by: req.user?.id,
     college_id: req.user?.college_id
@@ -217,7 +217,7 @@ async function getUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} GET /api/v1/users/:userId`,
+      `${LOG.API_END_PREFIX} GET /api/college/user/:userId`,
       {
         user_id: user.user_id,
         college_id: req.user.college_id,
@@ -231,7 +231,7 @@ async function getUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} GET /api/v1/users/:userId`,
+      `${LOG.API_ERROR_PREFIX} GET /api/college/user/:userId`,
       {
         error: err.message,
         target_user: req.params.userId,
@@ -255,7 +255,7 @@ async function getUser(req, res) {
 async function updateUser(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/v1/users/:userId`, {
+  logger.info(`${LOG.API_START_PREFIX} PUT /api/college/update-user/:userId`, {
     user_id: req.params.userId,
     updated_by: req.user?.id,
     college_id: req.user?.college_id,
@@ -284,7 +284,7 @@ async function updateUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} PUT /api/v1/users/:userId`,
+      `${LOG.API_END_PREFIX} PUT /api/college/update-user/:userId`,
       {
         user_id: updatedUser.user_id,
         college_id: req.user.college_id,
@@ -299,7 +299,7 @@ async function updateUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} PUT /api/v1/users/:userId`,
+      `${LOG.API_ERROR_PREFIX} PUT /api/college/update-user/:userId`,
       {
         error: err.message,
         target_user: req.params.userId,
@@ -327,7 +327,7 @@ async function updateUser(req, res) {
 async function deleteUser(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} DELETE /api/v1/users/:userId`, {
+  logger.info(`${LOG.API_START_PREFIX} DELETE /api/college/user/:userId`, {
     user_id: req.params.userId,
     deleted_by: req.user?.id,
     college_id: req.user?.college_id
@@ -354,7 +354,7 @@ async function deleteUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} DELETE /api/v1/users/:userId`,
+      `${LOG.API_END_PREFIX} DELETE /api/college/user/:userId`,
       {
         user_id: req.params.userId,
         college_id: req.user.college_id,
@@ -369,7 +369,7 @@ async function deleteUser(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} DELETE /api/v1/users/:userId`,
+      `${LOG.API_ERROR_PREFIX} DELETE /api/college/user/:userId`,
       {
         error: err.message,
         target_user: req.params.userId,

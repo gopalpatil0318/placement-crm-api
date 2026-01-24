@@ -18,6 +18,7 @@ const {
   ROLES,
   DB_ERROR_CODES
 } = require('../config/constants');
+const { cli } = require('winston/lib/winston/config');
 
 class CollegeService {
   /**
@@ -195,6 +196,66 @@ class CollegeService {
         }
       }
 
+      throw err;
+
+    } finally {
+      client.release();
+    }
+  }
+  /**
+   * Reset college admin password
+   * @param {string} userId
+   * @param {string} collegeId
+   * @param {string} newPassword
+   */
+  async resetCollegeAdminPassword(userId, collegeId, newPassword) {
+    const mainPool = getMainPool();
+    const client = await mainPool.connect();
+
+    try {
+      logger.debug(
+        `${LOG.TRANSACTION_PREFIX} Starting admin password reset`,
+        { user_id: userId, college_id: collegeId }
+      );
+
+      await client.query('BEGIN');
+
+      const userCheck = await client.query(
+        `SELECT user_id FROM users 
+        WHERE user_id = $1
+        AND college_id = $2
+        AND user_role = $3
+        AND user_status = $4`,
+        [userId, collegeId, ROLES.ADMIN, STATUS.ACTIVE]
+      );
+
+      if (!userCheck.rows.length) {
+        throw new Error('Admin user not found');
+      }
+
+      const hashedPassword = await passwordHelper.hashPassword(newPassword);
+      await client.query(
+        `UPDATE users
+        SET user_password = $1,
+        updated_at = NOW()
+        WHERE user_id = $2
+        AND college_id = $3`,
+        [hashedPassword, userId, collegeId]
+      );
+
+      await client.query('COMMIT');
+      logger.info(
+        `${LOG.TRANSACTION_PREFIX} Admin password reset committed`,
+        { user_id: userId }
+      );
+      return true
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error(
+        `${LOG.TRANSACTION_PREFIX} Admin password reset rolled back`,
+        { error: err.message }
+      );
       throw err;
 
     } finally {

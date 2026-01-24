@@ -34,7 +34,7 @@ router.use(authMiddleware);
  * Create new user (admin only)
  */
 router.post(
-  '/',
+  '/create-user',
   requireRole(ROLES.ADMIN),
   apiLimiter,
   validate(createUserSchema),
@@ -42,11 +42,11 @@ router.post(
 );
 
 /**
- * GET /api/v1/users
+ * GET /api/college
  * List users in college (admin/teacher)
  */
 router.get(
-  '/',
+  '/users',
   requireRole(ROLES.ADMIN, ROLES.TEACHER),
   apiLimiter,
   validate(listUserSchema),
@@ -54,22 +54,22 @@ router.get(
 );
 
 /**
- * GET /api/v1/users/:userId
+ * GET /api/college/:userId
  * Get single user (admin/teacher)
  */
 router.get(
-  '/:userId',
+  '/user/:userId',
   requireRole(ROLES.ADMIN, ROLES.TEACHER),
   apiLimiter,
   userController.getUser
 );
 
 /**
- * PUT /api/v1/users/:userId
+ * PUT /api/college/:userId
  * Update user (admin only)
  */
 router.put(
-  '/:userId',
+  '/update-user/:userId',
   requireRole(ROLES.ADMIN),
   apiLimiter,
   validate(updateUserSchema),
@@ -77,11 +77,11 @@ router.put(
 );
 
 /**
- * DELETE /api/v1/users/:userId
+ * DELETE /api/college/:userId
  * Soft delete user (admin only)
  */
 router.delete(
-  '/:userId',
+  '/user/:userId',
   requireRole(ROLES.ADMIN),
   apiLimiter,
   userController.deleteUser

@@ -19,6 +19,7 @@ const {
   SUCCESS_MESSAGES,
   ROLES
 } = require('../config/constants');
+const { Logform } = require('winston');
 
 /**
  * POST /api/v1/colleges
@@ -28,7 +29,7 @@ const {
 async function createCollege(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/colleges`, {
+  logger.info(`${LOG.API_START_PREFIX} POST /api/sysadmin/create-college`, {
     user_id: req.user?.id,
     user_role: req.user?.role,
     ip: req.ip
@@ -67,7 +68,7 @@ async function createCollege(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/colleges`,
+      `${LOG.API_END_PREFIX} POST /api/sysadmin/create-college`,
       {
         college_id: newCollege.college.college_id,
         admin_user_id: newCollege.admin.user_id,
@@ -88,7 +89,7 @@ async function createCollege(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/colleges`,
+      `${LOG.API_ERROR_PREFIX} POST /api/sysadmin/create-college`,
       {
         error: err.message,
         user_id: req.user?.id,
@@ -108,6 +109,61 @@ async function createCollege(req, res) {
   }
 }
 
+//forget password function
+async function forgotCollegeAdminPassword(req,res){
+  const startTime = Date.now()
+
+  logger.info(
+    `${LOG.API_START_PREFIX} PUT /api/sysadmin/colleges/forgot-password`,
+    {
+      user_id:req.user.id,
+      college_id:req.user.college_id,
+    }
+  )
+  try{
+    const {new_password} = req.validated;
+
+    await collegeService.resetCollegeAdminPassword(
+      req.user.id,
+      req.user.college_id,
+      new_password
+    )
+    const duration = Date.now() - startTime
+
+    logger.info(
+      `${LOG.API_END_PREFIX} PUT /api/sysadmin/colleges/forgot-password`,
+      {duration_ms:duration}
+    )
+
+    return success(
+      res,
+      null,
+      'Password updated successfully',
+      HTTP_STATUS.OK
+    )
+  }
+  catch(err){
+    const duration = Date.now() - startTime
+
+    logger.error(
+      `${LOG.API_ERROR_PREFIX} PUT /api/sysadmin/colleges/forgot-password`,
+      {
+        error: err.message, duration_ms: duration
+      }
+    )
+
+    if (err.message.includes('not found')) {
+      return error(res, err.message, HTTP_STATUS.NOT_FOUND);
+    }
+
+    return error(
+      res,
+      ERROR_MESSAGES.SERVER_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
+  }
+}
+
 /**
  * GET /api/v1/colleges
  * List all colleges with pagination
@@ -115,7 +171,7 @@ async function createCollege(req, res) {
 async function listColleges(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} GET /api/v1/colleges`, {
+  logger.info(`${LOG.API_START_PREFIX} GET /api/sysadmin/colleges`, {
     user_id: req.user?.id,
     user_role: req.user?.role,
     query_params: req.query
@@ -139,7 +195,7 @@ async function listColleges(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} GET /api/v1/colleges`,
+      `${LOG.API_END_PREFIX} GET /api/sysadmin/colleges`,
       {
         total: result.pagination.total,
         page: page,
@@ -154,7 +210,7 @@ async function listColleges(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} GET /api/v1/colleges`,
+      `${LOG.API_ERROR_PREFIX} GET /api/sysadmin/colleges`,
       {
         error: err.message,
         duration_ms: duration
@@ -172,7 +228,7 @@ async function listColleges(req, res) {
 async function getCollege(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} GET /api/v1/colleges/:collegeId`, {
+  logger.info(`${LOG.API_START_PREFIX} GET /api/sysadmin/colleges/:collegeId`, {
     college_id: req.params.collegeId,
     user_id: req.user?.id
   });
@@ -195,7 +251,7 @@ async function getCollege(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} GET /api/v1/colleges/:collegeId`,
+      `${LOG.API_END_PREFIX} GET /api/sysadmin/colleges/:collegeId`,
       {
         college_id: college.college_id,
         duration_ms: duration
@@ -208,7 +264,7 @@ async function getCollege(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} GET /api/v1/colleges/:collegeId`,
+      `${LOG.API_ERROR_PREFIX} GET /api/sysadmin/colleges/:collegeId`,
       {
         error: err.message,
         college_id: req.params.collegeId,
@@ -231,7 +287,7 @@ async function getCollege(req, res) {
 async function updateCollege(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/v1/colleges/:collegeId`, {
+  logger.info(`${LOG.API_START_PREFIX} PUT /api/sysadmin/update-college/:collegeId`, {
     college_id: req.params.collegeId,
     user_id: req.user?.id,
     updated_fields: Object.keys(req.validated)
@@ -258,7 +314,7 @@ async function updateCollege(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} PUT /api/v1/colleges/:collegeId`,
+      `${LOG.API_END_PREFIX} PUT /api/sysadmin/update-college/:collegeId`,
       {
         college_id: updatedCollege.college_id,
         updated_by: req.user.id,
@@ -272,7 +328,7 @@ async function updateCollege(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} PUT /api/v1/colleges/:collegeId`,
+      `${LOG.API_ERROR_PREFIX} PUT /api/sysadmin/update-college/:collegeId`,
       {
         error: err.message,
         college_id: req.params.collegeId,
@@ -301,7 +357,7 @@ async function updateCollege(req, res) {
 async function updateCollegeFeatures(req, res) {
   const startTime = Date.now();
 
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/v1/colleges/:collegeId/features`, {
+  logger.info(`${LOG.API_START_PREFIX} PUT /api/sysadmin/colleges/:collegeId/features`, {
     college_id: req.params.collegeId,
     user_id: req.user?.id,
     enabled_features: req.validated?.enabled_features
@@ -339,7 +395,7 @@ async function updateCollegeFeatures(req, res) {
     const duration = Date.now() - startTime;
 
     logger.info(
-      `${LOG.API_END_PREFIX} PUT /api/v1/colleges/:collegeId/features`,
+      `${LOG.API_END_PREFIX} PUT /api/sysadmin/colleges/:collegeId/features`,
       {
         college_id: updatedCollege.college_id,
         enabled_features: updatedCollege.enabled_features,
@@ -359,7 +415,7 @@ async function updateCollegeFeatures(req, res) {
     const duration = Date.now() - startTime;
 
     logger.error(
-      `${LOG.API_ERROR_PREFIX} PUT /api/v1/colleges/:collegeId/features`,
+      `${LOG.API_ERROR_PREFIX} PUT /api/sysadmin/colleges/:collegeId/features`,
       {
         error: err.message,
         college_id: req.params.collegeId,
@@ -377,6 +433,7 @@ async function updateCollegeFeatures(req, res) {
 
 module.exports = {
   createCollege,
+  forgotCollegeAdminPassword,
   listColleges,
   getCollege,
   updateCollege,
