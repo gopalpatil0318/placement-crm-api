@@ -26,8 +26,8 @@ const {
 // Cookie configuration for security
 const COOKIE_OPTIONS = {
   httpOnly: true, // Prevents JS access (XSS protection)
- secure: false, // HTTPS only in production
-  sameSite:'lax', 
+ secure: true, // HTTPS only in production
+  sameSite:'none', 
   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (matches JWT expiry)
 };
 
