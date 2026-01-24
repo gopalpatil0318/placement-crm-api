@@ -52,7 +52,7 @@ router.post(
  */
 router.get(
   '/verify',
-  authMiddleware,
+  authMiddleware, 
   authController.verifyToken
 );
 

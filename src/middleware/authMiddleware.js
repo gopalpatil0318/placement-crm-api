@@ -4,12 +4,14 @@
  * ============================================================================
  * Handles JWT validation and role-based access control
  * Single database - no multi-tenant pool logic
- * 
- * Supports 4 user types:
+ * * Supports 4 user types:
  * 1. SYSADMIN - System administrator (NOT in database - from .env)
  * 2. ADMIN (users table) - College administrator
  * 3. TEACHER (users table) - College teacher
  * 4. STUDENT (students table) - College student
+ * * * SECURITY NOTE:
+ * Reads token from HttpOnly Cookie ('token')
+ * Requires 'cookie-parser' middleware in app.js
  * ============================================================================
  */
 
@@ -26,12 +28,10 @@ const {
 
 /**
  * Query user based on role
- * 
- * SYSADMIN: No database query (verified during login)
+ * * SYSADMIN: No database query (verified during login)
  * ADMIN, TEACHER: Query users table
  * STUDENT: Query students table
- * 
- * @param {Object} mainPool - Database connection pool
+ * * @param {Object} mainPool - Database connection pool
  * @param {string} userId - User ID
  * @param {string} role - User role from JWT payload
  * @returns {Object} User data or null
@@ -108,14 +108,13 @@ async function queryUserByRole(mainPool, userId, role) {
 
 /**
  * Authentication Middleware
- * 
- * Flow:
- * 1. Extract & parse JWT token from Authorization header
+ * * Flow:
+ * 1. Extract JWT token from HttpOnly Cookie (UPDATED)
  * 2. Verify JWT signature and expiration
  * 3. Query correct table based on role:
- *    - SYSADMIN → No query (verified at login from .env)
- *    - STUDENT → students table
- *    - ADMIN/TEACHER → users table
+ * - SYSADMIN → No query (verified at login from .env)
+ * - STUDENT → students table
+ * - ADMIN/TEACHER → users table
  * 4. Verify user is active
  * 5. Verify college is active (if not sysadmin)
  * 6. Attach user to request
@@ -123,52 +122,25 @@ async function queryUserByRole(mainPool, userId, role) {
 async function authMiddleware(req, res, next) {
   try {
     // ====================================================================
-    // Step 1: Extract authorization header
+    // Step 1: Extract Token from Cookie
     // ====================================================================
-    const authHeader = req.headers['authorization'];
-
-    if (!authHeader) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} Missing authorization header`,
-        { ip: req.ip, path: req.path }
-      );
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: ERROR_MESSAGES.MISSING_AUTH_HEADER
-      });
-    }
-
-    // ====================================================================
-    // Step 2: Parse Bearer token
-    // ====================================================================
-    const parts = authHeader.split(' ');
-
-    if (parts.length !== 2 || parts[0] !== 'Bearer') {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} Invalid authorization header format`,
-        { ip: req.ip }
-      );
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: ERROR_MESSAGES.INVALID_AUTH_HEADER
-      });
-    }
-
-    const token = parts[1];
+    // CHANGED: Reading from req.cookies.token (matches res.cookie('token', ...))
+    const token = req.cookies && req.cookies.token;
 
     if (!token) {
       logger.warn(
-        `${LOG.SECURITY_PREFIX} Missing token in authorization header`,
-        { ip: req.ip }
+        `${LOG.SECURITY_PREFIX} Missing authentication cookie`,
+        { ip: req.ip, path: req.path }
       );
+      
       return res.status(HTTP_STATUS.UNAUTHORIZED).json({
         success: false,
-        message: ERROR_MESSAGES.INVALID_AUTH_HEADER
+        message: 'Authentication required' // Clearer message for frontend
       });
     }
 
     // ====================================================================
-    // Step 3: Verify JWT signature and expiration
+    // Step 2: Verify JWT signature and expiration
     // ====================================================================
     logger.debug(`${LOG.TRANSACTION_PREFIX} Verifying JWT token`);
 
@@ -186,7 +158,7 @@ async function authMiddleware(req, res, next) {
     }
 
     // ====================================================================
-    // Step 4: Validate user in correct table based on role
+    // Step 3: Validate user in correct table based on role
     // ====================================================================
     const mainPool = getMainPool();
 
@@ -247,7 +219,7 @@ async function authMiddleware(req, res, next) {
     }
 
     // ====================================================================
-    // Step 5: Attach user to request
+    // Step 4: Attach user to request
     // ====================================================================
     req.user = {
       ...payload,
@@ -279,8 +251,7 @@ async function authMiddleware(req, res, next) {
 
 /**
  * Role-Based Access Control (RBAC) Middleware
- * 
- * Validates user has one of the required roles
+ * * Validates user has one of the required roles
  */
 function requireRole(...allowedRoles) {
   return (req, res, next) => {

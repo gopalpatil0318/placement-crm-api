@@ -7,6 +7,8 @@
  * - College user login
  * - Token verification
  * - Logout endpoint
+ * * SECURITY NOTE: 
+ * Uses HttpOnly Cookies. Token is NOT sent in JSON body.
  */
 
 const authService = require('../services/authService');
@@ -20,6 +22,14 @@ const {
   HTTP_STATUS,
   AUTH
 } = require('../config/constants');
+
+// Cookie configuration for security
+const COOKIE_OPTIONS = {
+  httpOnly: true, // Prevents JS access (XSS protection)
+  secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', // CSRF protection
+  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (matches JWT expiry)
+};
 
 /**
  * POST /api/v1/auth/login
@@ -47,6 +57,9 @@ async function login(req, res) {
 
       const adminToken = authService.generateAdminToken(email);
 
+      // SET COOKIE HERE - Not in JSON body
+      res.cookie('token', adminToken, COOKIE_OPTIONS);
+
       const duration = Date.now() - startTime;
 
       logger.info(
@@ -62,7 +75,7 @@ async function login(req, res) {
       return success(
         res,
         {
-          token: adminToken,
+          // Token REMOVED from here
           role: ROLES.SYSADMIN,
           email: email,
           type: 'sysadmin'
@@ -78,6 +91,9 @@ async function login(req, res) {
     logger.debug(`${LOG.TRANSACTION_PREFIX} Authenticating college user`);
 
     const authResult = await authService.authenticateCollegeUser(email, password);
+
+    // SET COOKIE HERE - Not in JSON body
+    res.cookie('token', authResult.token, COOKIE_OPTIONS);
 
     const duration = Date.now() - startTime;
 
@@ -96,7 +112,7 @@ async function login(req, res) {
     return success(
       res,
       {
-        token: authResult.token,
+        // Token REMOVED from here
         role: authResult.user.user_role,
         email: authResult.user.user_email,
         college_id: authResult.user.college_id,
@@ -135,7 +151,7 @@ async function login(req, res) {
 
 /**
  * POST /api/v1/auth/logout
- * Logout user (stateless JWT - optional endpoint)
+ * Logout user (Clears HttpOnly Cookie)
  */
 async function logout(req, res) {
   const startTime = Date.now();
@@ -147,6 +163,9 @@ async function logout(req, res) {
   });
 
   try {
+    // CLEAR COOKIE HERE
+    res.clearCookie('token', COOKIE_OPTIONS);
+
     const duration = Date.now() - startTime;
 
     logger.info(
@@ -182,7 +201,7 @@ async function logout(req, res) {
 
 /**
  * GET /api/v1/auth/verify
- * Verify current token validity
+ * Verify current token validity (Reads from Cookie via Middleware)
  */
 async function verifyToken(req, res) {
   const startTime = Date.now();

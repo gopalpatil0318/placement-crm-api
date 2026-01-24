@@ -12,7 +12,7 @@
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
-
+const cookieParser = require('cookie-parser');
 const requestLogger = require('./middleware/requestLogger');
 const { apiLimiter } = require('./config/rateLimiter');
 const routes = require('./routes');
@@ -25,7 +25,11 @@ const app = express();
 // ============================================================================
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:5173', 
+  credentials: true
+}));
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -40,7 +44,7 @@ app.use(apiLimiter);
 // HEALTH CHECK
 // ============================================================================
 
-app.get('/health', (req, res) => {
+app.get('/', (req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 

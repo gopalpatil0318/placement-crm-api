@@ -11,8 +11,7 @@ const { LOG } = require('../config/constants');
 
 /**
  * Sign and generate JWT token
- * 
- * @param {Object} payload - Token payload (user data)
+ * * @param {Object} payload - Token payload (user data)
  * @returns {string} JWT token
  * @throws {Error} If signing fails
  */
@@ -40,8 +39,7 @@ function sign(payload) {
 
 /**
  * Verify and decode JWT token
- * 
- * @param {string} token - JWT token to verify
+ * * @param {string} token - JWT token to verify
  * @returns {Object|null} Decoded payload or null if invalid/expired
  */
 function verify(token) {

@@ -5,8 +5,8 @@
  * Single Database Architecture
  * - Register single student
  * - Bulk register students (admin only)
- * - Student login
- * - Student logout
+ * - Student login (HttpOnly Cookie)
+ * - Student logout (Clear Cookie)
  * - Update student password (authenticated student)
  * - Update student profile (admin/teacher)
  * - Status checks: college active, student active
@@ -22,6 +22,14 @@ const {
   SUCCESS_MESSAGES,
   ROLES
 } = require('../config/constants');
+
+// Cookie configuration for security
+const COOKIE_OPTIONS = {
+  httpOnly: true, // Prevents JS access (XSS protection)
+  secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', // CSRF protection
+  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (matches JWT expiry)
+};
 
 /**
  * POST /api/v1/students/register
@@ -194,6 +202,7 @@ async function bulkRegisterStudents(req, res) {
 /**
  * POST /api/v1/students/login
  * Student login
+ * * USES HTTPONLY COOKIE - Token NOT in body
  */
 async function loginStudent(req, res) {
   const startTime = Date.now();
@@ -213,6 +222,9 @@ async function loginStudent(req, res) {
       college_id
     );
 
+    // SET COOKIE HERE - Not in JSON body
+    res.cookie('token', authResult.token, COOKIE_OPTIONS);
+
     const duration = Date.now() - startTime;
 
     logger.info(
@@ -228,7 +240,7 @@ async function loginStudent(req, res) {
     return success(
       res,
       {
-        token: authResult.token,
+        // Token REMOVED from here
         role: 'student',
         student_email: authResult.student.student_email,
         student_name: authResult.student.student_name
@@ -275,7 +287,7 @@ async function loginStudent(req, res) {
 
 /**
  * POST /api/v1/students/logout
- * Logout student (stateless JWT - optional endpoint)
+ * Logout student (Clears HttpOnly Cookie)
  */
 async function logoutStudent(req, res) {
   const startTime = Date.now();
@@ -286,6 +298,9 @@ async function logoutStudent(req, res) {
   });
 
   try {
+    // CLEAR COOKIE HERE
+    res.clearCookie('token', COOKIE_OPTIONS);
+
     const duration = Date.now() - startTime;
 
     logger.info(

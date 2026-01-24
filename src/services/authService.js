@@ -23,8 +23,7 @@ const {
 class AuthService {
   /**
    * Verify system admin credentials
-   * 
-   * @param {string} email - Admin email
+   * * @param {string} email - Admin email
    * @param {string} password - Admin password
    * @returns {Promise<boolean>} True if credentials match
    */
@@ -61,8 +60,7 @@ class AuthService {
 
   /**
    * Generate system admin token
-   * 
-   * @param {string} email - Admin email
+   * * @param {string} email - Admin email
    * @returns {string} JWT token
    */
   generateAdminToken(email) {
@@ -80,15 +78,13 @@ class AuthService {
 
   /**
    * Authenticate college user
-   * 
-   * Single Database:
+   * * Single Database:
    * 1. Verify college is active
    * 2. Query user by email
    * 3. Verify user is active
    * 4. Verify password
    * 5. Generate token
-   * 
-   * @param {string} email - User email
+   * * @param {string} email - User email
    * @param {string} password - User password
    * @returns {Object} { token, user, college }
    * @throws {Error} If authentication fails
