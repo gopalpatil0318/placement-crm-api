@@ -26,8 +26,8 @@ const {
 // Cookie configuration for security
 const COOKIE_OPTIONS = {
   httpOnly: true, // Prevents JS access (XSS protection)
-  secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', // CSRF protection
+ secure: false, // HTTPS only in production
+  sameSite:'lax', 
   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (matches JWT expiry)
 };
 
