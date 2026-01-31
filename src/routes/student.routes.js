@@ -24,7 +24,12 @@ const {
   bulkRegisterStudentsSchema,
   loginStudentSchema,
   updatePasswordSchema,
-  updateProfileSchema
+  personalInfoSchema,
+  academicInfoSchema,
+  skillInfoSchema,
+  updatePersonalInfoSchema,
+  updateAcademicInfoSchema,
+  updateSkillInfoSchema
 } = require('../validators/studentValidator');
 
 const { ROLES } = require('../config/constants');
@@ -88,16 +93,79 @@ router.put(
 );
 
 /**
- * PUT /api/v1/students/:studentId/profile
- * Update student profile (admin/teacher)
+ * GET /api/v1/students/profile-status
+ * Get student profile completion status (student only)
  */
-router.put(
-  '/:studentId/profile',
+router.get(
+  '/profile-status',
   authMiddleware,
-  requireRole(ROLES.ADMIN, ROLES.TEACHER),
+  requireRole(ROLES.STUDENT),
+  studentController.getProfileStatus
+);
+router.post(
+  '/profile/personal-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  
   apiLimiter,
-  validate(updateProfileSchema),
-  studentController.updateProfile
+  validate(personalInfoSchema),
+  studentController.insertPersonalInfo
 );
 
+router.post(
+  '/profile/academic-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  apiLimiter,
+  validate(academicInfoSchema),
+  studentController.insertAcademicInfo
+);
+
+router.post(
+  '/profile/skills-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  apiLimiter,
+  validate(skillInfoSchema),
+  studentController.insertSkillInfo
+);
+
+/**
+ * PUT /api/v1/students/profile/update-personal-info
+ * Update personal information (student)
+ */
+router.put(
+  '/profile/update-personal-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  apiLimiter,
+  validate(updatePersonalInfoSchema),
+  studentController.updatePersonalInfo
+);
+
+/**
+ * PUT /api/v1/students/profile/update-academic-info
+ * Update academic information (student)
+ */
+router.put(
+  '/profile/update-academic-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  apiLimiter,
+  validate(updateAcademicInfoSchema),
+  studentController.updateAcademicInfo
+);
+
+/**
+ * PUT /api/v1/students/profile/update-skills-info
+ * Update skill information (student)
+ */
+router.put(
+  '/profile/update-skills-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  apiLimiter,
+  validate(updateSkillInfoSchema),
+  studentController.updateSkillInfo
+);
 module.exports = router;
