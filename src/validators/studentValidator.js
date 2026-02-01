@@ -318,11 +318,6 @@ const skillInfoSchema = Joi.object({
 
   area_of_interest: Joi.string().optional(),
 
-  selected_skills: Joi.array()
-    .items(Joi.string())
-    .min(1)
-    .required(),
-
   about_you: Joi.string().required(),
 
   profile_image: Joi.string().uri().optional()
@@ -434,11 +429,6 @@ const updateSkillInfoSchema = Joi.object({
   hackerrank_link: Joi.string().uri().optional(),
 
   area_of_interest: Joi.string().optional(),
-
-  selected_skills: Joi.array()
-    .items(Joi.string())
-    .min(1)
-    .optional(),
 
   about_you: Joi.string().optional(),
 

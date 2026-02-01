@@ -816,7 +816,7 @@ try {
           hackerrank_link,
 
           area_of_interest,
-          selected_skills,
+        
           about_you,
           profile_image
         )
@@ -829,7 +829,7 @@ try {
           $11,$12,$13,$14,
           $15,$16,$17,$18,
           $19,
-          $20,
+          
           $21,
           $22
         )
@@ -861,7 +861,7 @@ try {
         data.hackerrank_link || null,
 
         data.area_of_interest || null,
-        data.selected_skills, 
+     
         data.about_you,
         data.profile_image || null
       ];
@@ -1053,7 +1053,7 @@ async updatePersonalInfo(studentId, collegeId, data) {
         hackerrank_link = COALESCE($18, hackerrank_link),
 
         area_of_interest = COALESCE($19, area_of_interest),
-        selected_skills = COALESCE($20, selected_skills),
+       
         about_you = COALESCE($21, about_you),
         profile_image = COALESCE($22, profile_image),
 
@@ -1081,7 +1081,7 @@ async updatePersonalInfo(studentId, collegeId, data) {
         data.codechef_link,
         data.hackerrank_link,
         data.area_of_interest,
-        data.selected_skills,
+      
         data.about_you,
         data.profile_image
       ]
