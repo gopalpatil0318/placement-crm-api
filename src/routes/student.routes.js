@@ -168,4 +168,26 @@ router.put(
   validate(updateSkillInfoSchema),
   studentController.updateSkillInfo
 );
+
+router.get(
+  '/profile/student-personal-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  studentController.getPersonalInfo
+)
+
+router.get(
+  '/profile/student-academic-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  studentController.getAcademicInfo
+)
+
+router.get(
+  '/profile/student-skill-info',
+  authMiddleware,
+  requireRole(ROLES.STUDENT),
+  studentController.getSkillInfo
+)
+
 module.exports = router;

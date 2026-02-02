@@ -12,7 +12,6 @@
  * - Status checks: college active, student active
  */
 
-
 const studentService = require('../services/studentService');
 const logger = require('../config/logger');
 const { success, error } = require('../utils/responseHelper');
@@ -793,6 +792,175 @@ async function updateSkillInfo(req, res) {
     );
   }
 }
+async function getPersonalInfo(req, res) {
+  const startTime = Date.now();
+
+  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile/student-personal-info`, {
+    student_id: req.user?.id,
+    ip: req.ip
+  });
+
+  try {
+    const studentId = req.user.id;
+    const collegeId = req.user.college_id;
+
+    const data = await studentService.getStudentPersonalInfo(
+      studentId,
+      collegeId
+    );
+
+    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile/personal-info`, {
+      student_id: studentId,
+      college_id: collegeId,
+      duration_ms: Date.now() - startTime
+    });
+
+    return success(
+      res,
+      data,
+      'Personal info fetched successfully',
+      HTTP_STATUS.OK
+    );
+
+  } catch (err) {
+    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile/personal-info`, {
+      error: err.message,
+      student_id: req.user?.id,
+      duration_ms: Date.now() - startTime
+    });
+
+    if (err.message.includes('NOT_FOUND')) {
+      return error(
+        res,
+        'Personal information not found',
+        HTTP_STATUS.NOT_FOUND
+      );
+    }
+
+    return error(
+      res,
+      ERROR_MESSAGES.SERVER_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
+  }
+}
+
+/**
+ * GET /api/v1/students/profile/academic-info
+ */
+async function getAcademicInfo(req, res) {
+  const startTime = Date.now();
+
+  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile/student-academic-info`, {
+    student_id: req.user?.id,
+    ip: req.ip
+  });
+
+  try {
+    const studentId = req.user.id;
+    const collegeId = req.user.college_id;
+
+    const data = await studentService.getStudentAcademicInfo(
+      studentId,
+      collegeId
+    );
+
+    const duration = Date.now() - startTime;
+
+    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile/student-academic-info`, {
+      student_id: studentId,
+      college_id: collegeId,
+      duration_ms: duration
+    });
+
+    return success(
+      res,
+      data,
+      'Academic info fetched successfully',
+      HTTP_STATUS.OK
+    );
+
+  } catch (err) {
+    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile/student-academic-info`, {
+      error: err.message,
+      student_id: req.user?.id,
+      duration_ms: Date.now() - startTime
+    });
+
+    if (err.message.includes('NOT_FOUND')) {
+      return error(
+        res,
+        'Academic information not found',
+        HTTP_STATUS.NOT_FOUND
+      );
+    }
+
+    return error(
+      res,
+      ERROR_MESSAGES.SERVER_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
+  }
+}
+
+/**
+ * GET /api/v1/students/profile/skills-info
+ */
+async function getSkillInfo(req, res) {
+  const startTime = Date.now();
+
+  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile/student-skills-info`, {
+    student_id: req.user?.id,
+    ip: req.ip
+  });
+
+  try {
+    const studentId = req.user.id;
+    const collegeId = req.user.college_id;
+
+    const data = await studentService.getStudentSkillInfo(
+      studentId,
+      collegeId
+    );
+
+    const duration = Date.now() - startTime;
+
+    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile/student-skills-info`, {
+      student_id: studentId,
+      college_id: collegeId,
+      duration_ms: duration
+    });
+
+    return success(
+      res,
+      data,
+      'Skill info fetched successfully',
+      HTTP_STATUS.OK
+    );
+
+  } catch (err) {
+    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile/student-skills-info`, {
+      error: err.message,
+      student_id: req.user?.id,
+      duration_ms: Date.now() - startTime
+    });
+
+    if (err.message.includes('NOT_FOUND')) {
+      return error(
+        res,
+        'Skill information not found',
+        HTTP_STATUS.NOT_FOUND
+      );
+    }
+
+    return error(
+      res,
+      ERROR_MESSAGES.SERVER_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
+  }
+}
+
 
 module.exports = {
   registerStudent,
@@ -806,5 +974,8 @@ module.exports = {
   insertSkillInfo,
   updatePersonalInfo,
   updateAcademicInfo,
-  updateSkillInfo
+  updateSkillInfo,
+  getPersonalInfo,
+  getAcademicInfo,
+  getSkillInfo
 };

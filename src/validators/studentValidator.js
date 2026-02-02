@@ -276,6 +276,12 @@ const academicInfoSchema = Joi.object({
   sem6_cgpa: Joi.number().min(0).max(10).optional(),
   sem6_backlog: Joi.boolean().optional(),
 
+  sem7_cgpa: Joi.number().min(0).max(10).optional(),
+  sem7_backlog: Joi.boolean().optional(),
+  
+  sem8_cgpa: Joi.number().min(0).max(10).optional(),
+  sem8_backlog: Joi.boolean().optional(),
+  
   overall_cgpa: Joi.number().min(0).max(10).optional(),
 
   any_live_kt: Joi.boolean().optional(),
@@ -389,6 +395,12 @@ const updateAcademicInfoSchema = Joi.object({
 
   sem6_cgpa: Joi.number().min(0).max(10).optional(),
   sem6_backlog: Joi.boolean().optional(),
+
+  sem7_cgpa: Joi.number().min(0).max(10).optional(),
+  sem7_backlog: Joi.boolean().optional(),
+
+  sem8_cgpa: Joi.number().min(0).max(10).optional(),
+  sem8_backlog: Joi.boolean().optional(),
 
   overall_cgpa: Joi.number().min(0).max(10).optional(),
 
