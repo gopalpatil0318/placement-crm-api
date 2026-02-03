@@ -62,7 +62,8 @@ async function queryUserByRole(mainPool, userId, role) {
       const studentQuery = `
         SELECT 
           s.student_id as id,
-          s.student_status,
+         s.student_status AS user_status,
+
           s.college_id,
           $1 as user_role,
           c.college_status
@@ -224,6 +225,7 @@ async function authMiddleware(req, res, next) {
     req.user = {
       ...payload,
       college_id: dbUser.college_id,
+      
       user_role: dbUser.user_role || payload.role
     };
 
