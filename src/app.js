@@ -11,7 +11,12 @@
 
 const express = require('express');
 const helmet = require('helmet');
-const cors = require('cors');
+app.use(cors({
+  origin: '*',// REPLACE with your exact frontend URL (no trailing slash)
+  credentials: true, // This allows cookies to be sent/received
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 const cookieParser = require('cookie-parser');
 const requestLogger = require('./middleware/requestLogger');
 const { apiLimiter } = require('./config/rateLimiter');
