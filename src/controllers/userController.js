@@ -37,7 +37,7 @@ async function createUser(req, res) {
 
   try {
     // Authorization check
-    if (req.user?.role !== ROLES.ADMIN) {
+    if (req.user?.role !== ROLES.COLLEGEADMIN) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized user creation attempt`,
         {
@@ -127,7 +127,7 @@ async function listUsers(req, res) {
 
   try {
     // Authorization check
-    if (![ROLES.ADMIN, ROLES.TEACHER].includes(req.user?.role)) {
+    if (![ROLES.COLLEGEADMIN, ROLES.TEACHER].includes(req.user?.role)) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized user list attempt`,
         {
@@ -198,7 +198,7 @@ async function getUser(req, res) {
 
   try {
     // Authorization check
-    if (![ROLES.ADMIN, ROLES.TEACHER].includes(req.user?.role)) {
+    if (![ROLES.COLLEGEADMIN, ROLES.TEACHER].includes(req.user?.role)) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized user access attempt`,
         {
@@ -264,7 +264,7 @@ async function updateUser(req, res) {
 
   try {
     // Authorization check
-    if (req.user?.role !== ROLES.ADMIN) {
+    if (req.user?.role !== ROLES.COLLEGEADMIN) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized user update attempt`,
         {
@@ -335,7 +335,7 @@ async function deleteUser(req, res) {
 
   try {
     // Authorization check
-    if (req.user?.role !== ROLES.ADMIN) {
+    if (req.user?.role !== ROLES.COLLEGEADMIN) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized user deletion attempt`,
         {
