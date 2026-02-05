@@ -112,7 +112,7 @@ async function login(req, res) {
       res,
       {
         // Token REMOVED from here
-        role: authResult.user.user_role,
+        role: ROLES.COLLEGEADMIN,
         email: authResult.user.user_email,
         college_id: authResult.user.college_id,
         type: 'college_user'
