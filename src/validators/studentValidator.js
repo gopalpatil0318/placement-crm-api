@@ -258,27 +258,35 @@ const academicInfoSchema = Joi.object({
     lgName: Joi.string().required(),
   passout_year: Joi.number().integer().min(2000).max(2100).required(),
 
+  sem1_sgpa: Joi.number().min(0).max(10).optional(),
   sem1_cgpa: Joi.number().min(0).max(10).optional(),
   sem1_backlog: Joi.number().optional(),
 
+  sem2_sgpa: Joi.number().min(0).max(10).optional(),
   sem2_cgpa: Joi.number().min(0).max(10).optional(),
   sem2_backlog: Joi.number().optional(),
 
+  sem3_sgpa: Joi.number().min(0).max(10).optional(),
   sem3_cgpa: Joi.number().min(0).max(10).optional(),
   sem3_backlog: Joi.number().optional(),
 
+  sem4_sgpa: Joi.number().min(0).max(10).optional(),
   sem4_cgpa: Joi.number().min(0).max(10).optional(),
   sem4_backlog: Joi.number().optional(),
 
+  sem5_sgpa: Joi.number().min(0).max(10).optional(),
   sem5_cgpa: Joi.number().min(0).max(10).optional(),
   sem5_backlog: Joi.number().optional(),
 
+  sem6_sgpa: Joi.number().min(0).max(10).optional(),
   sem6_cgpa: Joi.number().min(0).max(10).optional(),
   sem6_backlog: Joi.number().optional(),
 
+  sem7_sgpa: Joi.number().min(0).max(10).optional(),
   sem7_cgpa: Joi.number().min(0).max(10).optional(),
   sem7_backlog: Joi.number().optional(),
   
+  sem8_sgpa: Joi.number().min(0).max(10).optional(),
   sem8_cgpa: Joi.number().min(0).max(10).optional(),
   sem8_backlog: Joi.number().optional(),
   
