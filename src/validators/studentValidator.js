@@ -183,15 +183,15 @@ const updatePasswordSchema = Joi.object({
  * Validates student profile update request body
  */
 const personalInfoSchema = Joi.object({
-  first_name: Joi.string().min(2).max(50).required(),
+  first_name: Joi.string().required(),
 
   middle_name: Joi.string().allow('', null),
 
-  last_name: Joi.string().min(2).max(50).required(),
+  last_name: Joi.string().required(),
 
 
   mobile_number: Joi.string()
-    .pattern(/^[6-9]\d{9}$/)
+    .regex(/^\d{10}$/)
     .required(),
 
   birth_date: Joi.date().iso().required(),
@@ -213,7 +213,7 @@ aadhaar_number: Joi.string()
   father_name: Joi.string().optional(),
 
   father_mobile_number: Joi.string()
-    .pattern(/^[6-9]\d{9}$/)
+    .regex(/^\d{10}$/)
     .optional(),
 
   father_occupation: Joi.string().optional(),
@@ -221,7 +221,7 @@ aadhaar_number: Joi.string()
   mother_name: Joi.string().optional(),
 
   mother_mobile_number: Joi.string()
-    .pattern(/^[6-9]\d{9}$/)
+    .regex(/^\d{10}$/)
     .optional(),
 
   mother_occupation: Joi.string().optional(),
@@ -254,39 +254,47 @@ const academicInfoSchema = Joi.object({
   admission_based_on: Joi.string().optional(),
 
   department: Joi.string().required(),
-  division: Joi.string().optional(),
-
+  division: Joi.string().required(),
+    lgName: Joi.string().required(),
   passout_year: Joi.number().integer().min(2000).max(2100).required(),
 
+  sem1_sgpa: Joi.number().min(0).max(10).optional(),
   sem1_cgpa: Joi.number().min(0).max(10).optional(),
-  sem1_backlog: Joi.boolean().optional(),
+  sem1_backlog: Joi.number().optional(),
 
+  sem2_sgpa: Joi.number().min(0).max(10).optional(),
   sem2_cgpa: Joi.number().min(0).max(10).optional(),
-  sem2_backlog: Joi.boolean().optional(),
+  sem2_backlog: Joi.number().optional(),
 
+  sem3_sgpa: Joi.number().min(0).max(10).optional(),
   sem3_cgpa: Joi.number().min(0).max(10).optional(),
-  sem3_backlog: Joi.boolean().optional(),
+  sem3_backlog: Joi.number().optional(),
 
+  sem4_sgpa: Joi.number().min(0).max(10).optional(),
   sem4_cgpa: Joi.number().min(0).max(10).optional(),
-  sem4_backlog: Joi.boolean().optional(),
+  sem4_backlog: Joi.number().optional(),
 
+  sem5_sgpa: Joi.number().min(0).max(10).optional(),
   sem5_cgpa: Joi.number().min(0).max(10).optional(),
-  sem5_backlog: Joi.boolean().optional(),
+  sem5_backlog: Joi.number().optional(),
 
+  sem6_sgpa: Joi.number().min(0).max(10).optional(),
   sem6_cgpa: Joi.number().min(0).max(10).optional(),
-  sem6_backlog: Joi.boolean().optional(),
+  sem6_backlog: Joi.number().optional(),
 
+  sem7_sgpa: Joi.number().min(0).max(10).optional(),
   sem7_cgpa: Joi.number().min(0).max(10).optional(),
-  sem7_backlog: Joi.boolean().optional(),
+  sem7_backlog: Joi.number().optional(),
   
+  sem8_sgpa: Joi.number().min(0).max(10).optional(),
   sem8_cgpa: Joi.number().min(0).max(10).optional(),
-  sem8_backlog: Joi.boolean().optional(),
+  sem8_backlog: Joi.number().optional(),
   
   overall_cgpa: Joi.number().min(0).max(10).optional(),
 
-  any_live_kt: Joi.boolean().optional(),
+  any_live_kt: Joi.number().optional(),
 
-  any_gap_during_education: Joi.boolean().required(),
+  any_gap_during_education: Joi.string().required(),
 
   gap_reason: Joi.when('any_gap_during_education', {
   is: true,
@@ -375,38 +383,38 @@ const updateAcademicInfoSchema = Joi.object({
 
   department: Joi.string().optional(),
   division: Joi.string().optional(),
-
+  lgName: Joi.string().optional(),
   passout_year: Joi.number().integer().min(2000).max(2100).optional(),
 
   sem1_cgpa: Joi.number().min(0).max(10).optional(),
-  sem1_backlog: Joi.boolean().optional(),
+  sem1_backlog: Joi.number().optional(),
 
   sem2_cgpa: Joi.number().min(0).max(10).optional(),
-  sem2_backlog: Joi.boolean().optional(),
+  sem2_backlog: Joi.number().optional(),
 
   sem3_cgpa: Joi.number().min(0).max(10).optional(),
-  sem3_backlog: Joi.boolean().optional(),
+  sem3_backlog: Joi.number().optional(),
 
   sem4_cgpa: Joi.number().min(0).max(10).optional(),
-  sem4_backlog: Joi.boolean().optional(),
+  sem4_backlog: Joi.number().optional(),
 
   sem5_cgpa: Joi.number().min(0).max(10).optional(),
-  sem5_backlog: Joi.boolean().optional(),
+  sem5_backlog: Joi.number().optional(),
 
   sem6_cgpa: Joi.number().min(0).max(10).optional(),
-  sem6_backlog: Joi.boolean().optional(),
+  sem6_backlog: Joi.number().optional(),
 
   sem7_cgpa: Joi.number().min(0).max(10).optional(),
-  sem7_backlog: Joi.boolean().optional(),
+  sem7_backlog: Joi.number().optional(),
 
   sem8_cgpa: Joi.number().min(0).max(10).optional(),
-  sem8_backlog: Joi.boolean().optional(),
+  sem8_backlog: Joi.number().optional(),
 
   overall_cgpa: Joi.number().min(0).max(10).optional(),
 
-  any_live_kt: Joi.boolean().optional(),
+  any_live_kt: Joi.number().optional(),
 
-  any_gap_during_education: Joi.boolean().optional(),
+  any_gap_during_education: Joi.string().optional(),
 
   gap_reason: Joi.when('any_gap_during_education', {
     is: true,

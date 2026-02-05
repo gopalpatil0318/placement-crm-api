@@ -80,6 +80,7 @@ async function registerStudent(req, res) {
       res,
       {
         student_id: newStudent.student_id,
+        college_id: newStudent.college_id,
         student_name: newStudent.student_name,
         student_email: newStudent.student_email
       },
@@ -243,6 +244,8 @@ async function loginStudent(req, res) {
       {
         // Token REMOVED from here
         role: 'student',
+        student_id: authResult.student.student_id,
+        college_id: authResult.student.college_id,
         student_email: authResult.student.student_email,
         student_name: authResult.student.student_name
       },
@@ -415,7 +418,7 @@ async function getProfileStatus(req, res) {
   });
 
   try {
-    // ✅ IDENTITY FROM COOKIE (req.user)
+ 
     const studentId = req.user.id;
     const collegeId = req.user.college_id;
 
@@ -434,7 +437,11 @@ async function getProfileStatus(req, res) {
 
     return success(
       res,
-      status,
+      {
+    student_id: studentId,
+    college_id: collegeId,
+    profile_status: status
+  },
       'Profile status fetched successfully',
       HTTP_STATUS.OK
     );
@@ -489,6 +496,8 @@ async function getProfileStatus(req, res) {
     return success(
       res,
       {
+        student_id: studentId,
+        college_id: collegeId,
         saved: req.validated,
         profile_status: profileStatus
       },
@@ -554,6 +563,8 @@ async function insertAcademicInfo(req, res) {
     return success(
       res,
       {
+        student_id: studentId,
+        college_id: collegeId,
         saved: req.validated,
         profile_status: profileStatus
       },
@@ -618,6 +629,8 @@ async function insertSkillInfo(req, res) {
     return success(
       res,
       {
+        student_id: studentId,
+        college_id: collegeId,
         saved: req.validated,
         profile_status: profileStatus
       },
@@ -677,7 +690,8 @@ console.log('req.validated:', req.validated);
 
     return success(
       res,
-      { profile_status: profileStatus },
+      { student_id: studentId, college_id: collegeId,
+        profile_status: profileStatus },
       'Personal information updated successfully',
       HTTP_STATUS.OK
     );
@@ -721,7 +735,8 @@ async function updateAcademicInfo(req, res) {
 
     return success(
       res,
-      { profile_status: profileStatus },
+      { student_id: studentId, college_id: collegeId,
+        profile_status: profileStatus },
       'Academic information updated successfully',
       HTTP_STATUS.OK
     );
@@ -770,7 +785,8 @@ async function updateSkillInfo(req, res) {
 
     return success(
       res,
-      { profile_status: profileStatus },
+      {student_id: studentId, college_id: collegeId,
+         profile_status: profileStatus },
       'Skill information updated successfully',
       HTTP_STATUS.OK
     );
@@ -817,7 +833,7 @@ async function getPersonalInfo(req, res) {
 
     return success(
       res,
-      data,
+      {  student_id: studentId, college_id: collegeId,...data},
       'Personal info fetched successfully',
       HTTP_STATUS.OK
     );
@@ -875,7 +891,7 @@ async function getAcademicInfo(req, res) {
 
     return success(
       res,
-      data,
+      { student_id: studentId, college_id: collegeId,...data },
       'Academic info fetched successfully',
       HTTP_STATUS.OK
     );
@@ -933,7 +949,7 @@ async function getSkillInfo(req, res) {
 
     return success(
       res,
-      data,
+      { student_id: studentId, college_id: collegeId,...data },
       'Skill info fetched successfully',
       HTTP_STATUS.OK
     );

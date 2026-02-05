@@ -41,7 +41,7 @@ const { ROLES } = require('../config/constants');
 router.post(
   '/create-college',
   authMiddleware,
-  requireRole(ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(createCollegeSchema),
   collegeController.createCollege
@@ -54,7 +54,7 @@ router.post(
 router.get(
   '/colleges',
   authMiddleware,
-  requireRole(ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(listCollegeSchema),
   collegeController.listColleges
@@ -67,7 +67,7 @@ router.get(
 router.get(
   '/colleges/:collegeId',
   authMiddleware,
-  requireRole(ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   collegeController.getCollege
 );
 
@@ -78,7 +78,7 @@ router.get(
 router.put(
   '/update-college/:collegeId',
   authMiddleware,
-  requireRole(ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(updateCollegeSchema),
   collegeController.updateCollege
@@ -91,7 +91,7 @@ router.put(
 router.put(
   '/colleges/:collegeId/features',
   authMiddleware,
-  requireRole(ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(updateCollegeFeaturesSchema),
   collegeController.updateCollegeFeatures
@@ -104,7 +104,7 @@ router.put(
 router.put(
   '/colleges/forgot-password',
   authMiddleware,
-  requireRole(ROLES.ADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(forgotPasswordSchema),
   collegeController.forgotCollegeAdminPassword
