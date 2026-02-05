@@ -691,86 +691,92 @@ async insertAcademicInfo(studentId, collegeId, data) {
 
   // ✅ Normalize gap_reason
   const gapReason =
-    data.any_gap_during_education === true
+    data.any_gap_during_education === 'yes'
       ? data.gap_reason
       : null;
 try {
 
 await pool.query(
-  `
-  INSERT INTO student_academic_information (
-    student_id, college_id,
-    prn_number, tenth_percentage,
-    twelfth_or_diploma, diploma_or_12th_percentage,
-    admission_based_on, department, division,
-    passout_year,
-    sem1_cgpa, sem1_backlog,
-    sem2_cgpa, sem2_backlog,
-    sem3_cgpa, sem3_backlog,
-    sem4_cgpa, sem4_backlog,
-    sem5_cgpa, sem5_backlog,
-    sem6_cgpa, sem6_backlog,
-    sem7_cgpa, sem7_backlog,
-    sem8_cgpa, sem8_backlog,
-    overall_cgpa,
-    any_live_kt,
-    any_gap_during_education,
-    gap_reason
-  )
-  VALUES (
-    $1, $2,
-    $3, $4,
-    $5, $6,
-    $7, $8, $9,
-    $10,
-    $11, $12,
-    $13, $14,
-    $15, $16,
-    $17, $18,
-    $19, $20,
-    $21, $22,
-    $23, $24,
-    $25, $26,
-    $27,
-    $28,
-    $29,
-    $30
-  )
-  `,
-  [
-    studentId,
-    collegeId,
-    data.prn_number,
-    data.tenth_percentage,
-    data.twelfth_or_diploma,
-    data.diploma_or_12th_percentage,
-    data.admission_based_on,
-    data.department,
-    data.division,
-    data.passout_year,
-    data.sem1_cgpa, data.sem1_backlog,
-    data.sem2_cgpa, data.sem2_backlog,
-    data.sem3_cgpa, data.sem3_backlog,
-    data.sem4_cgpa, data.sem4_backlog,
-    data.sem5_cgpa, data.sem5_backlog,
-    data.sem6_cgpa, data.sem6_backlog,
-    data.sem7_cgpa, data.sem7_backlog,
-    data.sem8_cgpa, data.sem8_backlog,
-    data.overall_cgpa,
-    data.any_live_kt,
-    data.any_gap_during_education,
-    gapReason
-  ]
-);
+    `
+    INSERT INTO student_academic_information (
+      student_id, college_id,
+      prn_number, tenth_percentage,
+      twelfth_or_diploma, diploma_or_12th_percentage,
+      admission_based_on, department, division,
+      passout_year,
+      "lgName",
 
-} catch (err) {
-  console.error('🔥 ACADEMIC INSERT FAILED 🔥');
-  console.error('PG CODE:', err.code);
-  console.error('PG MESSAGE:', err.message);
-  console.error('DETAIL:', err.detail);
-  console.error('CONSTRAINT:', err.constraint);
+      sem1_cgpa, sem1_sgpa, sem1_backlog,
+      sem2_cgpa, sem2_sgpa, sem2_backlog,
+      sem3_cgpa, sem3_sgpa, sem3_backlog,
+      sem4_cgpa, sem4_sgpa, sem4_backlog,
+      sem5_cgpa, sem5_sgpa, sem5_backlog,
+      sem6_cgpa, sem6_sgpa, sem6_backlog,
+      sem7_cgpa, sem7_sgpa, sem7_backlog,
+      sem8_cgpa, sem8_sgpa, sem8_backlog,
+
+      overall_cgpa,
+      any_live_kt,
+      any_gap_during_education,
+      gap_reason
+    )
+    VALUES (
+      $1,$2,
+      $3,$4,
+      $5,$6,
+      $7,$8,$9,
+      $10,
+      $11,
+
+      $12,$13,$14,
+      $15,$16,$17,
+      $18,$19,$20,
+      $21,$22,$23,
+      $24,$25,$26,
+      $27,$28,$29,
+      $30,$31,$32,
+      $33,$34,$35,
+
+      $36,
+      $37,
+      $38,
+      $39
+    )
+    `,
+    [
+      studentId,
+      collegeId,
+      data.prn_number,
+      data.tenth_percentage,
+      data.twelfth_or_diploma,
+      data.diploma_or_12th_percentage,
+      data.admission_based_on,
+      data.department,
+      data.division,
+      data.passout_year,
+      data.lgName,
+
+      data.sem1_cgpa, data.sem1_sgpa, data.sem1_backlog,
+      data.sem2_cgpa, data.sem2_sgpa, data.sem2_backlog,
+      data.sem3_cgpa, data.sem3_sgpa, data.sem3_backlog,
+      data.sem4_cgpa, data.sem4_sgpa, data.sem4_backlog,
+      data.sem5_cgpa, data.sem5_sgpa, data.sem5_backlog,
+      data.sem6_cgpa, data.sem6_sgpa, data.sem6_backlog,
+      data.sem7_cgpa, data.sem7_sgpa, data.sem7_backlog,
+      data.sem8_cgpa, data.sem8_sgpa, data.sem8_backlog,
+
+      data.overall_cgpa,
+      data.any_live_kt,
+      data.any_gap_during_education,
+      gapReason
+    ]
+  );
+}
+catch (err) {
+ 
   throw err;
 }
+
   return this.checkAndUpdateProfileCompletion(studentId, collegeId);
 }
   /**
@@ -969,64 +975,94 @@ async updatePersonalInfo(studentId, collegeId, data) {
     const pool = getMainPool();
 
     const gapReason =
-      data.any_gap_during_education === true
+      data.any_gap_during_education === "yes"
         ? data.gap_reason
         : null;
 
     const result = await pool.query(
-      `
-      UPDATE student_academic_information
-      SET
-        prn_number = COALESCE($3, prn_number),
-        tenth_percentage = COALESCE($4, tenth_percentage),
-        twelfth_or_diploma = COALESCE($5, twelfth_or_diploma),
-        diploma_or_12th_percentage = COALESCE($6, diploma_or_12th_percentage),
-        admission_based_on = COALESCE($7, admission_based_on),
-      sem1_cgpa = COALESCE($15, sem1_cgpa), sem1_backlog = COALESCE($16, sem1_backlog), 
-      sem2_cgpa = COALESCE($17, sem2_cgpa), sem2_backlog = COALESCE($18, sem2_backlog),
-      sem3_cgpa = COALESCE($19, sem3_cgpa), sem3_backlog = COALESCE($20, sem3_backlog),
-      sem4_cgpa = COALESCE($21, sem4_cgpa), sem4_backlog = COALESCE($22, sem4_backlog),
-      sem5_cgpa = COALESCE($23, sem5_cgpa), sem5_backlog = COALESCE($24, sem5_backlog),
-      sem6_cgpa = COALESCE($25, sem6_cgpa), sem6_backlog = COALESCE($26, sem6_backlog),
-      sem7_cgpa = COALESCE($27, sem7_cgpa), sem7_backlog = COALESCE($28, sem7_backlog),
-      sem8_cgpa = COALESCE($29, sem8_cgpa), sem8_backlog = COALESCE($30, sem8_backlog),
-        department = COALESCE($8, department),
-        division = COALESCE($9, division),
-        passout_year = COALESCE($10, passout_year),
-        overall_cgpa = COALESCE($11, overall_cgpa),
-        any_live_kt = COALESCE($12, any_live_kt),
-        any_gap_during_education = COALESCE($13, any_gap_during_education),
-        gap_reason = COALESCE($14, gap_reason),
-        updated_at = NOW()
-      WHERE student_id = $1 AND college_id = $2
-      RETURNING student_id
-      `,
-      [
-        studentId,
-        collegeId,
-        data.prn_number,
-        data.tenth_percentage,
-        data.twelfth_or_diploma,
-        data.diploma_or_12th_percentage,
-        data.admission_based_on,
-        data.sem1_cgpa, data.sem1_backlog,
-        data.sem2_cgpa, data.sem2_backlog,
-        data.sem3_cgpa, data.sem3_backlog,
-        data.sem4_cgpa, data.sem4_backlog,
-        data.sem5_cgpa, data.sem5_backlog,
-        data.sem6_cgpa, data.sem6_backlog,
-        data.sem7_cgpa, data.sem7_backlog,
-        data.sem8_cgpa, data.sem8_backlog,
-        data.department,
-        data.division,
-        data.passout_year,
-        data.overall_cgpa,
-        data.any_live_kt,
-        data.any_gap_during_education,
-        gapReason
-      ]
-    );
+    `
+    UPDATE student_academic_information
+    SET
+      prn_number = COALESCE($3, prn_number),
+      tenth_percentage = COALESCE($4, tenth_percentage),
+      twelfth_or_diploma = COALESCE($5, twelfth_or_diploma),
+      diploma_or_12th_percentage = COALESCE($6, diploma_or_12th_percentage),
+      admission_based_on = COALESCE($7, admission_based_on),
+      department = COALESCE($8, department),
+      division = COALESCE($9, division),
+      passout_year = COALESCE($10, passout_year),
+      "lgName" = COALESCE($11, "lgName"),
 
+      sem1_cgpa = COALESCE($12, sem1_cgpa),
+      sem1_sgpa = COALESCE($13, sem1_sgpa),
+      sem1_backlog = COALESCE($14, sem1_backlog),
+
+      sem2_cgpa = COALESCE($15, sem2_cgpa),
+      sem2_sgpa = COALESCE($16, sem2_sgpa),
+      sem2_backlog = COALESCE($17, sem2_backlog),
+
+      sem3_cgpa = COALESCE($18, sem3_cgpa),
+      sem3_sgpa = COALESCE($19, sem3_sgpa),
+      sem3_backlog = COALESCE($20, sem3_backlog),
+
+      sem4_cgpa = COALESCE($21, sem4_cgpa),
+      sem4_sgpa = COALESCE($22, sem4_sgpa),
+      sem4_backlog = COALESCE($23, sem4_backlog),
+
+      sem5_cgpa = COALESCE($24, sem5_cgpa),
+      sem5_sgpa = COALESCE($25, sem5_sgpa),
+      sem5_backlog = COALESCE($26, sem5_backlog),
+
+      sem6_cgpa = COALESCE($27, sem6_cgpa),
+      sem6_sgpa = COALESCE($28, sem6_sgpa),
+      sem6_backlog = COALESCE($29, sem6_backlog),
+
+      sem7_cgpa = COALESCE($30, sem7_cgpa),
+      sem7_sgpa = COALESCE($31, sem7_sgpa),
+      sem7_backlog = COALESCE($32, sem7_backlog),
+
+      sem8_cgpa = COALESCE($33, sem8_cgpa),
+      sem8_sgpa = COALESCE($34, sem8_sgpa),
+      sem8_backlog = COALESCE($35, sem8_backlog),
+
+      overall_cgpa = COALESCE($36, overall_cgpa),
+      any_live_kt = COALESCE($37, any_live_kt),
+      any_gap_during_education = COALESCE($38, any_gap_during_education),
+      gap_reason = COALESCE($39, gap_reason),
+
+      updated_at = NOW()
+
+    WHERE student_id = $1 AND college_id = $2
+    RETURNING student_id
+    `,
+    [
+      studentId,
+      collegeId,
+      data.prn_number,
+      data.tenth_percentage,
+      data.twelfth_or_diploma,
+      data.diploma_or_12th_percentage,
+      data.admission_based_on,
+      data.department,
+      data.division,
+      data.passout_year,
+      data.lgName,
+
+      data.sem1_cgpa, data.sem1_sgpa, data.sem1_backlog,
+      data.sem2_cgpa, data.sem2_sgpa, data.sem2_backlog,
+      data.sem3_cgpa, data.sem3_sgpa, data.sem3_backlog,
+      data.sem4_cgpa, data.sem4_sgpa, data.sem4_backlog,
+      data.sem5_cgpa, data.sem5_sgpa, data.sem5_backlog,
+      data.sem6_cgpa, data.sem6_sgpa, data.sem6_backlog,
+      data.sem7_cgpa, data.sem7_sgpa, data.sem7_backlog,
+      data.sem8_cgpa, data.sem8_sgpa, data.sem8_backlog,
+
+      data.overall_cgpa,
+      data.any_live_kt,
+      data.any_gap_during_education,
+      gapReason
+    ]
+  );
     if (!result.rows.length) {
       throw new Error('ACADEMIC_INFO_NOT_FOUND');
     }

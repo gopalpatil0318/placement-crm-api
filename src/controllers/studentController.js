@@ -574,7 +574,6 @@ async function insertAcademicInfo(req, res) {
 
   } catch (err) {
     const duration = Date.now() - startTime;
-
     logger.error(`${LOG.API_ERROR_PREFIX}  POST /api/students/profile/academic-info`, {
       error: err.message,
       student_id: req.params.studentId,

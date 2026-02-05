@@ -38,6 +38,7 @@ const AUTH = {
 const ROLES = {
   SYSADMIN: 'sysadmin',
   COLLEGEADMIN: 'collegeadmin',
+  ADMIN: 'admin',
   TEACHER: 'teacher',
   STUDENT: 'student'
 };
@@ -45,6 +46,7 @@ const ROLES = {
 const ROLE_HIERARCHY = {
   [ROLES.SYSADMIN]: 100,
   [ROLES.COLLEGEADMIN]: 80,
+  [ROLES.ADMIN]: 60,
   [ROLES.TEACHER]: 50,
   [ROLES.STUDENT]: 10
 };
