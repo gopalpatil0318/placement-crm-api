@@ -46,13 +46,7 @@ const createUserSchema = Joi.object({
       'any.required': 'User password is required'
     }),
 
-  user_role: Joi.string()
-    .valid(ROLES.COLLEGEADMIN)
-    .required()
-    .messages({
-      'any.only': `User role must be one of: ${ROLES.ADMIN}, ${ROLES.TEACHER}, student, other`,
-      'any.required': 'User role is required'
-    })
+  
 });
 
 /**
@@ -73,7 +67,7 @@ const updateUserSchema = Joi.object({
     .valid(ROLES.COLLEGEADMIN, ROLES.TEACHER, 'student', 'other')
     .optional()
     .messages({
-      'any.only': `User role must be one of: ${ROLES.ADMIN}, ${ROLES.TEACHER}, student, other`
+      'any.only': `User role must be one of: ${ROLES.COLLEGEADMIN}, ${ROLES.TEACHER}, student, other`
     }),
 
   user_status: Joi.string()
