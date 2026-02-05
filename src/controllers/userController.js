@@ -36,7 +36,9 @@ async function createUser(req, res) {
   });
 
   try {
+    // ====================================================================
     // Authorization check
+    // ====================================================================
     if (req.user?.role !== ROLES.COLLEGEADMIN) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized user creation attempt`,
@@ -49,20 +51,24 @@ async function createUser(req, res) {
       return error(res, ERROR_MESSAGES.FORBIDDEN, HTTP_STATUS.FORBIDDEN);
     }
 
+    // ====================================================================
+    // Extract ONLY allowed fields (NO user_role from frontend)
+    // ====================================================================
     const {
       user_name,
       user_email,
-      user_password,
-      user_role
+      user_password
+      // ❌ user_role intentionally ignored
     } = req.validated;
 
-    // Create user
+    // ====================================================================
+    // Create user (role is enforced in service layer)
+    // ====================================================================
     const newUser = await userService.create({
       college_id: req.user.college_id,
       user_name,
       user_email,
-      user_password,
-      user_role
+      user_password
     });
 
     const duration = Date.now() - startTime;
@@ -72,7 +78,7 @@ async function createUser(req, res) {
       {
         user_id: newUser.user_id,
         user_email: newUser.user_email,
-        user_role: newUser.user_role,
+        user_role: newUser.user_role, // will always be collegeadmin
         college_id: req.user.college_id,
         created_by: req.user.id,
         duration_ms: duration
@@ -103,13 +109,21 @@ async function createUser(req, res) {
       return error(res, err.message, HTTP_STATUS.CONFLICT);
     }
 
-    if (err.message.includes('Invalid role') || err.message.includes('inactive')) {
+    if (
+      err.message.includes('Invalid role') ||
+      err.message.includes('inactive')
+    ) {
       return error(res, err.message, HTTP_STATUS.BAD_REQUEST);
     }
 
-    return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    return error(
+      res,
+      ERROR_MESSAGES.SERVER_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
   }
 }
+
 
 /**
  * GET /api/v1/users
@@ -162,10 +176,14 @@ async function listUsers(req, res) {
 
     return success(
       res,
-      result.data,
+      {
+        users: result.data,
+        pagination: result.pagination
+      },
       'Users retrieved',
       HTTP_STATUS.OK
     );
+
 
   } catch (err) {
     const duration = Date.now() - startTime;
