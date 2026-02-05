@@ -35,174 +35,184 @@ class UserService {
    * @returns {Object} Created user (without password)
    * @throws {Error} If validation fails
    */
-  async create(data) {
-    const {
-      college_id,
-      user_name,
-      user_email,
-      user_password,
+ async create(data) {
+  const {
+    college_id,
+    user_name,
+    user_email,
+    user_password
+    // ❌ user_role REMOVED from destructuring
+  } = data;
+
+  // ✅ FORCE DEFAULT ROLE IN BACKEND
+  const user_role = ROLES.COLLEGEADMIN;
+
+  const mainPool = getMainPool();
+  const client = await mainPool.connect();
+
+  try {
+    logger.debug(
+      `${LOG.TRANSACTION_PREFIX} Starting user creation transaction`,
+      { college_id, user_email, user_role }
+    );
+
+    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+    // ====================================================================
+    // Step 1: Verify college exists and is active
+    // ====================================================================
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Verifying college status`, {
+      college_id
+    });
+
+    const collegeQuery = `
+      SELECT college_id, college_status
+      FROM colleges
+      WHERE college_id = $1
+      LIMIT 1
+    `;
+
+    const collegeResult = await client.query(collegeQuery, [college_id]);
+
+    if (!collegeResult.rows.length) {
+      await client.query('ROLLBACK');
+      throw new Error('College not found');
+    }
+
+    const college = collegeResult.rows[0];
+
+    if (college.college_status !== STATUS.ACTIVE) {
+      await client.query('ROLLBACK');
+      throw new Error('College is inactive');
+    }
+
+    // ====================================================================
+    // Step 2: Validate user role (BACKEND CONTROLLED)
+    // ====================================================================
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Validating user role`, {
       user_role
-    } = data;
+    });
 
-    const mainPool = getMainPool();
-    const client = await mainPool.connect();
+    const validRoles = [ROLES.COLLEGEADMIN, ROLES.TEACHER, 'student', 'other'];
+    if (!validRoles.includes(user_role)) {
+      await client.query('ROLLBACK');
+      throw new Error(`Invalid role: ${user_role}`);
+    }
 
-    try {
-      logger.debug(
-        `${LOG.TRANSACTION_PREFIX} Starting user creation transaction`,
-        { college_id, user_email, user_role }
-      );
+    // ====================================================================
+    // Step 3: Hash password
+    // ====================================================================
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Hashing user password`);
 
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    const hashedPassword = await passwordHelper.hashPassword(user_password);
 
-      // ====================================================================
-      // Step 1: Verify college exists and is active
-      // ====================================================================
-      logger.debug(`${LOG.TRANSACTION_PREFIX} Verifying college status`, {
-        college_id
-      });
+    // ====================================================================
+    // Step 4: Check email uniqueness
+    // ====================================================================
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Checking email uniqueness`, {
+      user_email
+    });
 
-      const collegeQuery = `
-        SELECT college_id, college_status
-        FROM colleges
-        WHERE college_id = $1
-        LIMIT 1
-      `;
+    const emailCheckQuery = `
+      SELECT user_id FROM users
+      WHERE LOWER(user_email) = LOWER($1)
+      LIMIT 1
+    `;
 
-      const collegeResult = await client.query(collegeQuery, [college_id]);
+    const emailCheckResult = await client.query(emailCheckQuery, [user_email]);
 
-      if (!collegeResult.rows.length) {
-        await client.query('ROLLBACK');
-        throw new Error('College not found');
-      }
+    if (emailCheckResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      throw new Error('Email already exists');
+    }
 
-      const college = collegeResult.rows[0];
+    // ====================================================================
+    // Step 5: Create user
+    // ====================================================================
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Creating user record`, {
+      college_id,
+      user_email
+    });
 
-      if (college.college_status !== STATUS.ACTIVE) {
-        await client.query('ROLLBACK');
-        throw new Error('College is inactive');
-      }
-
-      // ====================================================================
-      // Step 2: Validate user role
-      // ====================================================================
-      logger.debug(`${LOG.TRANSACTION_PREFIX} Validating user role`, {
-        user_role
-      });
-
-      const validRoles = [ROLES.ADMIN, ROLES.TEACHER, 'student', 'other'];
-      if (!validRoles.includes(user_role)) {
-        await client.query('ROLLBACK');
-        throw new Error(`Invalid role: ${user_role}`);
-      }
-
-      // ====================================================================
-      // Step 3: Hash password
-      // ====================================================================
-      logger.debug(`${LOG.TRANSACTION_PREFIX} Hashing user password`);
-
-      const hashedPassword = await passwordHelper.hashPassword(user_password);
-
-      // ====================================================================
-      // Step 4: Check email uniqueness
-      // ====================================================================
-      logger.debug(`${LOG.TRANSACTION_PREFIX} Checking email uniqueness`, {
-        user_email
-      });
-
-      const emailCheckQuery = `
-        SELECT user_id FROM users
-        WHERE LOWER(user_email) = LOWER($1)
-        LIMIT 1
-      `;
-
-      const emailCheckResult = await client.query(emailCheckQuery, [user_email]);
-
-      if (emailCheckResult.rows.length > 0) {
-        await client.query('ROLLBACK');
-        throw new Error('Email already exists');
-      }
-
-      // ====================================================================
-      // Step 5: Create user
-      // ====================================================================
-      logger.debug(`${LOG.TRANSACTION_PREFIX} Creating user record`, {
-        college_id,
-        user_email
-      });
-
-      const userInsertQuery = `
-        INSERT INTO users (
-          college_id,
-          user_name,
-          user_email,
-          user_password,
-          user_role,
-          user_status,
-          created_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        RETURNING user_id, college_id, user_name, user_email, user_role, user_status, created_at
-      `;
-
-      const userResult = await client.query(userInsertQuery, [
+    const userInsertQuery = `
+      INSERT INTO users (
         college_id,
         user_name,
         user_email,
-        hashedPassword,
+        user_password,
         user_role,
-        STATUS.ACTIVE
-      ]);
+        user_status,
+        created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING
+        user_id,
+        college_id,
+        user_name,
+        user_email,
+        user_role,
+        user_status,
+        created_at
+    `;
 
-      await client.query('COMMIT');
+    const userResult = await client.query(userInsertQuery, [
+      college_id,
+      user_name,
+      user_email,
+      hashedPassword,
+      user_role,          // ✅ always collegeadmin
+      STATUS.ACTIVE
+    ]);
 
-      const user = userResult.rows[0];
+    await client.query('COMMIT');
 
-      logger.info(
-        `${LOG.TRANSACTION_PREFIX} User created successfully`,
-        {
-          user_id: user.user_id,
-          college_id: user.college_id,
-          user_email: user.user_email,
-          user_role: user.user_role
-        }
-      );
+    const user = userResult.rows[0];
 
-      return user;
-
-    } catch (err) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (rollbackErr) {
-        logger.error(
-          `${LOG.TRANSACTION_PREFIX} Rollback failed`,
-          { error: rollbackErr.message }
-        );
+    logger.info(
+      `${LOG.TRANSACTION_PREFIX} User created successfully`,
+      {
+        user_id: user.user_id,
+        college_id: user.college_id,
+        user_email: user.user_email,
+        user_role: user.user_role
       }
+    );
 
+    return user;
+
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
       logger.error(
-        `${LOG.TRANSACTION_PREFIX} User creation failed`,
-        {
-          error: err.message,
-          code: err.code,
-          college_id
-        }
+        `${LOG.TRANSACTION_PREFIX} Rollback failed`,
+        { error: rollbackErr.message }
       );
-
-      if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
-        throw new Error('Email already exists');
-      }
-
-      if (err.code === DB_ERROR_CODES.FOREIGN_KEY_VIOLATION) {
-        throw new Error('Invalid college reference');
-      }
-
-      throw err;
-
-    } finally {
-      client.release();
     }
+
+    logger.error(
+      `${LOG.TRANSACTION_PREFIX} User creation failed`,
+      {
+        error: err.message,
+        code: err.code,
+        college_id
+      }
+    );
+
+    if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
+      throw new Error('Email already exists');
+    }
+
+    if (err.code === DB_ERROR_CODES.FOREIGN_KEY_VIOLATION) {
+      throw new Error('Invalid college reference');
+    }
+
+    throw err;
+
+  } finally {
+    client.release();
   }
+}
 
   /**
    * Get all users in college with pagination
@@ -407,7 +417,7 @@ class UserService {
       // Step 2: Validate role if provided
       // ====================================================================
       if (data.user_role) {
-        const validRoles = [ROLES.ADMIN, ROLES.TEACHER, 'student', 'other'];
+        const validRoles = [ROLES.COLLEGEADMIN, ROLES.TEACHER, 'student', 'other'];
         if (!validRoles.includes(data.user_role)) {
           await client.query('ROLLBACK');
           throw new Error(`Invalid role: ${data.user_role}`);
