@@ -47,7 +47,7 @@ const createUserSchema = Joi.object({
     }),
 
   user_role: Joi.string()
-    .valid(ROLES.ADMIN, ROLES.TEACHER, 'student', 'other')
+    .valid(ROLES.COLLEGEADMIN)
     .required()
     .messages({
       'any.only': `User role must be one of: ${ROLES.ADMIN}, ${ROLES.TEACHER}, student, other`,
@@ -70,7 +70,7 @@ const updateUserSchema = Joi.object({
     }),
 
   user_role: Joi.string()
-    .valid(ROLES.ADMIN, ROLES.TEACHER, 'student', 'other')
+    .valid(ROLES.COLLEGEADMIN, ROLES.TEACHER, 'student', 'other')
     .optional()
     .messages({
       'any.only': `User role must be one of: ${ROLES.ADMIN}, ${ROLES.TEACHER}, student, other`
