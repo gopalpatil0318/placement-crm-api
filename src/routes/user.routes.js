@@ -3,11 +3,11 @@
  * USER ROUTES - User Management API
  * ============================================================================
  * Single Database Architecture
- * - POST /users - Create user (admin only)
- * - GET /users - List users (admin/teacher)
+ * - POST /users - Create user (COLLEGEADMIN only)
+ * - GET /users - List users (COLLEGEADMIN/teacher)
  * - GET /users/:userId - Get user
- * - PUT /users/:userId - Update user (admin only)
- * - DELETE /users/:userId - Delete user (admin only)
+ * - PUT /users/:userId - Update user (COLLEGEADMIN only)
+ * - DELETE /users/:userId - Delete user (COLLEGEADMIN only)
  */
 
 const express = require('express');
@@ -31,11 +31,11 @@ router.use(authMiddleware);
 
 /**
  * POST /api/v1/users
- * Create new user (admin only)
+ * Create new user (COLLEGEADMIN only)
  */
 router.post(
   '/create-user',
-  requireRole(ROLES.ADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(createUserSchema),
   userController.createUser
@@ -43,11 +43,11 @@ router.post(
 
 /**
  * GET /api/college
- * List users in college (admin/teacher)
+ * List users in college (COLLEGEADMIN/teacher)
  */
 router.get(
   '/users',
-  requireRole(ROLES.ADMIN, ROLES.TEACHER),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(listUserSchema),
   userController.listUsers
@@ -55,22 +55,22 @@ router.get(
 
 /**
  * GET /api/college/:userId
- * Get single user (admin/teacher)
+ * Get single user (COLLEGEADMIN/teacher)
  */
 router.get(
   '/user/:userId',
-  requireRole(ROLES.ADMIN, ROLES.TEACHER),
+  requireRole(ROLES.COLLEGEADMIN, ROLES.TEACHER),
   apiLimiter,
   userController.getUser
 );
 
 /**
  * PUT /api/college/:userId
- * Update user (admin only)
+ * Update user (COLLEGEADMIN only)
  */
 router.put(
   '/update-user/:userId',
-  requireRole(ROLES.ADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(updateUserSchema),
   userController.updateUser
@@ -78,11 +78,11 @@ router.put(
 
 /**
  * DELETE /api/college/:userId
- * Soft delete user (admin only)
+ * Soft delete user (COLLEGEADMIN only)
  */
 router.delete(
   '/user/:userId',
-  requireRole(ROLES.ADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   userController.deleteUser
 );
