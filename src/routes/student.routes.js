@@ -49,7 +49,7 @@ router.post(
 router.post(
   '/bulk-register',
   authMiddleware,
-  requireRole(ROLES.ADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(bulkRegisterStudentsSchema),
   studentController.bulkRegisterStudents

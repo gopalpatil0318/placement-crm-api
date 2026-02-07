@@ -140,7 +140,7 @@ async function bulkRegisterStudents(req, res) {
 
   try {
     // Authorization check
-    if (req.user?.role !== ROLES.ADMIN) {
+    if (req.user?.role !== ROLES.COLLEGEADMIN) {
       logger.warn(
         `${LOG.SECURITY_PREFIX} Unauthorized bulk registration attempt`,
         {
