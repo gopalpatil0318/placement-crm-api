@@ -121,4 +121,14 @@ router.get(
   // No rate limiter for GET usually, or use a looser readLimiter if you had one
   studentController.getProfile
 );
+
+// API 4: Get All Master Skills (GET)
+// Publicly authenticated (Any logged-in user can see the skill list)
+router.get(
+  '/skills',
+  authMiddleware, 
+  // No role requirement needed unless you want to restrict it, usually all roles need this.
+  // No rate limiter needed for standard GET requests in your architecture.
+  studentController.getAllSkills
+);
 module.exports = router;

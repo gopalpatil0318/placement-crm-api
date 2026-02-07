@@ -495,6 +495,32 @@ async function getProfile(req, res) {
     return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
   }
 }
+
+async function getAllSkills(req, res) {
+  const startTime = Date.now();
+  
+  // Log request (Optional for high-volume GETs, but good for tracking usage)
+  // logger.debug(`${LOG.API_START_PREFIX} GET /api/v1/skills`, { user_id: req.user.id });
+
+  try {
+    const skills = await studentService.getAllSkills();
+
+    const duration = Date.now() - startTime;
+    logger.info(`${LOG.API_END_PREFIX} GET /api/v1/skills`, { count: skills.length, duration_ms: duration });
+
+    return success(
+      res,
+      skills,
+      'Skills fetched successfully',
+      HTTP_STATUS.OK
+    );
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/v1/skills ${err.message}`, { error: err.message, duration_ms: duration });
+    return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  }
+}
 module.exports = {
   registerStudent,
   bulkRegisterStudents,
@@ -503,5 +529,6 @@ module.exports = {
   updatePassword,
   upsertProfile,
   createSkill,
-  getProfile
+  getProfile,
+  getAllSkills
 };

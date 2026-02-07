@@ -793,6 +793,19 @@ class StudentService {
       throw err;
     }
   }
+  /**
+   * API 4: Get All Master Skills
+   * Fetches the global list of skills for frontend dropdowns
+   */
+  async getAllSkills() {
+    const pool = getMainPool();
+    
+    // Ordered alphabetically for better UX
+    const query = 'SELECT skill_id, skill_name FROM skills ORDER BY skill_name ASC';
+    
+    const { rows } = await pool.query(query);
+    return rows;
+  }
 }
 
 module.exports = new StudentService();
