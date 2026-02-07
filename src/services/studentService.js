@@ -552,616 +552,247 @@ class StudentService {
       client.release();
     }
   }
+/**
+   * API 1: Upsert Profile & Return Full Data
+   * Handles Personal, Academic, Skill Links, and Rated Skills
+   */
+  async upsertStudentProfile(studentId, collegeId, email, data) {
+    const pool = getMainPool();
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN'); // Start Transaction
+
+      logger.debug(`${LOG.TRANSACTION_PREFIX} Start Upsert Profile`, { student_id: studentId });
+
+      // ---------------------------------------------------------
+      // 1. Upsert Personal Info
+      // ---------------------------------------------------------
+      if (data.personal_info) {
+        const p = data.personal_info;
+        const personalQuery = `
+          INSERT INTO student_personal_information (
+            student_id, college_id, first_name, middle_name, last_name, email, mobile_number,
+            birth_date, gender, aadhaar_number, caste, blood_group, father_name,
+            father_mobile_number, father_occupation, mother_name, mother_mobile_number,
+            mother_occupation, city, district, state, pincode, local_address, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW()
+          )
+          ON CONFLICT (student_id) DO UPDATE SET
+            first_name = EXCLUDED.first_name, middle_name = EXCLUDED.middle_name, last_name = EXCLUDED.last_name,
+            mobile_number = EXCLUDED.mobile_number, birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
+            aadhaar_number = EXCLUDED.aadhaar_number, caste = EXCLUDED.caste, blood_group = EXCLUDED.blood_group,
+            father_name = EXCLUDED.father_name, father_mobile_number = EXCLUDED.father_mobile_number,
+            father_occupation = EXCLUDED.father_occupation, mother_name = EXCLUDED.mother_name,
+            mother_mobile_number = EXCLUDED.mother_mobile_number, mother_occupation = EXCLUDED.mother_occupation,
+            city = EXCLUDED.city, district = EXCLUDED.district, state = EXCLUDED.state,
+            pincode = EXCLUDED.pincode, local_address = EXCLUDED.local_address, updated_at = NOW()
+        `;
+        await client.query(personalQuery, [
+            studentId, collegeId, p.first_name, p.middle_name, p.last_name, email, p.mobile_number,
+            p.birth_date, p.gender, p.aadhaar_number, p.caste, p.blood_group, p.father_name,
+            p.father_mobile_number, p.father_occupation, p.mother_name, p.mother_mobile_number,
+            p.mother_occupation, p.city, p.district, p.state, p.pincode, p.local_address
+        ]);
+      }
+
+      // ---------------------------------------------------------
+      // 2. Upsert Academic Info
+      // ---------------------------------------------------------
+      if (data.academic_info) {
+        const a = data.academic_info;
+        // Normalize gap reason
+        const gapReason = (a.any_gap_during_education === 'Yes' || a.any_gap_during_education === 'true') ? a.gap_reason : null;
+
+        const academicQuery = `
+          INSERT INTO student_academic_information (
+            student_id, college_id, prn_number, tenth_percentage, twelfth_or_diploma, diploma_or_12th_percentage,
+            admission_based_on, department, division, "lgName", passout_year,
+            sem1_cgpa, sem1_backlog, sem2_cgpa, sem2_backlog, sem3_cgpa, sem3_backlog,
+            sem4_cgpa, sem4_backlog, sem5_cgpa, sem5_backlog, sem6_cgpa, sem6_backlog,
+            sem7_cgpa, sem7_backlog, sem8_cgpa, sem8_backlog, overall_cgpa, any_live_kt,
+            any_gap_during_education, gap_reason, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+            $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
+            $28, $29, $30, $31, NOW()
+          )
+          ON CONFLICT (student_id) DO UPDATE SET
+            prn_number = EXCLUDED.prn_number, tenth_percentage = EXCLUDED.tenth_percentage,
+            twelfth_or_diploma = EXCLUDED.twelfth_or_diploma, diploma_or_12th_percentage = EXCLUDED.diploma_or_12th_percentage,
+            admission_based_on = EXCLUDED.admission_based_on, department = EXCLUDED.department,
+            division = EXCLUDED.division, "lgName" = EXCLUDED."lgName", passout_year = EXCLUDED.passout_year,
+            sem1_cgpa = EXCLUDED.sem1_cgpa, sem1_backlog = EXCLUDED.sem1_backlog,
+            sem2_cgpa = EXCLUDED.sem2_cgpa, sem2_backlog = EXCLUDED.sem2_backlog,
+            sem3_cgpa = EXCLUDED.sem3_cgpa, sem3_backlog = EXCLUDED.sem3_backlog,
+            sem4_cgpa = EXCLUDED.sem4_cgpa, sem4_backlog = EXCLUDED.sem4_backlog,
+            sem5_cgpa = EXCLUDED.sem5_cgpa, sem5_backlog = EXCLUDED.sem5_backlog,
+            sem6_cgpa = EXCLUDED.sem6_cgpa, sem6_backlog = EXCLUDED.sem6_backlog,
+            sem7_cgpa = EXCLUDED.sem7_cgpa, sem7_backlog = EXCLUDED.sem7_backlog,
+            sem8_cgpa = EXCLUDED.sem8_cgpa, sem8_backlog = EXCLUDED.sem8_backlog,
+            overall_cgpa = EXCLUDED.overall_cgpa, any_live_kt = EXCLUDED.any_live_kt,
+            any_gap_during_education = EXCLUDED.any_gap_during_education, gap_reason = EXCLUDED.gap_reason,
+            updated_at = NOW()
+        `;
+        
+        await client.query(academicQuery, [
+           studentId, collegeId, a.prn_number, a.tenth_percentage, a.twelfth_or_diploma, a.diploma_or_12th_percentage,
+           a.admission_based_on, a.department, a.division, a.lgName, a.passout_year,
+           a.sem1_cgpa, a.sem1_backlog, a.sem2_cgpa, a.sem2_backlog, a.sem3_cgpa, a.sem3_backlog,
+           a.sem4_cgpa, a.sem4_backlog, a.sem5_cgpa, a.sem5_backlog, a.sem6_cgpa, a.sem6_backlog,
+           a.sem7_cgpa, a.sem7_backlog, a.sem8_cgpa, a.sem8_backlog,
+           a.overall_cgpa, a.any_live_kt, a.any_gap_during_education, gapReason
+        ]);
+      }
+
+      // ---------------------------------------------------------
+      // 3. Upsert Skill Links (Info)
+      // ---------------------------------------------------------
+      if (data.skill_links) {
+        const s = data.skill_links;
+        const skillLinksQuery = `
+          INSERT INTO student_skill_information (
+            student_id, college_id, project_title_1, project_link_1, project_description_1,
+            project_title_2, project_link_2, project_description_2, personal_portfolio_link,
+            resume_drive_link, github_link, linkedin_link, instagram_link, twitter_link,
+            leetcode_link, geeksforgeeks_link, codechef_link, hackerrank_link,
+            area_of_interest, about_you, profile_image, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW()
+          )
+          ON CONFLICT (student_id) DO UPDATE SET
+            project_title_1 = EXCLUDED.project_title_1, project_link_1 = EXCLUDED.project_link_1,
+            project_description_1 = EXCLUDED.project_description_1, project_title_2 = EXCLUDED.project_title_2,
+            project_link_2 = EXCLUDED.project_link_2, project_description_2 = EXCLUDED.project_description_2,
+            personal_portfolio_link = EXCLUDED.personal_portfolio_link, resume_drive_link = EXCLUDED.resume_drive_link,
+            github_link = EXCLUDED.github_link, linkedin_link = EXCLUDED.linkedin_link,
+            instagram_link = EXCLUDED.instagram_link, twitter_link = EXCLUDED.twitter_link,
+            leetcode_link = EXCLUDED.leetcode_link, geeksforgeeks_link = EXCLUDED.geeksforgeeks_link,
+            codechef_link = EXCLUDED.codechef_link, hackerrank_link = EXCLUDED.hackerrank_link,
+            area_of_interest = EXCLUDED.area_of_interest, about_you = EXCLUDED.about_you,
+            profile_image = EXCLUDED.profile_image, updated_at = NOW()
+        `;
+        await client.query(skillLinksQuery, [
+            studentId, collegeId, s.project_title_1, s.project_link_1, s.project_description_1,
+            s.project_title_2, s.project_link_2, s.project_description_2, s.personal_portfolio_link,
+            s.resume_drive_link, s.github_link, s.linkedin_link, s.instagram_link, s.twitter_link,
+            s.leetcode_link, s.geeksforgeeks_link, s.codechef_link, s.hackerrank_link,
+            s.area_of_interest, s.about_you, s.profile_image
+        ]);
+      }
+
+      // ---------------------------------------------------------
+      // 4. Upsert Rated Skills
+      // ---------------------------------------------------------
+      if (data.rated_skills && Array.isArray(data.rated_skills)) {
+        // Iterate through skills and upsert each
+        const skillQuery = `
+          INSERT INTO student_skills (student_id, college_id, skill_id, rating, updated_at)
+          VALUES ($1, $2, $3, $4, NOW())
+          ON CONFLICT (student_id, skill_id) 
+          DO UPDATE SET rating = EXCLUDED.rating, updated_at = NOW()
+        `;
+
+        for (const skill of data.rated_skills) {
+          await client.query(skillQuery, [studentId, collegeId, skill.skill_id, skill.rating]);
+        }
+      }
+
+      // ---------------------------------------------------------
+      // 5. Update Profile Completion Status
+      // ---------------------------------------------------------
+      // Check if all tables have data
+      const checkCompletion = `
+        UPDATE students SET profile_complete = (
+          EXISTS(SELECT 1 FROM student_personal_information WHERE student_id = $1) AND
+          EXISTS(SELECT 1 FROM student_academic_information WHERE student_id = $1) AND
+          EXISTS(SELECT 1 FROM student_skill_information WHERE student_id = $1)
+        ), updated_at = NOW()
+        WHERE student_id = $1
+        RETURNING profile_complete
+      `;
+      const completionRes = await client.query(checkCompletion, [studentId]);
+      
+      await client.query('COMMIT');
+      
+      // ---------------------------------------------------------
+      // 6. Fetch Full Data for Response
+      // ---------------------------------------------------------
+      return await this.fetchFullProfile(studentId, collegeId, completionRes.rows[0]?.profile_complete);
+
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
 
   /**
-   * Update student profile (admin/teacher)
-   * 
-   * @param {string} studentId - Student ID
-   * @param {string} collegeId - College ID (for isolation)
-   * @param {Object} data - { student_name, student_department, student_year, student_status }
-   * @returns {Object} Updated student
-   * @throws {Error} If not found or access denied
+   * Helper: Fetch all data and structure strictly as requested
    */
-  async checkAndUpdateProfileCompletion(studentId, collegeId) {
+  async fetchFullProfile(studentId, collegeId, profileCompleteStatus = null) {
     const pool = getMainPool();
 
-    const personal = await pool.query(
-      `SELECT 1 FROM student_personal_information
-       WHERE student_id = $1 AND college_id = $2`,
-      [studentId, collegeId]
-    );
+    // Parallel fetch for speed
+    const [student, personal, academic, skillInfo, ratedSkills] = await Promise.all([
+      pool.query('SELECT * FROM students WHERE student_id = $1 AND college_id = $2', [studentId, collegeId]),
+      pool.query('SELECT * FROM student_personal_information WHERE student_id = $1 AND college_id = $2', [studentId, collegeId]),
+      pool.query('SELECT * FROM student_academic_information WHERE student_id = $1 AND college_id = $2', [studentId, collegeId]),
+      pool.query('SELECT * FROM student_skill_information WHERE student_id = $1 AND college_id = $2', [studentId, collegeId]),
+      pool.query(`
+        SELECT ss.student_skill_id, ss.rating, s.skill_id, s.skill_name 
+        FROM student_skills ss
+        JOIN skills s ON ss.skill_id = s.skill_id
+        WHERE ss.student_id = $1 AND ss.college_id = $2
+      `, [studentId, collegeId])
+    ]);
 
-    const academic = await pool.query(
-      `SELECT 1 FROM student_academic_information
-       WHERE student_id = $1 AND college_id = $2`,
-      [studentId, collegeId]
-    );
+    // Determine completion if not provided
+    let isComplete = profileCompleteStatus;
+    if (isComplete === null && student.rows[0]) {
+      isComplete = student.rows[0].profile_complete;
+    }
 
-    const skills = await pool.query(
-      `SELECT 1 FROM student_skill_information
-       WHERE student_id = $1 AND college_id = $2`,
-      [studentId, collegeId]
-    );
-
-    const missing = [];
-    if (!personal.rows.length) missing.push('personal');
-    if (!academic.rows.length) missing.push('academic');
-    if (!skills.rows.length) missing.push('skills');
-
-    await pool.query(
-      `UPDATE students
-       SET profile_complete = $1, updated_at = NOW()
-       WHERE student_id = $2 AND college_id = $3`,
-      [missing.length === 0, studentId, collegeId]
-    );
-
+    // Structure exact response requested
     return {
-      profile_complete: missing.length === 0,
-      missing
+      student_id: studentId,
+      college_id: collegeId,
+      profile_complete: isComplete || false,
+      profile_Data: {
+        Studentinfo: student.rows[0] || {},
+        "Student_personal_information": personal.rows[0] || {},
+        "student_academic_information": academic.rows[0] || {},
+        "student_skills_information": skillInfo.rows[0] || {},
+        "Student_skills": ratedSkills.rows || []
+      }
     };
   }
 
   /**
-   * ==========================================================================
-   * GET PROFILE STATUS
-   * ==========================================================================
+   * API 2: Add New Master Skill
    */
-  async getProfileStatus(studentId, collegeId) {
-    return this.checkAndUpdateProfileCompletion(studentId, collegeId);
-  }
-
-  /**
-   * ==========================================================================
-   * UPSERT PERSONAL INFORMATION
-   * ==========================================================================
-   */
-  async insertPersonalInfo(studentId, collegeId, data,studentEmail) {
+  async createMasterSkill(skillName) {
     const pool = getMainPool();
-
-    const exists = await pool.query(
-      `SELECT 1 FROM student_personal_information WHERE student_id=$1 AND college_id=$2`,
-      [studentId, collegeId]
-    );
-
-    if (exists.rows.length) {
-      throw new Error('PERSONAL_INFO_ALREADY_FILLED');
-    }
-
-    await pool.query(
-    `
-    INSERT INTO student_personal_information (
-      student_id, college_id,
-      first_name, middle_name, last_name,
-      email, mobile_number, birth_date,
-      gender, aadhaar_number, caste, blood_group,
-      father_name, father_mobile_number, father_occupation,
-      mother_name, mother_mobile_number, mother_occupation,
-      city, district, state, pincode, local_address
-    )
-    VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-      $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
-    )
-    `,
-    [
-      studentId,
-      collegeId,
-      data.first_name,
-      data.middle_name,
-      data.last_name,
-      studentEmail,              // ✅ FROM JWT
-      data.mobile_number,
-      data.birth_date,
-      data.gender,
-      data.aadhaar_number,
-      data.caste,
-      data.blood_group,
-      data.father_name,
-      data.father_mobile_number,
-      data.father_occupation,
-      data.mother_name,
-      data.mother_mobile_number,
-      data.mother_occupation,
-      data.city,
-      data.district,
-      data.state,
-      data.pincode,
-      data.local_address
-    ]
-  );
-    return this.checkAndUpdateProfileCompletion(studentId, collegeId);
-  }
-
-
-  /**
-   * ==========================================================================
-   * INSERT ACADEMIC INFORMATION (ONCE)
-   * ==========================================================================
-   */
-async insertAcademicInfo(studentId, collegeId, data) {
-  const pool = getMainPool();
-  const exists = await pool.query(
-    `SELECT 1 FROM student_academic_information WHERE student_id=$1 AND college_id=$2`,
-    [studentId, collegeId]
-  );
-
-  if (exists.rows.length) {
-    throw new Error('ACADEMIC_INFO_ALREADY_FILLED');
-  }
-
-  // ✅ Normalize gap_reason
-  const gapReason =
-    data.any_gap_during_education === true
-      ? data.gap_reason
-      : null;
-try {
-
-await pool.query(
-  `
-  INSERT INTO student_academic_information (
-    student_id, college_id,
-    prn_number, tenth_percentage,
-    twelfth_or_diploma, diploma_or_12th_percentage,
-    admission_based_on, department, division,
-    passout_year,
-    sem1_cgpa, sem1_backlog,
-    sem2_cgpa, sem2_backlog,
-    sem3_cgpa, sem3_backlog,
-    sem4_cgpa, sem4_backlog,
-    sem5_cgpa, sem5_backlog,
-    sem6_cgpa, sem6_backlog,
-    sem7_cgpa, sem7_backlog,
-    sem8_cgpa, sem8_backlog,
-    overall_cgpa,
-    any_live_kt,
-    any_gap_during_education,
-    gap_reason
-  )
-  VALUES (
-    $1, $2,
-    $3, $4,
-    $5, $6,
-    $7, $8, $9,
-    $10,
-    $11, $12,
-    $13, $14,
-    $15, $16,
-    $17, $18,
-    $19, $20,
-    $21, $22,
-    $23, $24,
-    $25, $26,
-    $27,
-    $28,
-    $29,
-    $30
-  )
-  `,
-  [
-    studentId,
-    collegeId,
-    data.prn_number,
-    data.tenth_percentage,
-    data.twelfth_or_diploma,
-    data.diploma_or_12th_percentage,
-    data.admission_based_on,
-    data.department,
-    data.division,
-    data.passout_year,
-    data.sem1_cgpa, data.sem1_backlog,
-    data.sem2_cgpa, data.sem2_backlog,
-    data.sem3_cgpa, data.sem3_backlog,
-    data.sem4_cgpa, data.sem4_backlog,
-    data.sem5_cgpa, data.sem5_backlog,
-    data.sem6_cgpa, data.sem6_backlog,
-    data.sem7_cgpa, data.sem7_backlog,
-    data.sem8_cgpa, data.sem8_backlog,
-    data.overall_cgpa,
-    data.any_live_kt,
-    data.any_gap_during_education,
-    gapReason
-  ]
-);
-
-} catch (err) {
-  console.error('🔥 ACADEMIC INSERT FAILED 🔥');
-  console.error('PG CODE:', err.code);
-  console.error('PG MESSAGE:', err.message);
-  console.error('DETAIL:', err.detail);
-  console.error('CONSTRAINT:', err.constraint);
-  throw err;
-}
-  return this.checkAndUpdateProfileCompletion(studentId, collegeId);
-}
-  /**
-   * ==========================================================================
-   * INSERT SKILL INFORMATION (ONCE)
-   * ==========================================================================
-   */
-  async insertSkillInfo(studentId, collegeId, data) {
-    const pool = getMainPool();
-
+    
     try {
-      logger.debug(
-        `${LOG.TRANSACTION_PREFIX} Starting skill info insert`,
-        { student_id: studentId, college_id: collegeId }
+      const result = await pool.query(
+        'INSERT INTO skills (skill_name) VALUES ($1) ON CONFLICT (lower(skill_name)) DO NOTHING RETURNING *',
+        [skillName]
       );
 
-      // 1️⃣ Check if skill info already exists
-      const exists = await pool.query(
-        `SELECT 1 FROM student_skill_information
-         WHERE student_id = $1 AND college_id = $2`,
-        [studentId, collegeId]
-      );
-
-      if (exists.rows.length > 0) {
-        logger.warn(
-          `${LOG.TRANSACTION_PREFIX} Skill info already exists`,
-          { student_id: studentId, college_id: collegeId }
-        );
-        throw new Error('SKILL_INFO_ALREADY_FILLED');
+      // If inserted, return new. If conflict (dup), fetch existing.
+      if (result.rows.length > 0) {
+        return result.rows[0];
+      } else {
+        const existing = await pool.query('SELECT * FROM skills WHERE lower(skill_name) = lower($1)', [skillName]);
+        return existing.rows[0];
       }
-
-      // 2️⃣ Insert skill info
-      const insertQuery = `
-        INSERT INTO student_skill_information (
-          student_id, college_id,
-
-          project_title_1, project_link_1, project_description_1,
-          project_title_2, project_link_2, project_description_2,
-
-          personal_portfolio_link,
-          resume_drive_link,
-
-          github_link,
-          linkedin_link,
-          instagram_link,
-          twitter_link,
-
-          leetcode_link,
-          geeksforgeeks_link,
-          codechef_link,
-          hackerrank_link,
-
-          area_of_interest,
-        
-          about_you,
-          profile_image
-        )
-        VALUES (
-          $1,$2,
-          $3,$4,$5,
-          $6,$7,$8,
-          $9,
-          $10,
-          $11,$12,$13,$14,
-          $15,$16,$17,$18,
-          $19,
-          
-          $20,
-          $21
-        )
-      `;
-
-      const values = [
-        studentId,
-        collegeId,
-
-        data.project_title_1 || null,
-        data.project_link_1 || null,
-        data.project_description_1 || null,
-
-        data.project_title_2 || null,
-        data.project_link_2 || null,
-        data.project_description_2 || null,
-
-        data.personal_portfolio_link || null,
-        data.resume_drive_link || null,
-
-        data.github_link || null,
-        data.linkedin_link || null,
-        data.instagram_link || null,
-        data.twitter_link || null,
-
-        data.leetcode_link || null,
-        data.geeksforgeeks_link || null,
-        data.codechef_link || null,
-        data.hackerrank_link || null,
-
-        data.area_of_interest || null,
-     
-        data.about_you,
-        data.profile_image || null
-      ];
-
-      await pool.query(insertQuery, values);
-
-      const result = await this.checkAndUpdateProfileCompletion(studentId, collegeId);
-
-      logger.info(
-        `${LOG.TRANSACTION_PREFIX} Skill info inserted successfully`,
-        { student_id: studentId, college_id: collegeId }
-      );
-
-      return result;
-
     } catch (err) {
-   console.error('🔥 ACADEMIC INSERT FAILED 🔥');
-  console.error('PG CODE:', err.code);
-  console.error('PG MESSAGE:', err.message);
-  console.error('DETAIL:', err.detail);
-  console.error('CONSTRAINT:', err.constraint);
-  throw err;
-
-     
+      throw err;
     }
   }
-
-  // ========================== EDIT PROFILE INFO ==========================
-async updatePersonalInfo(studentId, collegeId, data) {
-  const pool = getMainPool();
-  console.log('fired updatePersonalInfo with data:', data);
-
-    const result = await pool.query(
-      `
-      UPDATE student_personal_information
-      SET
-        first_name = COALESCE($3, first_name),
-        middle_name = COALESCE($4, middle_name),
-        last_name = COALESCE($5, last_name),
-            
-        mobile_number = COALESCE($6, mobile_number),
-        birth_date = COALESCE($7, birth_date),
-        gender = COALESCE($8, gender),
-        caste = COALESCE($9, caste),
-        blood_group = COALESCE($10, blood_group),
-        father_name = COALESCE($11, father_name),
-        father_mobile_number = COALESCE($12, father_mobile_number),
-        mother_name = COALESCE($13, mother_name),
-        mother_mobile_number = COALESCE($14, mother_mobile_number),
-        city = COALESCE($15, city),
-        district = COALESCE($16, district),
-        state = COALESCE($17, state),
-        pincode = COALESCE($18, pincode),
-        local_address = COALESCE($19, local_address),
-        updated_at = NOW()
-      WHERE student_id = $1 AND college_id = $2
-      RETURNING student_id
-      `,
-      [
-        studentId,
-        collegeId,
-        data.first_name,
-        data.middle_name,
-        data.last_name,
-        
-        data.mobile_number,
-        data.birth_date,
-        data.gender,
-        data.caste,
-        data.blood_group,
-        data.father_name,
-        data.father_mobile_number,
-        data.mother_name,
-        data.mother_mobile_number,
-        data.city,
-        data.district,
-        data.state,
-        data.pincode,
-        data.local_address
-      ]
-    );
-
-    if (!result.rows.length) {
-      throw new Error('PERSONAL_INFO_NOT_FOUND');
-    }
-
-    return this.checkAndUpdateProfileCompletion(studentId, collegeId);
-
-  
-}
-
-  // ==========================================================================
-  // EDIT ACADEMIC INFORMATION
-  // ==========================================================================
-
-  async updateAcademicInfo(studentId, collegeId, data) {
-    const pool = getMainPool();
-
-    const gapReason =
-      data.any_gap_during_education === true
-        ? data.gap_reason
-        : null;
-
-    const result = await pool.query(
-      `
-      UPDATE student_academic_information
-      SET
-        prn_number = COALESCE($3, prn_number),
-        tenth_percentage = COALESCE($4, tenth_percentage),
-        twelfth_or_diploma = COALESCE($5, twelfth_or_diploma),
-        diploma_or_12th_percentage = COALESCE($6, diploma_or_12th_percentage),
-        admission_based_on = COALESCE($7, admission_based_on),
-      sem1_cgpa = COALESCE($15, sem1_cgpa), sem1_backlog = COALESCE($16, sem1_backlog), 
-      sem2_cgpa = COALESCE($17, sem2_cgpa), sem2_backlog = COALESCE($18, sem2_backlog),
-      sem3_cgpa = COALESCE($19, sem3_cgpa), sem3_backlog = COALESCE($20, sem3_backlog),
-      sem4_cgpa = COALESCE($21, sem4_cgpa), sem4_backlog = COALESCE($22, sem4_backlog),
-      sem5_cgpa = COALESCE($23, sem5_cgpa), sem5_backlog = COALESCE($24, sem5_backlog),
-      sem6_cgpa = COALESCE($25, sem6_cgpa), sem6_backlog = COALESCE($26, sem6_backlog),
-      sem7_cgpa = COALESCE($27, sem7_cgpa), sem7_backlog = COALESCE($28, sem7_backlog),
-      sem8_cgpa = COALESCE($29, sem8_cgpa), sem8_backlog = COALESCE($30, sem8_backlog),
-        department = COALESCE($8, department),
-        division = COALESCE($9, division),
-        passout_year = COALESCE($10, passout_year),
-        overall_cgpa = COALESCE($11, overall_cgpa),
-        any_live_kt = COALESCE($12, any_live_kt),
-        any_gap_during_education = COALESCE($13, any_gap_during_education),
-        gap_reason = COALESCE($14, gap_reason),
-        updated_at = NOW()
-      WHERE student_id = $1 AND college_id = $2
-      RETURNING student_id
-      `,
-      [
-        studentId,
-        collegeId,
-        data.prn_number,
-        data.tenth_percentage,
-        data.twelfth_or_diploma,
-        data.diploma_or_12th_percentage,
-        data.admission_based_on,
-        data.sem1_cgpa, data.sem1_backlog,
-        data.sem2_cgpa, data.sem2_backlog,
-        data.sem3_cgpa, data.sem3_backlog,
-        data.sem4_cgpa, data.sem4_backlog,
-        data.sem5_cgpa, data.sem5_backlog,
-        data.sem6_cgpa, data.sem6_backlog,
-        data.sem7_cgpa, data.sem7_backlog,
-        data.sem8_cgpa, data.sem8_backlog,
-        data.department,
-        data.division,
-        data.passout_year,
-        data.overall_cgpa,
-        data.any_live_kt,
-        data.any_gap_during_education,
-        gapReason
-      ]
-    );
-
-    if (!result.rows.length) {
-      throw new Error('ACADEMIC_INFO_NOT_FOUND');
-    }
-
-    return this.checkAndUpdateProfileCompletion(studentId, collegeId);
-  }
-
-  // ==========================================================================
-  // EDIT SKILL INFORMATION
-  // ==========================================================================
-  async updateSkillInfo(studentId, collegeId, data) {
-    const pool = getMainPool();
-
-   const result = await pool.query(
-  `
-  UPDATE student_skill_information
-  SET
-    project_title_1 = COALESCE($3, project_title_1),
-    project_link_1 = COALESCE($4, project_link_1),
-    project_description_1 = COALESCE($5, project_description_1),
-
-    project_title_2 = COALESCE($6, project_title_2),
-    project_link_2 = COALESCE($7, project_link_2),
-    project_description_2 = COALESCE($8, project_description_2),
-
-    personal_portfolio_link = COALESCE($9, personal_portfolio_link),
-    resume_drive_link = COALESCE($10, resume_drive_link),
-
-    github_link = COALESCE($11, github_link),
-    linkedin_link = COALESCE($12, linkedin_link),
-    instagram_link = COALESCE($13, instagram_link),
-    twitter_link = COALESCE($14, twitter_link),
-
-    leetcode_link = COALESCE($15, leetcode_link),
-    geeksforgeeks_link = COALESCE($16, geeksforgeeks_link),
-    codechef_link = COALESCE($17, codechef_link),
-    hackerrank_link = COALESCE($18, hackerrank_link),
-
-    area_of_interest = COALESCE($19, area_of_interest),
-    about_you = COALESCE($20, about_you),
-    profile_image = COALESCE($21, profile_image),
-
-    updated_at = NOW()
-  WHERE student_id = $1 AND college_id = $2
-  RETURNING student_id
-  `,
-  [
-    studentId,
-    collegeId,
-    data.project_title_1,
-    data.project_link_1,
-    data.project_description_1,
-    data.project_title_2,
-    data.project_link_2,
-    data.project_description_2,
-    data.personal_portfolio_link,
-    data.resume_drive_link,
-    data.github_link,
-    data.linkedin_link,
-    data.instagram_link,
-    data.twitter_link,
-    data.leetcode_link,
-    data.geeksforgeeks_link,
-    data.codechef_link,
-    data.hackerrank_link,
-    data.area_of_interest,
-    data.about_you,
-    data.profile_image
-  ]
-);
-
-
-    if (!result.rows.length) {
-      throw new Error('SKILL_INFO_NOT_FOUND');
-    }
-
-    return this.checkAndUpdateProfileCompletion(studentId, collegeId);
-  }
-
-  // ==========================================================================
-  // GET PERSONAL INFORMATION
-  // ==========================================================================
-  async getStudentPersonalInfo(studentId, collegeId) {
-    const pool = getMainPool();
-
-    const { rows } = await pool.query(
-      `SELECT * FROM student_personal_information
-       WHERE student_id = $1 AND college_id = $2
-       LIMIT 1`,
-      [studentId, collegeId]
-    );
-
-    if (!rows.length) {
-      throw new Error('PERSONAL_INFO_NOT_FOUND');
-    }
-
-    return rows[0];
-  }
-
-
-async getStudentAcademicInfo(studentId, collegeId) {
-  const pool = getMainPool();
-
-  const { rows } = await pool.query(
-    `
-    SELECT *
-    FROM student_academic_information
-    WHERE student_id = $1 AND college_id = $2
-    LIMIT 1
-    `,
-    [studentId, collegeId]
-  );
-
-  if (!rows.length) {
-    throw new Error('ACADEMIC_INFO_NOT_FOUND');
-  }
-
-  return rows[0];
-}
-async getStudentSkillInfo(studentId, collegeId){
-
-  const pool = getMainPool()
-
-  const {rows} = await pool.query(
-    `
-    SELECT * FROM student_skill_information
-    WHERE student_id = $1 AND college_id = $2
-    LIMIT 1 `,
-    [studentId,collegeId]
-  )
-  if(!rows.length){
-    throw new Error('SKILL_INFO_NOT_FOUND');
-  }
-  return rows[0]
-}
 }
 
 module.exports = new StudentService();

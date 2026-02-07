@@ -28,8 +28,8 @@ const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: false, // Must be FALSE because localhost is HTTP
   sameSite: 'lax', // 'lax' works because the proxy makes it look like the same domain
-  path: '/',  
-  maxAge: 7 * 24 * 60 * 60 * 1000 
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000
 };
 
 /**
@@ -405,593 +405,103 @@ async function updatePassword(req, res) {
     );
   }
 }
-/**
- * GET /api/v1/students/:studentId/profile-status
- * Get student profile completion status (student only)
- */
-async function getProfileStatus(req, res) {
+async function upsertProfile(req, res) {
   const startTime = Date.now();
+  const studentId = req.user.id;
 
-  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile-status`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
+  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/students/profile`, { student_id: studentId });
 
   try {
- 
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    const status = await studentService.getProfileStatus(
+    const fullProfile = await studentService.upsertStudentProfile(
       studentId,
-      collegeId
+      req.user.college_id,
+      req.user.email,
+      req.validated
     );
 
     const duration = Date.now() - startTime;
-
-    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile-status`, {
-      student_id: studentId,
-      college_id: collegeId,
-      duration_ms: duration
-    });
+    logger.info(`${LOG.API_END_PREFIX} POST /api/v1/students/profile`, { student_id: studentId, duration_ms: duration });
 
     return success(
       res,
-      {
-    student_id: studentId,
-    college_id: collegeId,
-    profile_status: status
-  },
+      fullProfile,
+      'Profile status fetched successfully', // Message as per your prompt example
+      HTTP_STATUS.OK
+    );
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    logger.error(`${LOG.API_ERROR_PREFIX} POST /api/v1/students/profile ${err.message}`, { error: err.message, duration_ms: duration });
+    return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  }
+}
+
+/**
+ * API 2: Create Master Skill
+ * Adds a new skill to the global skill list
+ */
+async function createSkill(req, res) {
+  const startTime = Date.now();
+  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/skills`, { user_id: req.user.id });
+
+  try {
+    const skill = await studentService.createMasterSkill(req.validated.skill_name);
+
+    const duration = Date.now() - startTime;
+    logger.info(`${LOG.API_END_PREFIX} POST /api/v1/skills`, { skill_id: skill.skill_id, duration_ms: duration });
+
+    return success(res, skill, 'Skill added successfully', HTTP_STATUS.CREATED);
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    logger.error(`${LOG.API_ERROR_PREFIX} POST /api/v1/skills`, { error: err.message, duration_ms: duration });
+    return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  }
+}
+
+/**
+ * API 3: Get Full Profile (GET) - NEW
+ * Fetches all student data in the exact structure requested
+ */
+async function getProfile(req, res) {
+  const startTime = Date.now();
+  const studentId = req.user.id;
+
+  // Log request (Optional for GET, but good for debugging complex profiles)
+  // logger.debug(`${LOG.API_START_PREFIX} GET /api/v1/students/profile`, { student_id: studentId });
+
+  try {
+    // Call the helper directly
+    const fullProfile = await studentService.fetchFullProfile(
+      studentId,
+      req.user.college_id
+    );
+
+    const duration = Date.now() - startTime;
+    logger.info(`${LOG.API_END_PREFIX} GET /api/v1/students/profile`, { student_id: studentId, duration_ms: duration });
+
+    return success(
+      res,
+      fullProfile,
       'Profile status fetched successfully',
       HTTP_STATUS.OK
     );
 
   } catch (err) {
-    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile-status`, {
-      error: err.message,
-      student_id: req.user?.id,
-      duration_ms: Date.now() - startTime
-    });
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-/**
- * ============================================================================
- * UPSERT PERSONAL INFORMATION (STUDENT SIDE)
- * ============================================================================
- */async function insertPersonalInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} POST /api/students/profile/personal-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    // ✅ Identity always comes from JWT (cookie)
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-    const studentEmail = req.user.email;
-
-    const profileStatus = await studentService.insertPersonalInfo(
-      studentId,
-      collegeId,
-      req.validated,
-        req.user.email 
-    );
-
     const duration = Date.now() - startTime;
+    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/v1/students/profile`, { error: err.message, duration_ms: duration });
 
-    logger.info(`${LOG.API_END_PREFIX} POST /api/students/profile/personal-info`, {
-      student_id: studentId,
-      profile_status: profileStatus,
-      duration_ms: duration
-    });
-
-    return success(
-      res,
-      {
-        student_id: studentId,
-        college_id: collegeId,
-        saved: req.validated,
-        profile_status: profileStatus
-      },
-      'Personal information saved successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    const duration = Date.now() - startTime;
-
-    logger.error(`${LOG.API_ERROR_PREFIX} POST /api/students/profile/personal-info`, {
-      error: err.message,
-      student_id: req.user?.id,
-      duration_ms: duration
-    });
-
-    // Already filled (expected business error)
-    if (err.message.includes('ALREADY')) {
-      return error(res, err.message, HTTP_STATUS.CONFLICT);
-    }
-
-    if (err.message.includes('not found')) {
-      return error(res, ERROR_MESSAGES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
-    }
-
-    if (err.message.includes('inactive')) {
-      return error(res, err.message, HTTP_STATUS.BAD_REQUEST);
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
+    // Handle specific not found case if strictly required, usually returns empty objects
+    return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
   }
 }
-
-/**
- * ============================================================================
- * UPSERT ACADEMIC INFORMATION (STUDENT SIDE)
- * ============================================================================
- */
-async function insertAcademicInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} POST /api/students/profile/academic-info`, {
-    student_id: req.user?.id,
-    target_student_id: req.params.studentId,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    // ✅ EXACTLY 3 arguments
-    const profileStatus = await studentService.insertAcademicInfo(
-      studentId,
-      collegeId,
-      req.validated
-    );
-
-    return success(
-      res,
-      {
-        student_id: studentId,
-        college_id: collegeId,
-        saved: req.validated,
-        profile_status: profileStatus
-      },
-      'Academic information saved successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    const duration = Date.now() - startTime;
-
-    logger.error(`${LOG.API_ERROR_PREFIX}  POST /api/students/profile/academic-info`, {
-      error: err.message,
-      student_id: req.params.studentId,
-      duration_ms: duration
-    });
-
-    if (err.message.includes('not found')) {
-      return error(res, ERROR_MESSAGES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-
-/**
- * ============================================================================
- * UPSERT SKILL INFORMATION (STUDENT SIDE)
- * ============================================================================
- */
-async function insertSkillInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} POST /api/students/profile/skills-info`, {
-    student_id: req.user?.id,
-    target_student_id: req.params.studentId,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    // ✅ EXACTLY 3 arguments
-    const profileStatus = await studentService.insertSkillInfo(
-      studentId,
-      collegeId,
-      req.validated
-    );
-
-    const duration = Date.now() - startTime;
-
-    logger.info(`${LOG.API_END_PREFIX} POST /api/students/profile/skills-info`, {
-      student_id: req.params.studentId,
-      profile_status: profileStatus,
-      duration_ms: duration
-    });
-
-    return success(
-      res,
-      {
-        student_id: studentId,
-        college_id: collegeId,
-        saved: req.validated,
-        profile_status: profileStatus
-      },
-      'Skill information saved successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    const duration = Date.now() - startTime;
-
-    logger.error(`${LOG.API_ERROR_PREFIX} POST /api/students/profile/skills-info`, {
-      error: err.message,
-      student_id: req.params.studentId,
-      duration_ms: duration
-    });
-
-    if (err.message.includes('not found')) {
-      return error(res, ERROR_MESSAGES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-
-async function updatePersonalInfo(req, res) {
-  if (!req.validated || Object.keys(req.validated).length === 0) {
-  return res.status(400).json({
-    success: false,
-    message: 'Request body is missing or invalid'
-  });
-}
-
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/students/profile/update-personal-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    console.log('req.body:', req.body);
-console.log('req.validated:', req.validated);
-
-    const profileStatus =
-      await studentService.updatePersonalInfo(
-        studentId,
-        collegeId,
-        req.validated
-      );
-
-    return success(
-      res,
-      { student_id: studentId, college_id: collegeId,
-        profile_status: profileStatus },
-      'Personal information updated successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-  console.log('ERROR MESSAGE:', err.message);
-  console.log('ERROR STACK:', err.stack);
-
-  return res.status(500).json({
-    success: false,
-    message: err.message
-  });
-}
-
-    
-  }
-
-
-/**
- * PUT /api/v1/students/profile/academic-info
- * Update academic information (student)
- */
-async function updateAcademicInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/students/profile/update-academic-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    const profileStatus =
-      await studentService.updateAcademicInfo(
-        studentId,
-        collegeId,
-        req.validated
-      );
-
-    return success(
-      res,
-      { student_id: studentId, college_id: collegeId,
-        profile_status: profileStatus },
-      'Academic information updated successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    logger.error(`${LOG.API_ERROR_PREFIX} PUT /api/students/profile/update-academic-info`, {
-      error: err.message,
-      student_id: req.user?.id
-    });
-
-    if (err.message.includes('NOT_FOUND')) {
-      return error(res, ERROR_MESSAGES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-
-
-/**
- * PUT /api/v1/students/profile/skills-info
- * Update skill information (student)
- */
-async function updateSkillInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} PUT /api/students/profile/update-skills-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    const profileStatus =
-      await studentService.updateSkillInfo(
-        studentId,
-        collegeId,
-        req.validated
-      );
-
-    return success(
-      res,
-      {student_id: studentId, college_id: collegeId,
-         profile_status: profileStatus },
-      'Skill information updated successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    logger.error(`${LOG.API_ERROR_PREFIX} PUT /api/students/profile/update-skills-info`, {
-      error: err.message,
-      student_id: req.user?.id
-    });
-
-    if (err.message.includes('NOT_FOUND')) {
-      return error(res, ERROR_MESSAGES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-async function getPersonalInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile/student-personal-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    const data = await studentService.getStudentPersonalInfo(
-      studentId,
-      collegeId
-    );
-
-    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile/personal-info`, {
-      student_id: studentId,
-      college_id: collegeId,
-      duration_ms: Date.now() - startTime
-    });
-
-    return success(
-      res,
-      {  student_id: studentId, college_id: collegeId,...data},
-      'Personal info fetched successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile/personal-info`, {
-      error: err.message,
-      student_id: req.user?.id,
-      duration_ms: Date.now() - startTime
-    });
-
-    if (err.message.includes('NOT_FOUND')) {
-      return error(
-        res,
-        'Personal information not found',
-        HTTP_STATUS.NOT_FOUND
-      );
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-
-/**
- * GET /api/v1/students/profile/academic-info
- */
-async function getAcademicInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile/student-academic-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    const data = await studentService.getStudentAcademicInfo(
-      studentId,
-      collegeId
-    );
-
-    const duration = Date.now() - startTime;
-
-    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile/student-academic-info`, {
-      student_id: studentId,
-      college_id: collegeId,
-      duration_ms: duration
-    });
-
-    return success(
-      res,
-      { student_id: studentId, college_id: collegeId,...data },
-      'Academic info fetched successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile/student-academic-info`, {
-      error: err.message,
-      student_id: req.user?.id,
-      duration_ms: Date.now() - startTime
-    });
-
-    if (err.message.includes('NOT_FOUND')) {
-      return error(
-        res,
-        'Academic information not found',
-        HTTP_STATUS.NOT_FOUND
-      );
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-
-/**
- * GET /api/v1/students/profile/skills-info
- */
-async function getSkillInfo(req, res) {
-  const startTime = Date.now();
-
-  logger.info(`${LOG.API_START_PREFIX} GET /api/students/profile/student-skills-info`, {
-    student_id: req.user?.id,
-    ip: req.ip
-  });
-
-  try {
-    const studentId = req.user.id;
-    const collegeId = req.user.college_id;
-
-    const data = await studentService.getStudentSkillInfo(
-      studentId,
-      collegeId
-    );
-
-    const duration = Date.now() - startTime;
-
-    logger.info(`${LOG.API_END_PREFIX} GET /api/students/profile/student-skills-info`, {
-      student_id: studentId,
-      college_id: collegeId,
-      duration_ms: duration
-    });
-
-    return success(
-      res,
-      { student_id: studentId, college_id: collegeId,...data },
-      'Skill info fetched successfully',
-      HTTP_STATUS.OK
-    );
-
-  } catch (err) {
-    logger.error(`${LOG.API_ERROR_PREFIX} GET /api/students/profile/student-skills-info`, {
-      error: err.message,
-      student_id: req.user?.id,
-      duration_ms: Date.now() - startTime
-    });
-
-    if (err.message.includes('NOT_FOUND')) {
-      return error(
-        res,
-        'Skill information not found',
-        HTTP_STATUS.NOT_FOUND
-      );
-    }
-
-    return error(
-      res,
-      ERROR_MESSAGES.SERVER_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
-    );
-  }
-}
-
-
 module.exports = {
   registerStudent,
   bulkRegisterStudents,
   loginStudent,
   logoutStudent,
   updatePassword,
-  getProfileStatus,
-  insertPersonalInfo,
-  insertAcademicInfo,
-  insertSkillInfo,
-  updatePersonalInfo,
-  updateAcademicInfo,
-  updateSkillInfo,
-  getPersonalInfo,
-  getAcademicInfo,
-  getSkillInfo
+  upsertProfile,
+  createSkill,
+  getProfile
 };

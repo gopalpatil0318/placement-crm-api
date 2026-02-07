@@ -178,293 +178,111 @@ const updatePasswordSchema = Joi.object({
     })
 });
 
-/**
- * Update profile schema
- * Validates student profile update request body
- */
-const personalInfoSchema = Joi.object({
-  first_name: Joi.string().required(),
-
-  middle_name: Joi.string().allow('', null),
-
-  last_name: Joi.string().required(),
-
-
-  mobile_number: Joi.string()
-    .regex(/^\d{10}$/)
-    .required(),
-
-  birth_date: Joi.date().iso().required(),
-
-  gender: Joi.string()
-    .valid('Male', 'Female', 'Other')
-    .required(),
-
-aadhaar_number: Joi.string()
-  .pattern(/^\d{12}$/)
-  .optional(),
-
-  caste: Joi.string().optional(),
-
-  blood_group: Joi.string()
-    .valid('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-')
-    .optional(),
-
-  father_name: Joi.string().optional(),
-
-  father_mobile_number: Joi.string()
-    .regex(/^\d{10}$/)
-    .optional(),
-
-  father_occupation: Joi.string().optional(),
-
-  mother_name: Joi.string().optional(),
-
-  mother_mobile_number: Joi.string()
-    .regex(/^\d{10}$/)
-    .optional(),
-
-  mother_occupation: Joi.string().optional(),
-
-  city: Joi.string().required(),
-
-  district: Joi.string().optional(),
-
-  state: Joi.string().required(),
-
-  pincode: Joi.string()
-    .pattern(/^\d{6}$/)
-    .required(),
-
-  local_address: Joi.string().required()
-}).required();
-
-
-const academicInfoSchema = Joi.object({
-  prn_number: Joi.string().required(),
-
-  tenth_percentage: Joi.number().min(0).max(100).required(),
-
-  twelfth_or_diploma: Joi.string()
-    .valid('12th', 'Diploma')
-    .required(),
-
-  diploma_or_12th_percentage: Joi.number().min(0).max(100).required(),
-
-  admission_based_on: Joi.string().optional(),
-
-  department: Joi.string().required(),
-  division: Joi.string().required(),
-    lgName: Joi.string().required(),
-  passout_year: Joi.number().integer().min(2000).max(2100).required(),
-
-  sem1_sgpa: Joi.number().min(0).max(10).optional(),
-  sem1_cgpa: Joi.number().min(0).max(10).optional(),
-  sem1_backlog: Joi.number().optional(),
-
-  sem2_sgpa: Joi.number().min(0).max(10).optional(),
-  sem2_cgpa: Joi.number().min(0).max(10).optional(),
-  sem2_backlog: Joi.number().optional(),
-
-  sem3_sgpa: Joi.number().min(0).max(10).optional(),
-  sem3_cgpa: Joi.number().min(0).max(10).optional(),
-  sem3_backlog: Joi.number().optional(),
-
-  sem4_sgpa: Joi.number().min(0).max(10).optional(),
-  sem4_cgpa: Joi.number().min(0).max(10).optional(),
-  sem4_backlog: Joi.number().optional(),
-
-  sem5_sgpa: Joi.number().min(0).max(10).optional(),
-  sem5_cgpa: Joi.number().min(0).max(10).optional(),
-  sem5_backlog: Joi.number().optional(),
-
-  sem6_sgpa: Joi.number().min(0).max(10).optional(),
-  sem6_cgpa: Joi.number().min(0).max(10).optional(),
-  sem6_backlog: Joi.number().optional(),
-
-  sem7_sgpa: Joi.number().min(0).max(10).optional(),
-  sem7_cgpa: Joi.number().min(0).max(10).optional(),
-  sem7_backlog: Joi.number().optional(),
-  
-  sem8_sgpa: Joi.number().min(0).max(10).optional(),
-  sem8_cgpa: Joi.number().min(0).max(10).optional(),
-  sem8_backlog: Joi.number().optional(),
-  
-  overall_cgpa: Joi.number().min(0).max(10).optional(),
-
-  any_live_kt: Joi.number().optional(),
-
-  any_gap_during_education: Joi.string().required(),
-
-  gap_reason: Joi.when('any_gap_during_education', {
-  is: true,
-  then: Joi.string().min(3).required(),
-  otherwise: Joi.string()
-    .allow(null)
-    .empty('')
-    .optional()
-})
-
-}).required();
-
-const skillInfoSchema = Joi.object({
-  project_title_1: Joi.string().optional(),
-  project_link_1: Joi.string().uri().optional(),
-  project_description_1: Joi.string().optional(),
-
-  project_title_2: Joi.string().optional(),
-  project_link_2: Joi.string().uri().optional(),
-  project_description_2: Joi.string().optional(),
-
-  personal_portfolio_link: Joi.string().uri().optional(),
-
-  resume_drive_link: Joi.string().uri().optional(),
-
-  github_link: Joi.string().uri().optional(),
-  linkedin_link: Joi.string().uri().optional(),
-  instagram_link: Joi.string().uri().optional(),
-  twitter_link: Joi.string().uri().optional(),
-
-  leetcode_link: Joi.string().uri().optional(),
-  geeksforgeeks_link: Joi.string().uri().optional(),
-  codechef_link: Joi.string().uri().optional(),
-  hackerrank_link: Joi.string().uri().optional(),
-
-  area_of_interest: Joi.string().optional(),
-
-  about_you: Joi.string().required(),
-
-  profile_image: Joi.string().uri().optional()
-}).required();
-
-
-const updatePersonalInfoSchema = Joi.object({
-  first_name: Joi.string().optional(),
-  middle_name: Joi.string().optional().allow(null, ''),
-  last_name: Joi.string().optional(),
-
-  mobile_number: Joi.string().length(10).optional(),
-  birth_date: Joi.date().iso().optional(),
-  gender: Joi.string().valid('Male', 'Female', 'Other').optional(),
-
-  aadhaar_number: Joi.string().length(12).optional(),
-  caste: Joi.string().optional(),
-  blood_group: Joi.string().optional(),
-
-  father_name: Joi.string().optional(),
-  father_mobile_number: Joi.string().length(10).optional(),
-  father_occupation: Joi.string().optional(),
-
-  mother_name: Joi.string().optional(),
-  mother_mobile_number: Joi.string().length(10).optional(),
-  mother_occupation: Joi.string().optional(),
-
-  city: Joi.string().optional(),
-  district: Joi.string().optional(),
-  state: Joi.string().optional(),
-  pincode: Joi.string().length(6).optional(),
-  local_address: Joi.string().optional()
-})
-.min(1); 
-
-
-const updateAcademicInfoSchema = Joi.object({
-  prn_number: Joi.string().optional(),
-
-  tenth_percentage: Joi.number().min(0).max(100).optional(),
-
-  twelfth_or_diploma: Joi.string()
-    .valid('12th', 'Diploma')
-    .optional(),
-
-  diploma_or_12th_percentage: Joi.number().min(0).max(100).optional(),
-
-  admission_based_on: Joi.string().optional(),
-
-  department: Joi.string().optional(),
-  division: Joi.string().optional(),
-  lgName: Joi.string().optional(),
-  passout_year: Joi.number().integer().min(2000).max(2100).optional(),
-
-  sem1_cgpa: Joi.number().min(0).max(10).optional(),
-  sem1_backlog: Joi.number().optional(),
-
-  sem2_cgpa: Joi.number().min(0).max(10).optional(),
-  sem2_backlog: Joi.number().optional(),
-
-  sem3_cgpa: Joi.number().min(0).max(10).optional(),
-  sem3_backlog: Joi.number().optional(),
-
-  sem4_cgpa: Joi.number().min(0).max(10).optional(),
-  sem4_backlog: Joi.number().optional(),
-
-  sem5_cgpa: Joi.number().min(0).max(10).optional(),
-  sem5_backlog: Joi.number().optional(),
-
-  sem6_cgpa: Joi.number().min(0).max(10).optional(),
-  sem6_backlog: Joi.number().optional(),
-
-  sem7_cgpa: Joi.number().min(0).max(10).optional(),
-  sem7_backlog: Joi.number().optional(),
-
-  sem8_cgpa: Joi.number().min(0).max(10).optional(),
-  sem8_backlog: Joi.number().optional(),
-
-  overall_cgpa: Joi.number().min(0).max(10).optional(),
-
-  any_live_kt: Joi.number().optional(),
-
-  any_gap_during_education: Joi.string().optional(),
-
-  gap_reason: Joi.when('any_gap_during_education', {
-    is: true,
-    then: Joi.string().min(3).required(),
-    otherwise: Joi.string().allow(null).empty('').optional()
-  })
-})
-.min(1); 
-
-
-const updateSkillInfoSchema = Joi.object({
-  project_title_1: Joi.string().optional(),
-  project_link_1: Joi.string().uri().optional(),
-  project_description_1: Joi.string().optional(),
-
-  project_title_2: Joi.string().optional(),
-  project_link_2: Joi.string().uri().optional(),
-  project_description_2: Joi.string().optional(),
-
-  personal_portfolio_link: Joi.string().uri().optional(),
-
-  resume_drive_link: Joi.string().uri().optional(),
-
-  github_link: Joi.string().uri().optional(),
-  linkedin_link: Joi.string().uri().optional(),
-  instagram_link: Joi.string().uri().optional(),
-  twitter_link: Joi.string().uri().optional(),
-
-  leetcode_link: Joi.string().uri().optional(),
-  geeksforgeeks_link: Joi.string().uri().optional(),
-  codechef_link: Joi.string().uri().optional(),
-  hackerrank_link: Joi.string().uri().optional(),
-
-  area_of_interest: Joi.string().optional(),
-
-  about_you: Joi.string().optional(),
-
-  profile_image: Joi.string().uri().optional()
-})
-.min(1); 
-
+// Master Schema for Profile Upsert (All sections optional)
+const upsertProfileSchema = Joi.object({
+  // 1. Personal Information
+  personal_info: Joi.object({
+    first_name: Joi.string().required(),
+    middle_name: Joi.string().allow('', null).optional(),
+    last_name: Joi.string().required(),
+    mobile_number: Joi.string().pattern(/^\d{10}$/).required(),
+    birth_date: Joi.date().iso().required(),
+    gender: Joi.string().valid('Male', 'Female', 'Other').required(),
+    aadhaar_number: Joi.string().pattern(/^\d{12}$/).optional(),
+    caste: Joi.string().optional(),
+    blood_group: Joi.string().valid('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-').optional(),
+    father_name: Joi.string().optional(),
+    father_mobile_number: Joi.string().pattern(/^\d{10}$/).optional(),
+    father_occupation: Joi.string().optional(),
+    mother_name: Joi.string().optional(),
+    mother_mobile_number: Joi.string().pattern(/^\d{10}$/).optional(),
+    mother_occupation: Joi.string().optional(),
+    city: Joi.string().required(),
+    district: Joi.string().optional(),
+    state: Joi.string().required(),
+    pincode: Joi.string().pattern(/^\d{6}$/).required(),
+    local_address: Joi.string().required()
+  }).optional(),
+
+  // 2. Academic Information
+  academic_info: Joi.object({
+    prn_number: Joi.string().required(),
+    tenth_percentage: Joi.number().min(0).max(100).required(),
+    twelfth_or_diploma: Joi.string().valid('12th', 'Diploma').required(),
+    diploma_or_12th_percentage: Joi.number().min(0).max(100).required(),
+    admission_based_on: Joi.string().optional(),
+    department: Joi.string().required(),
+    division: Joi.string().required(),
+    lgName: Joi.string().optional(),
+    passout_year: Joi.number().integer().min(2000).max(2100).required(),
+    // Semester data
+    sem1_cgpa: Joi.number().min(0).max(10).optional(),
+    sem1_backlog: Joi.number().integer().min(0).optional(),
+    sem2_cgpa: Joi.number().min(0).max(10).optional(),
+    sem2_backlog: Joi.number().integer().min(0).optional(),
+    sem3_cgpa: Joi.number().min(0).max(10).optional(),
+    sem3_backlog: Joi.number().integer().min(0).optional(),
+    sem4_cgpa: Joi.number().min(0).max(10).optional(),
+    sem4_backlog: Joi.number().integer().min(0).optional(),
+    sem5_cgpa: Joi.number().min(0).max(10).optional(),
+    sem5_backlog: Joi.number().integer().min(0).optional(),
+    sem6_cgpa: Joi.number().min(0).max(10).optional(),
+    sem6_backlog: Joi.number().integer().min(0).optional(),
+    sem7_cgpa: Joi.number().min(0).max(10).optional(),
+    sem7_backlog: Joi.number().integer().min(0).optional(),
+    sem8_cgpa: Joi.number().min(0).max(10).optional(),
+    sem8_backlog: Joi.number().integer().min(0).optional(),
+    
+    overall_cgpa: Joi.number().min(0).max(10).optional(),
+    any_live_kt: Joi.number().integer().min(0).optional(),
+    any_gap_during_education: Joi.string().required(),
+    gap_reason: Joi.when('any_gap_during_education', {
+        is: Joi.valid('Yes', 'true', 'True'),
+        then: Joi.string().required(),
+        otherwise: Joi.string().allow(null, '').optional()
+    })
+  }).optional(),
+
+  // 3. Skill Links (Portfolio, Socials, etc)
+  skill_links: Joi.object({
+    project_title_1: Joi.string().optional(),
+    project_link_1: Joi.string().uri().optional(),
+    project_description_1: Joi.string().optional(),
+    project_title_2: Joi.string().optional(),
+    project_link_2: Joi.string().uri().optional(),
+    project_description_2: Joi.string().optional(),
+    personal_portfolio_link: Joi.string().uri().optional(),
+    resume_drive_link: Joi.string().uri().optional(),
+    github_link: Joi.string().uri().optional(),
+    linkedin_link: Joi.string().uri().optional(),
+    instagram_link: Joi.string().uri().optional(),
+    twitter_link: Joi.string().uri().optional(),
+    leetcode_link: Joi.string().uri().optional(),
+    geeksforgeeks_link: Joi.string().uri().optional(),
+    codechef_link: Joi.string().uri().optional(),
+    hackerrank_link: Joi.string().uri().optional(),
+    area_of_interest: Joi.string().optional(),
+    about_you: Joi.string().required(),
+    profile_image: Joi.string().uri().optional()
+  }).optional(),
+
+  // 4. Rated Skills (Array of mappings)
+  rated_skills: Joi.array().items(
+    Joi.object({
+      skill_id: Joi.string().uuid().required(),
+      rating: Joi.number().integer().min(1).max(5).required() // Schema constraint is 5
+    })
+  ).optional()
+});
+// Schema for adding a new Master Skill
+const createMasterSkillSchema = Joi.object({
+  skill_name: Joi.string().min(2).max(100).required()
+});
 module.exports = {
   registerStudentSchema,
   bulkRegisterStudentsSchema,
   loginStudentSchema,
   updatePasswordSchema,
-  personalInfoSchema,
-  academicInfoSchema,
-  skillInfoSchema,
-  updatePersonalInfoSchema,
-  updateAcademicInfoSchema,
-  updateSkillInfoSchema
+  upsertProfileSchema,
+  createMasterSkillSchema
 };

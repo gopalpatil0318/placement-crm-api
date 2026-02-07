@@ -24,12 +24,9 @@ const {
   bulkRegisterStudentsSchema,
   loginStudentSchema,
   updatePasswordSchema,
-  personalInfoSchema,
-  academicInfoSchema,
-  skillInfoSchema,
-  updatePersonalInfoSchema,
-  updateAcademicInfoSchema,
-  updateSkillInfoSchema
+  upsertProfileSchema,
+  createMasterSkillSchema
+
 } = require('../validators/studentValidator');
 
 const { ROLES } = require('../config/constants');
@@ -92,102 +89,36 @@ router.put(
   studentController.updatePassword
 );
 
-/**
- * GET /api/v1/students/profile-status
- * Get student profile completion status (student only)
- */
-router.get(
-  '/profile-status',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  studentController.getProfileStatus
-);
+// API 1: Upsert Profile (Insert/Update All Info)
+// This endpoint takes the big JSON body and returns the full profile tree
 router.post(
-  '/profile/personal-info',
+  '/create_or_update_profile',
   authMiddleware,
   requireRole(ROLES.STUDENT),
-  
   apiLimiter,
-  validate(personalInfoSchema),
-  studentController.insertPersonalInfo
+  validate(upsertProfileSchema),
+  studentController.upsertProfile
 );
 
+// API 2: Add New Master Skill
+// This endpoint allows adding a skill to the global list if it doesn't exist
 router.post(
-  '/profile/academic-info',
+  '/create_skills',
   authMiddleware,
-  requireRole(ROLES.STUDENT),
+  requireRole(ROLES.STUDENT, ROLES.COLLEGEADMIN, ROLES.SYSADMIN),
   apiLimiter,
-  validate(academicInfoSchema),
-  studentController.insertAcademicInfo
+  validate(createMasterSkillSchema),
+  studentController.createSkill
 );
 
-router.post(
-  '/profile/skills-info',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  apiLimiter,
-  validate(skillInfoSchema),
-  studentController.insertSkillInfo
-);
 
-/**
- * PUT /api/v1/students/profile/update-personal-info
- * Update personal information (student)
- */
-router.put(
-  '/profile/update-personal-info',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  apiLimiter,
-  validate(updatePersonalInfoSchema),
-  studentController.updatePersonalInfo
-);
-
-/**
- * PUT /api/v1/students/profile/update-academic-info
- * Update academic information (student)
- */
-router.put(
-  '/profile/update-academic-info',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  apiLimiter,
-  validate(updateAcademicInfoSchema),
-  studentController.updateAcademicInfo
-);
-
-/**
- * PUT /api/v1/students/profile/update-skills-info
- * Update skill information (student)
- */
-router.put(
-  '/profile/update-skills-info',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  apiLimiter,
-  validate(updateSkillInfoSchema),
-  studentController.updateSkillInfo
-);
-
+// API 3: Get Full Profile (GET)
+// Fetches all data: Personal, Academic, Skill Links, Rated Skills
 router.get(
-  '/profile/student-personal-info',
+  '/profile',
   authMiddleware,
   requireRole(ROLES.STUDENT),
-  studentController.getPersonalInfo
-)
-
-router.get(
-  '/profile/student-academic-info',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  studentController.getAcademicInfo
-)
-
-router.get(
-  '/profile/student-skill-info',
-  authMiddleware,
-  requireRole(ROLES.STUDENT),
-  studentController.getSkillInfo
-)
-
+  // No rate limiter for GET usually, or use a looser readLimiter if you had one
+  studentController.getProfile
+);
 module.exports = router;
