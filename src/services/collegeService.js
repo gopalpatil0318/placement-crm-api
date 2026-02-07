@@ -138,7 +138,7 @@ class CollegeService {
         admin_name || 'Admin',
         admin_email,
         hashedPassword,
-        ROLES.ADMIN,
+        ROLES.COLLEGEADMIN,
         STATUS.ACTIVE
       ]);
 
@@ -180,7 +180,7 @@ class CollegeService {
       await client.query('ROLLBACK');
 
       logger.error(
-        `${LOG.TRANSACTION_PREFIX} College creation failed - rolled back`,
+        `${LOG.TRANSACTION_PREFIX} College creation failed - rolled back ${err.message}`,
         {
           error: err.message,
           code: err.code

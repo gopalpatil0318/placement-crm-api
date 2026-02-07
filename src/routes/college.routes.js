@@ -104,7 +104,7 @@ router.put(
 router.put(
   '/colleges/forgot-password',
   authMiddleware,
-  requireRole(ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   validate(forgotPasswordSchema),
   collegeController.forgotCollegeAdminPassword
