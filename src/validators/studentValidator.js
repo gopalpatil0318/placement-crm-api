@@ -178,7 +178,6 @@ const updatePasswordSchema = Joi.object({
     })
 });
 
-// Master Schema for Profile Upsert (All sections optional)
 const upsertProfileSchema = Joi.object({
   // 1. Personal Information
   personal_info: Joi.object({
@@ -215,23 +214,46 @@ const upsertProfileSchema = Joi.object({
     division: Joi.string().required(),
     lgName: Joi.string().optional(),
     passout_year: Joi.number().integer().min(2000).max(2100).required(),
-    // Semester data
-    sem1_cgpa: Joi.number().min(0).max(10).optional(),
-    sem1_backlog: Joi.number().integer().min(0).optional(),
-    sem2_cgpa: Joi.number().min(0).max(10).optional(),
-    sem2_backlog: Joi.number().integer().min(0).optional(),
-    sem3_cgpa: Joi.number().min(0).max(10).optional(),
-    sem3_backlog: Joi.number().integer().min(0).optional(),
-    sem4_cgpa: Joi.number().min(0).max(10).optional(),
-    sem4_backlog: Joi.number().integer().min(0).optional(),
-    sem5_cgpa: Joi.number().min(0).max(10).optional(),
-    sem5_backlog: Joi.number().integer().min(0).optional(),
-    sem6_cgpa: Joi.number().min(0).max(10).optional(),
-    sem6_backlog: Joi.number().integer().min(0).optional(),
-    sem7_cgpa: Joi.number().min(0).max(10).optional(),
-    sem7_backlog: Joi.number().integer().min(0).optional(),
-    sem8_cgpa: Joi.number().min(0).max(10).optional(),
-    sem8_backlog: Joi.number().integer().min(0).optional(),
+    
+    // Semester 1
+    sem1_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem1_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem1_backlog: Joi.number().integer().min(0).default(0).optional(),
+    
+    // Semester 2
+    sem2_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem2_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem2_backlog: Joi.number().integer().min(0).default(0).optional(),
+
+    // Semester 3
+    sem3_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem3_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem3_backlog: Joi.number().integer().min(0).default(0).optional(),
+
+    // Semester 4
+    sem4_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem4_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem4_backlog: Joi.number().integer().min(0).default(0).optional(),
+
+    // Semester 5
+    sem5_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem5_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem5_backlog: Joi.number().integer().min(0).default(0).optional(),
+
+    // Semester 6
+    sem6_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem6_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem6_backlog: Joi.number().integer().min(0).default(0).optional(),
+
+    // Semester 7
+    sem7_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem7_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem7_backlog: Joi.number().integer().min(0).default(0).optional(),
+
+    // Semester 8
+    sem8_cgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem8_sgpa: Joi.number().min(0).max(10).allow(null).optional(),
+    sem8_backlog: Joi.number().integer().min(0).default(0).optional(),
     
     overall_cgpa: Joi.number().min(0).max(10).optional(),
     any_live_kt: Joi.number().integer().min(0).optional(),

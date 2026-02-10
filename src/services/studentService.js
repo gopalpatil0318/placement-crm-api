@@ -556,14 +556,14 @@ class StudentService {
    * API 1: Upsert Profile & Return Full Data
    * Handles Personal, Academic, Skill Links, and Rated Skills
    */
-  async upsertStudentProfile(studentId, collegeId, email, data) {
+async upsertStudentProfile(studentId, collegeId, email, data) {
     const pool = getMainPool();
     const client = await pool.connect();
 
     try {
       await client.query('BEGIN'); // Start Transaction
 
-      logger.debug(`${LOG.TRANSACTION_PREFIX} Start Upsert Profile`, { student_id: studentId });
+      // logger.debug(`${LOG.TRANSACTION_PREFIX} Start Upsert Profile`, { student_id: studentId });
 
       // ---------------------------------------------------------
       // 1. Upsert Personal Info
@@ -590,15 +590,15 @@ class StudentService {
             pincode = EXCLUDED.pincode, local_address = EXCLUDED.local_address, updated_at = NOW()
         `;
         await client.query(personalQuery, [
-            studentId, collegeId, p.first_name, p.middle_name, p.last_name, email, p.mobile_number,
-            p.birth_date, p.gender, p.aadhaar_number, p.caste, p.blood_group, p.father_name,
-            p.father_mobile_number, p.father_occupation, p.mother_name, p.mother_mobile_number,
-            p.mother_occupation, p.city, p.district, p.state, p.pincode, p.local_address
+          studentId, collegeId, p.first_name, p.middle_name, p.last_name, email, p.mobile_number,
+          p.birth_date, p.gender, p.aadhaar_number, p.caste, p.blood_group, p.father_name,
+          p.father_mobile_number, p.father_occupation, p.mother_name, p.mother_mobile_number,
+          p.mother_occupation, p.city, p.district, p.state, p.pincode, p.local_address
         ]);
       }
 
       // ---------------------------------------------------------
-      // 2. Upsert Academic Info
+      // 2. Upsert Academic Info (FIXED: Added SGPA & Backlogs for all sem)
       // ---------------------------------------------------------
       if (data.academic_info) {
         const a = data.academic_info;
@@ -609,28 +609,36 @@ class StudentService {
           INSERT INTO student_academic_information (
             student_id, college_id, prn_number, tenth_percentage, twelfth_or_diploma, diploma_or_12th_percentage,
             admission_based_on, department, division, "lgName", passout_year,
-            sem1_cgpa, sem1_backlog, sem2_cgpa, sem2_backlog, sem3_cgpa, sem3_backlog,
-            sem4_cgpa, sem4_backlog, sem5_cgpa, sem5_backlog, sem6_cgpa, sem6_backlog,
-            sem7_cgpa, sem7_backlog, sem8_cgpa, sem8_backlog, overall_cgpa, any_live_kt,
+            sem1_cgpa, sem1_sgpa, sem1_backlog,
+            sem2_cgpa, sem2_sgpa, sem2_backlog,
+            sem3_cgpa, sem3_sgpa, sem3_backlog,
+            sem4_cgpa, sem4_sgpa, sem4_backlog,
+            sem5_cgpa, sem5_sgpa, sem5_backlog,
+            sem6_cgpa, sem6_sgpa, sem6_backlog,
+            sem7_cgpa, sem7_sgpa, sem7_backlog,
+            sem8_cgpa, sem8_sgpa, sem8_backlog,
+            overall_cgpa, any_live_kt,
             any_gap_during_education, gap_reason, updated_at
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-            $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
-            $28, $29, $30, $31, NOW()
+            $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35,
+            $36, $37, $38, $39, NOW()
           )
           ON CONFLICT (student_id) DO UPDATE SET
             prn_number = EXCLUDED.prn_number, tenth_percentage = EXCLUDED.tenth_percentage,
             twelfth_or_diploma = EXCLUDED.twelfth_or_diploma, diploma_or_12th_percentage = EXCLUDED.diploma_or_12th_percentage,
             admission_based_on = EXCLUDED.admission_based_on, department = EXCLUDED.department,
             division = EXCLUDED.division, "lgName" = EXCLUDED."lgName", passout_year = EXCLUDED.passout_year,
-            sem1_cgpa = EXCLUDED.sem1_cgpa, sem1_backlog = EXCLUDED.sem1_backlog,
-            sem2_cgpa = EXCLUDED.sem2_cgpa, sem2_backlog = EXCLUDED.sem2_backlog,
-            sem3_cgpa = EXCLUDED.sem3_cgpa, sem3_backlog = EXCLUDED.sem3_backlog,
-            sem4_cgpa = EXCLUDED.sem4_cgpa, sem4_backlog = EXCLUDED.sem4_backlog,
-            sem5_cgpa = EXCLUDED.sem5_cgpa, sem5_backlog = EXCLUDED.sem5_backlog,
-            sem6_cgpa = EXCLUDED.sem6_cgpa, sem6_backlog = EXCLUDED.sem6_backlog,
-            sem7_cgpa = EXCLUDED.sem7_cgpa, sem7_backlog = EXCLUDED.sem7_backlog,
-            sem8_cgpa = EXCLUDED.sem8_cgpa, sem8_backlog = EXCLUDED.sem8_backlog,
+            
+            sem1_cgpa = EXCLUDED.sem1_cgpa, sem1_sgpa = EXCLUDED.sem1_sgpa, sem1_backlog = EXCLUDED.sem1_backlog,
+            sem2_cgpa = EXCLUDED.sem2_cgpa, sem2_sgpa = EXCLUDED.sem2_sgpa, sem2_backlog = EXCLUDED.sem2_backlog,
+            sem3_cgpa = EXCLUDED.sem3_cgpa, sem3_sgpa = EXCLUDED.sem3_sgpa, sem3_backlog = EXCLUDED.sem3_backlog,
+            sem4_cgpa = EXCLUDED.sem4_cgpa, sem4_sgpa = EXCLUDED.sem4_sgpa, sem4_backlog = EXCLUDED.sem4_backlog,
+            sem5_cgpa = EXCLUDED.sem5_cgpa, sem5_sgpa = EXCLUDED.sem5_sgpa, sem5_backlog = EXCLUDED.sem5_backlog,
+            sem6_cgpa = EXCLUDED.sem6_cgpa, sem6_sgpa = EXCLUDED.sem6_sgpa, sem6_backlog = EXCLUDED.sem6_backlog,
+            sem7_cgpa = EXCLUDED.sem7_cgpa, sem7_sgpa = EXCLUDED.sem7_sgpa, sem7_backlog = EXCLUDED.sem7_backlog,
+            sem8_cgpa = EXCLUDED.sem8_cgpa, sem8_sgpa = EXCLUDED.sem8_sgpa, sem8_backlog = EXCLUDED.sem8_backlog,
+            
             overall_cgpa = EXCLUDED.overall_cgpa, any_live_kt = EXCLUDED.any_live_kt,
             any_gap_during_education = EXCLUDED.any_gap_during_education, gap_reason = EXCLUDED.gap_reason,
             updated_at = NOW()
@@ -639,9 +647,14 @@ class StudentService {
         await client.query(academicQuery, [
            studentId, collegeId, a.prn_number, a.tenth_percentage, a.twelfth_or_diploma, a.diploma_or_12th_percentage,
            a.admission_based_on, a.department, a.division, a.lgName, a.passout_year,
-           a.sem1_cgpa, a.sem1_backlog, a.sem2_cgpa, a.sem2_backlog, a.sem3_cgpa, a.sem3_backlog,
-           a.sem4_cgpa, a.sem4_backlog, a.sem5_cgpa, a.sem5_backlog, a.sem6_cgpa, a.sem6_backlog,
-           a.sem7_cgpa, a.sem7_backlog, a.sem8_cgpa, a.sem8_backlog,
+           a.sem1_cgpa, a.sem1_sgpa, a.sem1_backlog,
+           a.sem2_cgpa, a.sem2_sgpa, a.sem2_backlog,
+           a.sem3_cgpa, a.sem3_sgpa, a.sem3_backlog,
+           a.sem4_cgpa, a.sem4_sgpa, a.sem4_backlog,
+           a.sem5_cgpa, a.sem5_sgpa, a.sem5_backlog,
+           a.sem6_cgpa, a.sem6_sgpa, a.sem6_backlog,
+           a.sem7_cgpa, a.sem7_sgpa, a.sem7_backlog,
+           a.sem8_cgpa, a.sem8_sgpa, a.sem8_backlog,
            a.overall_cgpa, a.any_live_kt, a.any_gap_during_education, gapReason
         ]);
       }
