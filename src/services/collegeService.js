@@ -226,7 +226,7 @@ class CollegeService {
         AND college_id = $2
         AND user_role = $3
         AND user_status = $4`,
-        [userId, collegeId, ROLES.SYSADMIN, STATUS.ACTIVE]
+        [userId, collegeId, ROLES.COLLEGEADMIN, STATUS.ACTIVE]
       );
 
       if (!userCheck.rows.length) {
