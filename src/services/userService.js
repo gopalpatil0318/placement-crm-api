@@ -561,6 +561,72 @@ class UserService {
       client.release();
     }
   }
-}
 
+
+/**
+ * Toggle user status (ACTIVE <-> INACTIVE)
+ *
+ * @param {string} userId
+ * @param {string} collegeId
+ * @param {string} newStatus
+ */
+
+async toggleStatus(userId, collegeId, newStatus){
+  console.log('Toggling user status', { userId, collegeId, newStatus });
+  const mainPool = getMainPool();
+  const client = await mainPool.connect();
+  try{
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Starting status toggle`, {
+      user_id: userId,
+      college_id: collegeId,
+      new_status: newStatus
+    });
+
+    await client.query('BEGIN')
+const check = await client.query(
+      `SELECT user_id FROM users
+       WHERE user_id = $1
+       AND college_id = $2
+       LIMIT 1`,
+      [userId, collegeId]
+    );
+
+    if (!check.rows.length) {
+      await client.query('ROLLBACK');
+      throw new Error('User not found');
+    }
+
+    const result = await client.query(
+      `UPDATE users
+       SET user_status = $1,
+           updated_at = NOW()
+       WHERE user_id = $2
+       AND college_id = $3
+       RETURNING user_id, user_name, user_email, user_status`,
+      [newStatus, userId, collegeId]
+    );
+
+    await client.query('COMMIT');
+
+    logger.info(`${LOG.TRANSACTION_PREFIX} Status toggled`, {
+      user_id: userId,
+      new_status: newStatus
+    });
+
+    return result.rows[0];
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.log(err)
+    logger.error(`${LOG.TRANSACTION_PREFIX} Toggle failed`, {
+      error: err.message,
+      user_id: userId
+    });
+
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+}
 module.exports = new UserService();

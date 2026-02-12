@@ -21,7 +21,8 @@ const { apiLimiter } = require('../config/rateLimiter');
 const {
   createUserSchema,
   updateUserSchema,
-  listUserSchema
+  listUserSchema,
+  toggleUserStatusSchema
 } = require('../validators/userValidator');
 
 const { ROLES } = require('../config/constants');
@@ -85,6 +86,13 @@ router.delete(
   requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
   userController.deleteUser
+);
+router.put(
+  '/user/:userId/status',
+  requireRole(ROLES.COLLEGEADMIN),
+  apiLimiter,
+  validate(toggleUserStatusSchema),
+  userController.toggleUserStatus
 );
 
 module.exports = router;

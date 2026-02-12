@@ -104,8 +104,19 @@ const listUserSchema = Joi.object({
     })
 });
 
+const toggleUserStatusSchema = Joi.object({
+  user_status: Joi.string()
+    .valid(STATUS.ACTIVE, STATUS.INACTIVE)
+    .required()
+    .messages({
+      'any.only': `Status must be ${STATUS.ACTIVE} or ${STATUS.INACTIVE}`
+    })
+});
+
+
 module.exports = {
   createUserSchema,
   updateUserSchema,
-  listUserSchema
+  listUserSchema,
+  toggleUserStatusSchema
 };

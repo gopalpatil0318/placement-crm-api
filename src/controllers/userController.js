@@ -407,11 +407,70 @@ async function deleteUser(req, res) {
     return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
   }
 }
+/**
+ * PUT /api/college/user/:userId/status
+ * Toggle user active/inactive
+ */
+async function toggleUserStatus(req, res) {
+  const startTime = Date.now();
+  console.log('Toggling user status', req.params.userId, req.validated.user_status);
+  logger.info(`${LOG.API_START_PREFIX} PUT /api/college/user/:userId/status`, {
+    target_user: req.params.userId,
+    changed_by: req.user?.id,
+    college_id: req.user?.college_id
+  });
+
+  try {
+    if (req.user?.role !== ROLES.COLLEGEADMIN) {
+      logger.warn(`${LOG.SECURITY_PREFIX} Unauthorized status toggle`, {
+        user_id: req.user?.id
+      });
+      return error(res, ERROR_MESSAGES.FORBIDDEN, HTTP_STATUS.FORBIDDEN);
+    }
+
+    const updated = await userService.toggleStatus(
+      req.params.userId,
+      req.user.college_id,
+      req.validated.user_status
+    );
+
+    const duration = Date.now() - startTime;
+
+    logger.info(`${LOG.API_END_PREFIX} PUT /api/college/user/:userId/status`, {
+      user_id: updated.user_id,
+      new_status: updated.user_status,
+      duration_ms: duration
+    });
+
+    return success(
+      res,
+      updated,
+      'User status updated',
+      HTTP_STATUS.OK
+    );
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    console.error('Error toggling user status:', err);
+    logger.error(`${LOG.API_ERROR_PREFIX} PUT /api/college/user/:userId/status`, {
+      error: err.message,
+      duration_ms: duration
+    });
+
+    if (err.message.includes('not found')) {
+      return error(res, ERROR_MESSAGES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
+    }
+
+    return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  }
+}
+
 
 module.exports = {
   createUser,
   listUsers,
   getUser,
   updateUser,
-  deleteUser
+  deleteUser,
+  toggleUserStatus
 };
