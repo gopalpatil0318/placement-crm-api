@@ -1,0 +1,427 @@
+# Placement CRM — API Endpoints (170 Total)
+
+> All documents (offer letters, resumes, certificates) stored as **URL links** — no file uploads.
+> Bulk registration receives **JSON array** from frontend (frontend parses Excel/CSV).
+
+---
+
+## 🔴 Section 1: Sysadmin APIs (8 endpoints)
+
+> **Auth**: .env credentials → JWT with role `sysadmin`
+
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 1 | POST | `/api/sysadmin/login` | Sysadmin login (.env credentials) |
+| 2 | POST | `/api/sysadmin/create_new_college` | Create college + first admin user (transaction) |
+| 3 | GET | `/api/sysadmin/get_all_colleges` | List all colleges (filter: status, type) |
+| 4 | GET | `/api/sysadmin/get_college/:collegeId` | Get single college details |
+| 5 | PUT | `/api/sysadmin/update_college/:collegeId` | Update college info |
+| 6 | PATCH | `/api/sysadmin/toggle_college_status/:collegeId` | Activate / Inactivate college |
+| 7 | PATCH | `/api/sysadmin/update_college_features/:collegeId` | Update enabled features |
+| 8 | PATCH | `/api/sysadmin/update_academic_year/:collegeId` | Update default_academic_year |
+
+---
+
+## 🟢 Section 2: College Admin APIs (95 endpoints)
+
+> **Auth**: JWT from college user login → payload has `{ user_id, college_id, role }`
+
+### Auth & Password
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 9 | POST | `/api/college/login` | College user login |
+| 10 | POST | `/api/college/forgot_password` | Send password reset email |
+| 11 | POST | `/api/college/reset_password` | Reset password with token |
+| 12 | POST | `/api/college/change_password` | Change own password |
+
+### User Management (College Admin, TPO, HOD, Teacher)
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 13 | POST | `/api/college/create_user` | Create college user |
+| 14 | GET | `/api/college/get_all_users` | List users (filter: role, status) |
+| 15 | GET | `/api/college/get_user/:userId` | Get single user |
+| 16 | PUT | `/api/college/update_user/:userId` | Update user info |
+| 17 | PATCH | `/api/college/toggle_user_status/:userId` | Activate / Inactivate user |
+
+### Department Management
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 18 | POST | `/api/college/create_department` | Create department |
+| 19 | GET | `/api/college/get_all_departments` | List departments (filter: status) |
+| 20 | GET | `/api/college/get_department/:deptId` | Get single department |
+| 21 | PUT | `/api/college/update_department/:deptId` | Update department |
+| 22 | PATCH | `/api/college/toggle_department_status/:deptId` | Activate / Inactivate department |
+
+### Student Management
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 23 | POST | `/api/college/register_student` | Register single student |
+| 24 | POST | `/api/college/bulk_register_students` | Bulk register students (JSON array from frontend) |
+| 25 | GET | `/api/college/get_all_students` | List students (filter: passout_year, dept, status) |
+| 26 | GET | `/api/college/get_student/:studentId` | Get student basic info |
+| 27 | GET | `/api/college/get_student_full_profile/:studentId` | Get complete profile (all tables joined) |
+| 28 | PUT | `/api/college/update_student/:studentId` | Update student basic info |
+| 29 | PATCH | `/api/college/toggle_student_status/:studentId` | Activate / Inactivate / Suspend student |
+| 30 | PATCH | `/api/college/approve_student_profile/:studentId` | Approve / Reject student profile |
+| 31 | GET | `/api/college/export_students` | Export student list to Excel |
+| 32 | GET | `/api/college/get_unplaced_students` | List unplaced students (by passout_year) |
+| 33 | GET | `/api/college/get_student_applications/:studentId` | All applications by a student |
+| 34 | GET | `/api/college/get_student_placements/:studentId` | Placement results for a student |
+
+### Student Restrictions
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 35 | POST | `/api/college/add_student_restriction/:studentId` | Add restriction (bar/warning/probation) |
+| 36 | GET | `/api/college/get_all_restrictions` | List all active restrictions |
+| 37 | GET | `/api/college/get_student_restrictions/:studentId` | Get restrictions for a student |
+| 38 | PATCH | `/api/college/update_restriction/:restrictionId` | Resolve / Deactivate restriction |
+
+### Company Management
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 39 | POST | `/api/college/create_company` | Create company |
+| 40 | GET | `/api/college/get_all_companies` | List companies (filter: status, industry) |
+| 41 | GET | `/api/college/get_company/:companyId` | Get company with contacts |
+| 42 | PUT | `/api/college/update_company/:companyId` | Update company |
+| 43 | PATCH | `/api/college/toggle_company_status/:companyId` | Activate / Inactivate company |
+
+### Company Contacts
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 44 | POST | `/api/college/add_company_contact/:companyId` | Add contact person |
+| 45 | GET | `/api/college/get_company_contacts/:companyId` | List contacts for company |
+| 46 | PUT | `/api/college/update_contact/:contactId` | Update contact |
+| 47 | PATCH | `/api/college/toggle_contact_status/:contactId` | Activate / Inactivate contact |
+
+### Job Postings
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 48 | POST | `/api/college/create_job` | Create job posting (with positions, criteria, rounds) |
+| 49 | GET | `/api/college/get_all_jobs` | List jobs (filter: passout_year, status, company) |
+| 50 | GET | `/api/college/get_job/:jobId` | Get full job details (positions + criteria + rounds + questions) |
+| 51 | PUT | `/api/college/update_job/:jobId` | Update job posting |
+| 52 | PATCH | `/api/college/update_job_status/:jobId` | Change status (draft → published → closed → cancelled) |
+
+### Job Positions
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 53 | POST | `/api/college/add_job_position/:jobId` | Add position to job |
+| 54 | PUT | `/api/college/update_position/:positionId` | Update position |
+| 55 | PATCH | `/api/college/update_position_status/:positionId` | Update position status (active/filled) |
+
+### Job Eligibility Criteria
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 56 | POST | `/api/college/set_job_criteria/:jobId` | Set eligibility criteria |
+| 57 | PUT | `/api/college/update_job_criteria/:jobId` | Update criteria |
+| 58 | GET | `/api/college/get_eligible_students/:jobId` | Get eligible students for this job |
+
+### Job Rounds
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 59 | POST | `/api/college/add_job_round/:jobId` | Add selection round |
+| 60 | PUT | `/api/college/update_round/:roundId` | Update round (date, venue, status) |
+| 61 | PATCH | `/api/college/update_round_status/:roundId` | Change round status |
+
+### Application Questions
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 62 | POST | `/api/college/add_job_question/:jobId` | Add application question |
+| 63 | GET | `/api/college/get_job_questions/:jobId` | List questions for job |
+| 64 | PUT | `/api/college/update_question/:questionId` | Update question |
+| 65 | DELETE | `/api/college/delete_question/:questionId` | Delete question |
+
+### Application Management
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 66 | GET | `/api/college/get_job_applications/:jobId` | All applications for a job (filter: status) |
+| 67 | GET | `/api/college/get_application/:applicationId` | Get single application with answers |
+| 68 | PATCH | `/api/college/update_application_status/:applicationId` | Shortlist / Reject application |
+| 69 | POST | `/api/college/bulk_update_application_status` | Bulk update application statuses |
+
+### Round Results
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 70 | POST | `/api/college/add_round_result/:roundId` | Add result for single student |
+| 71 | POST | `/api/college/bulk_add_round_results/:roundId` | Bulk add round results |
+| 72 | GET | `/api/college/get_round_results/:roundId` | Get all results for a round |
+| 73 | PUT | `/api/college/update_round_result/:resultId` | Update single round result |
+
+### Placement Results
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 74 | POST | `/api/college/create_placement` | Create placement result (offer given) |
+| 75 | GET | `/api/college/get_all_placements` | List placements (filter: year, company, status) |
+| 76 | GET | `/api/college/get_placement/:placementId` | Get single placement detail |
+| 77 | PUT | `/api/college/update_placement/:placementId` | Update placement (package, offer letter URL, etc.) |
+| 78 | PATCH | `/api/college/verify_offer_letter/:placementId` | Verify offer letter |
+| 79 | PATCH | `/api/college/update_placement_status/:placementId` | Change status (offered → accepted → joined) |
+
+### Placement Policies (Multiple rules per year)
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 80 | POST | `/api/college/create_policy` | Add a policy rule for a passout year |
+| 81 | GET | `/api/college/get_all_policies` | List all policies (filter: passout_year, is_active) |
+| 82 | GET | `/api/college/get_policy/:policyId` | Get single policy |
+| 83 | PUT | `/api/college/update_policy/:policyId` | Update policy rule |
+| 84 | PATCH | `/api/college/toggle_policy_status/:policyId` | Activate / Deactivate policy |
+| 85 | DELETE | `/api/college/delete_policy/:policyId` | Delete policy rule |
+
+### Eligible Not Applied & Denials
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 86 | GET | `/api/college/get_eligible_not_applied/:jobId` | Students who were eligible but didn't apply |
+| 87 | POST | `/api/college/notify_eligible_students/:jobId` | Notify eligible students |
+| 88 | GET | `/api/college/get_job_denials/:jobId` | Students who denied this job |
+
+### Training Programs
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 89 | POST | `/api/college/create_training_program` | Create training program |
+| 90 | GET | `/api/college/get_all_training_programs` | List programs (filter: status, type) |
+| 91 | GET | `/api/college/get_training_program/:programId` | Get program details with enrollment stats |
+| 92 | PUT | `/api/college/update_training_program/:programId` | Update program |
+| 93 | PATCH | `/api/college/toggle_training_status/:programId` | Change program status |
+| 94 | GET | `/api/college/get_training_enrollments/:programId` | List enrolled students + progress |
+| 95 | PATCH | `/api/college/update_enrollment/:enrollmentId` | Update enrollment (sessions, completion) |
+
+### Notifications
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 96 | POST | `/api/college/send_notification` | Send notification to student(s) |
+| 97 | POST | `/api/college/send_bulk_notification` | Send bulk notification (by dept, year) |
+| 98 | GET | `/api/college/get_sent_notifications` | List sent notifications |
+
+### Feedback & Interview Questions (Admin approves)
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 99 | GET | `/api/college/get_all_feedback` | List all feedback (filter: approved, company) |
+| 100 | PATCH | `/api/college/approve_feedback/:feedbackId` | Approve / Reject feedback |
+| 101 | GET | `/api/college/get_all_interview_questions` | List submitted questions (filter: approved, company) |
+| 102 | PATCH | `/api/college/approve_interview_question/:questionId` | Approve / Reject question |
+
+### Skills Master (per college)
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 103 | POST | `/api/college/create_skill` | Add skill to college's list |
+| 104 | GET | `/api/college/get_all_skills` | List skills (search, filter by category) |
+
+### Dashboard & Statistics
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 105 | GET | `/api/college/dashboard_overview` | Overall stats (placed %, avg package, companies) |
+| 106 | GET | `/api/college/dashboard_department_wise` | Department-wise placement stats |
+| 107 | GET | `/api/college/dashboard_company_wise` | Company-wise application & selection stats |
+| 108 | GET | `/api/college/dashboard_year_comparison` | Compare passout years side by side |
+
+---
+
+## 🔵 Section 3: Student APIs (67 endpoints)
+
+> **Auth**: JWT from student login → payload has `{ student_id, college_id }`
+
+### Auth
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 109 | POST | `/api/student/login` | Student login |
+| 110 | POST | `/api/student/forgot_password` | Send reset link |
+| 111 | POST | `/api/student/reset_password` | Reset password with token |
+| 112 | POST | `/api/student/change_password` | Change own password |
+
+### Profile Overview
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 113 | GET | `/api/student/get_full_profile` | Get own complete profile (all tables) |
+| 114 | GET | `/api/student/get_profile_completion` | Get profile completion percentage |
+
+### Personal Information
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 115 | POST | `/api/student/create_personal_info` | Create personal info (first time) |
+| 116 | GET | `/api/student/get_personal_info` | Get own personal info |
+| 117 | PUT | `/api/student/update_personal_info` | Update personal info |
+
+### Academic Information
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 118 | POST | `/api/student/create_academic_info` | Create academic info |
+| 119 | GET | `/api/student/get_academic_info` | Get own academic info |
+| 120 | PUT | `/api/student/update_academic_info` | Update academic info |
+
+### Semester Grades
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 121 | POST | `/api/student/add_semester_grade` | Add semester grade |
+| 122 | GET | `/api/student/get_all_semester_grades` | Get all semester grades |
+| 123 | PUT | `/api/student/update_semester_grade/:gradeId` | Update semester grade |
+
+### Skills
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 124 | POST | `/api/student/add_skill` | Add skill to profile |
+| 125 | GET | `/api/student/get_all_skills` | List own skills |
+| 126 | PUT | `/api/student/update_skill/:studentSkillId` | Update proficiency |
+| 127 | DELETE | `/api/student/remove_skill/:studentSkillId` | Remove skill |
+
+### Projects
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 128 | POST | `/api/student/add_project` | Add project |
+| 129 | GET | `/api/student/get_all_projects` | List own projects |
+| 130 | PUT | `/api/student/update_project/:projectId` | Update project |
+| 131 | DELETE | `/api/student/delete_project/:projectId` | Delete project |
+
+### Experience
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 132 | POST | `/api/student/add_experience` | Add experience |
+| 133 | GET | `/api/student/get_all_experience` | List own experience |
+| 134 | PUT | `/api/student/update_experience/:experienceId` | Update experience |
+| 135 | DELETE | `/api/student/delete_experience/:experienceId` | Delete experience |
+
+### Achievements
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 136 | POST | `/api/student/add_achievement` | Add achievement |
+| 137 | GET | `/api/student/get_all_achievements` | List own achievements |
+| 138 | PUT | `/api/student/update_achievement/:achievementId` | Update achievement |
+| 139 | DELETE | `/api/student/delete_achievement/:achievementId` | Delete achievement |
+
+### Certificates
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 140 | POST | `/api/student/add_certificate` | Add certificate |
+| 141 | GET | `/api/student/get_all_certificates` | List own certificates |
+| 142 | PUT | `/api/student/update_certificate/:certificateId` | Update certificate |
+| 143 | DELETE | `/api/student/delete_certificate/:certificateId` | Delete certificate |
+
+### Activities
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 144 | POST | `/api/student/add_activity` | Add activity |
+| 145 | GET | `/api/student/get_all_activities` | List own activities |
+| 146 | PUT | `/api/student/update_activity/:activityId` | Update activity |
+| 147 | DELETE | `/api/student/delete_activity/:activityId` | Delete activity |
+
+### Profile Links
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 148 | POST | `/api/student/create_profile_links` | Create profile links (first time) |
+| 149 | GET | `/api/student/get_profile_links` | Get own profile links |
+| 150 | PUT | `/api/student/update_profile_links` | Update profile links |
+
+### Job Browsing & Applications
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 151 | GET | `/api/student/get_available_jobs` | List available jobs (published, within deadline) |
+| 152 | GET | `/api/student/get_job_details/:jobId` | Get job details (positions, criteria, rounds) |
+| 153 | GET | `/api/student/check_job_eligibility/:jobId` | Check own eligibility for a job |
+| 154 | POST | `/api/student/apply_for_job/:jobId` | Apply to job (with question answers) |
+| 155 | POST | `/api/student/deny_job/:jobId` | Deny/opt-out of job with reason |
+| 156 | GET | `/api/student/get_my_applications` | List own applications with status |
+| 157 | GET | `/api/student/get_application_details/:applicationId` | Get application detail + round results |
+| 158 | PATCH | `/api/student/withdraw_application/:applicationId` | Withdraw application |
+
+### Placement Results (Own)
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 159 | GET | `/api/student/get_my_placements` | Get own placement offers |
+| 160 | PATCH | `/api/student/accept_placement/:placementId` | Accept offer |
+| 161 | PATCH | `/api/student/reject_placement/:placementId` | Reject offer |
+
+### Restrictions (Own)
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 162 | GET | `/api/student/get_my_restrictions` | View own restrictions |
+| 163 | POST | `/api/student/appeal_restriction/:restrictionId` | Submit appeal |
+
+### Training Programs
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 164 | GET | `/api/student/get_available_training` | List available programs |
+| 165 | POST | `/api/student/enroll_in_training/:programId` | Enroll in program |
+| 166 | GET | `/api/student/get_enrolled_training` | List enrolled programs + progress |
+| 167 | POST | `/api/student/submit_training_feedback/:enrollmentId` | Submit feedback & rating |
+
+### Notifications
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 168 | GET | `/api/student/get_my_notifications` | List notifications (filter: read/unread) |
+| 169 | GET | `/api/student/get_unread_notification_count` | Get unread count (for badge) |
+| 170 | PATCH | `/api/student/mark_notification_read/:notificationId` | Mark as read |
+| 171 | PATCH | `/api/student/mark_all_notifications_read` | Mark all as read |
+
+### Feedback & Interview Questions
+| # | Method | Endpoint | Description |
+|---|--------|----------|-------------|
+| 172 | POST | `/api/student/submit_feedback` | Submit placement feedback for a job |
+| 173 | GET | `/api/student/get_my_feedback` | View own submitted feedback |
+| 174 | POST | `/api/student/submit_interview_question` | Submit interview question |
+| 175 | GET | `/api/student/browse_interview_questions` | Browse approved questions (filter: company) |
+
+---
+
+## Summary
+
+| Section | Count | Description |
+|---------|-------|-------------|
+| **Sysadmin** | 8 | College management |
+| **College Admin** | 100 | Full placement management |
+| **Student** | 67 | Profile + applications + everything |
+| **Total** | **175** | Complete API coverage |
+
+---
+
+## Route Files Structure
+
+```
+src/routes/
+├── index.js
+├── sysadmin/
+│   ├── auth.routes.js
+│   └── college.routes.js
+├── college/
+│   ├── auth.routes.js
+│   ├── user.routes.js
+│   ├── department.routes.js
+│   ├── student.routes.js
+│   ├── restriction.routes.js
+│   ├── company.routes.js
+│   ├── contact.routes.js
+│   ├── job.routes.js
+│   ├── position.routes.js
+│   ├── criteria.routes.js
+│   ├── round.routes.js
+│   ├── question.routes.js
+│   ├── application.routes.js
+│   ├── roundResult.routes.js
+│   ├── placement.routes.js
+│   ├── policy.routes.js
+│   ├── training.routes.js
+│   ├── notification.routes.js
+│   ├── feedback.routes.js
+│   ├── interviewQuestion.routes.js
+│   ├── skill.routes.js
+│   └── dashboard.routes.js
+└── student/
+    ├── auth.routes.js
+    ├── profile.routes.js
+    ├── personalInfo.routes.js
+    ├── academicInfo.routes.js
+    ├── semester.routes.js
+    ├── skill.routes.js
+    ├── project.routes.js
+    ├── experience.routes.js
+    ├── achievement.routes.js
+    ├── certificate.routes.js
+    ├── activity.routes.js
+    ├── profileLinks.routes.js
+    ├── job.routes.js
+    ├── application.routes.js
+    ├── placement.routes.js
+    ├── restriction.routes.js
+    ├── training.routes.js
+    ├── notification.routes.js
+    ├── feedback.routes.js
+    └── interviewQuestion.routes.js
+```

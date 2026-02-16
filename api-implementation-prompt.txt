@@ -1,11 +1,11 @@
 /**
  * ============================================================================
- * API DEVELOPMENT PROMPT - UPDATED & CORRECTED
+ * PLACEMENT CRM — API DEVELOPMENT PROMPT
  * ============================================================================
  * Use this prompt for ALL NEW or ENHANCED APIs to maintain consistent:
  * - Code quality & standards
  * - Security practices
- * - Optimized logging (Essential logs only - Winston + Structured JSON)
+ * - Optimized logging (Winston + Structured JSON)
  * - Rate limiting & traffic control
  * - Transaction handling
  * - Single database model (All colleges in one DB)
@@ -13,733 +13,501 @@
  * ============================================================================
  */
 
+// ============================================================================
+// ARCHITECTURE OVERVIEW
+// ============================================================================
+
 /**
- * ============================================================================
- * CRITICAL CHANGES FROM ORIGINAL PROMPT
- * ============================================================================
+ * Stack: Node.js + Express.js + PostgreSQL (Supabase)
+ * Auth: JWT (college users + students) | .env credentials (sysadmin)
  * 
- * ❌ REMOVED (NOT IN YOUR ARCHITECTURE):
- * 1. globalLimiter - Application does not use global limiter
- * 2. uploadLimiter - No file upload functionality
- * 3. searchLimiter - No dedicated search endpoints
- * 4. collegeLimiter - Not implemented in current stack
- * 5. readLimiter - Simplified to apiLimiter only
- * 6. tenantLimiter - No tenant architecture
- * 7. getMainPool() with tenant database switching - Using ONLY main pool
- * 8. SUSPENDED and PENDING statuses - Using only ACTIVE, INACTIVE
- * 9. ROLES.OTHER - Removed, using only SYSADMIN, ADMIN, TEACHER, STUDENT
- * 10. Multi-tenant database logic - Single database architecture
+ * Single Shared Database:
+ * - All colleges, users, students in ONE PostgreSQL database
+ * - College isolation via college_id (row-level filtering in WHERE clause)
+ * - Always use getMainPool() — no other pools exist
  * 
- * ✅ SIMPLIFIED TO (YOUR ACTUAL IMPLEMENTATION):
- * 1. authLimiter - 5 attempts per 15 minutes (for login endpoints)
- * 2. apiLimiter - 50 requests per minute (for all other endpoints)
- * 3. getMainPool() ONLY - All queries use main pool, no tenant switching
- * 4. STATUS.ACTIVE, STATUS.INACTIVE - Only these two statuses
- * 5. ROLES: SYSADMIN, ADMIN, TEACHER, STUDENT - Four roles only
- * 6. Single Database - No tenant isolation complexity, just college_id filtering
+ * Rate Limiters (2 only):
+ * 1. authLimiter — 5 attempts per 15 min (login APIs only)
+ * 2. apiLimiter  — 50 requests per 1 min (POST, PUT, PATCH, DELETE)
+ * 
+ * Roles (4 only):
+ * - SYSADMIN, COLLEGEADMIN, TEACHER, STUDENT
+ * 
+ * Status (2 only):
+ * - ACTIVE, INACTIVE
+ * 
+ * No file uploads — all documents stored as URLs (links provided by user)
  */
 
 // ============================================================================
-// LOGGING STANDARDS - LEAN & PERFORMANT (CORRECTED)
+// PROJECT STRUCTURE
 // ============================================================================
 
 /**
- * All logging uses Winston logger with structured JSON output
- * PHILOSOPHY: Log ONLY what matters for debugging and monitoring
+ * src/
+ * ├── config/
+ * │   ├── constants.js          (all magic strings, enums, messages)
+ * │   ├── db.js                 (PostgreSQL pool - getMainPool())
+ * │   ├── logger.js             (Winston logger setup)
+ * │   └── rateLimiter.js        (authLimiter + apiLimiter)
+ * ├── middleware/
+ * │   ├── authMiddleware.js     (JWT verify + requireRole)
+ * │   └── validateRequest.js    (Joi validation middleware)
+ * ├── routes/
+ * │   ├── index.js              (route aggregator)
+ * │   ├── sysadmin/             (sysadmin routes)
+ * │   ├── college/              (college admin routes)
+ * │   └── student/              (student routes)
+ * ├── controllers/              (request handlers - HTTP layer)
+ * ├── services/                 (business logic + DB queries)
+ * ├── validators/               (Joi schemas)
+ * ├── utils/
+ * │   ├── responseHelper.js     ({ success, data, message } format)
+ * │   └── pagination.js         (page, limit, offset, total)
+ * ├── app.js                    (Express app setup)
+ * └── server.js                 (Listen on PORT)
+ */
+
+// ============================================================================
+// LOGGING STANDARDS (Winston)
+// ============================================================================
+
+/**
+ * PHILOSOPHY: Log what matters for debugging + monitoring. Nothing more.
  * 
  * Log Levels:
- * - error: System errors, exceptions, failed operations (level 0) - ALWAYS log
- * - warn: Validation failures, security issues (level 1) - ALWAYS log
- * - info: API endpoints, successful operations (level 2) - Log strategically
- * - debug: Detailed flow (level 3) - Only in development
+ * - error (0): System errors, exceptions, failed DB operations
+ * - warn  (1): Validation failures, security issues, auth rejections
+ * - info  (2): API start/end for state-changing ops, successful operations
+ * - debug (3): Development only — never in production
  * 
- * Logging Rules:
- * ✅ Log API_START: Only for POST/PUT/DELETE (state-changing operations)
+ * Prefixes (from constants.js LOG object):
+ * - LOG.API_START_PREFIX   → '[API_START]'
+ * - LOG.API_END_PREFIX     → '[API_END]'
+ * - LOG.API_ERROR_PREFIX   → '[API_ERROR]'
+ * - LOG.TRANSACTION_PREFIX → '[TRANSACTION]'
+ * - LOG.SECURITY_PREFIX    → '[SECURITY]'
+ * 
+ * Rules:
+ * ✅ Log API_START: Only for POST/PUT/PATCH/DELETE (state-changing)
  * ✅ Log API_END: Only on success, with duration_ms
- * ✅ Log API_ERROR: Always, with error details
- * ✅ Log SECURITY warnings: All auth failures, unauthorized access
- * ✅ Log TRANSACTION: Multi-step operations (commit/rollback)
- * ✅ Log INFO: Successful resource operations with IDs
- * ❌ Do NOT log GET requests unless slow (>500ms) or error
- * ❌ Do NOT log routine operations
- * ❌ Do NOT log sensitive data (passwords, tokens)
- * ❌ Do NOT use console.log/console.error
+ * ✅ Log API_ERROR: Always, with full error.message + error.stack
+ * ✅ Log SECURITY: Auth failures, unauthorized access attempts
+ * ✅ Log TRANSACTION: Commits and rollbacks
+ * ❌ No console.log / console.error / console.warn
+ * ❌ No logging GET requests (unless error or slow >500ms)
+ * ❌ No logging sensitive data (passwords, tokens, aadhaar)
+ * ❌ No logging routine operations or variable states
  * 
- * Usage in Controllers:
- * ✅ logger.info(`${LOG.API_START_PREFIX} POST /endpoint`, { user_id, college_id })
- * ✅ logger.info(`${LOG.API_END_PREFIX} POST /endpoint`, { resource_id, duration_ms })
- * ✅ logger.error(`${LOG.API_ERROR_PREFIX} POST /endpoint`, { error, code })
- * ✅ logger.warn(`${LOG.SECURITY_PREFIX} Unauthorized access`, { user_id, reason })
- * ✅ logger.debug(`${LOG.TRANSACTION_PREFIX} Starting operation`, { operation })
- * ✅ logger.info(`${LOG.TRANSACTION_PREFIX} Committed`, { resource_id })
- * ✅ logger.error(`${LOG.TRANSACTION_PREFIX} Rolled back`, { error })
+ * IMPORTANT — Proper Error Logging Pattern:
+ * ✅ CORRECT:
+ *   logger.error(`${LOG.API_ERROR_PREFIX} POST /api/sysadmin/create_new_college`, {
+ *     error: err.message,
+ *     stack: err.stack,
+ *     college_id: req.user?.college_id,
+ *     duration_ms: Date.now() - startTime
+ *   });
  * 
- * ❌ DO NOT USE:
- * ❌ console.log()
- * ❌ console.error()
- * ❌ console.warn()
- * ❌ logger.debug() in production (development only)
- * ❌ Logging every function call
- * ❌ Logging internal variable states
- * ❌ Logging sensitive data (emails are OK, passwords are NOT)
+ * ❌ WRONG (only prints "[object Object]" — useless):
+ *   logger.error(`${err} ${LOG.TRANSACTION_PREFIX} Unexpected error`, { error: err.message });
  * 
- * Logs Available in constants.js:
- * - LOG.API_START_PREFIX: '[API_START]'
- * - LOG.API_END_PREFIX: '[API_END]'
- * - LOG.API_ERROR_PREFIX: '[API_ERROR]'
- * - LOG.TRANSACTION_PREFIX: '[TRANSACTION]'
- * - LOG.SECURITY_PREFIX: '[SECURITY]'
+ * Always include:
+ * - err.message (the actual error text)
+ * - err.stack (the full stack trace for debugging)
+ * - Context: path, method, user_id, college_id, duration_ms
  */
 
 // ============================================================================
-// RATE LIMITING STANDARDS - SIMPLIFIED (2 LIMITERS ONLY)
+// STEP 1: CREATE VALIDATOR
 // ============================================================================
 
 /**
- * Rate limiting prevents abuse and controls traffic
+ * File: src/validators/{resource}Validator.js
  * 
- * YOUR STACK HAS ONLY 2 LIMITERS (Not 7):
+ * - Define Joi schemas for request body/query/params validation
+ * - Use VALIDATION constants for min/max lengths (from constants.js)
+ * - Custom error messages for user-friendly responses
+ * - Export with clear names: create{Resource}Schema, update{Resource}Schema
  * 
- * 1. authLimiter (Import from rateLimiter.js)
- *    - Purpose: Prevent brute force on login
- *    - Limit: 5 attempts per 15 minutes
- *    - Bypass: None (security feature - no bypass even for sysadmin)
- *    - Apply to: POST /auth/login, POST /students/login
- *    - Example: router.post('/login', authLimiter, controller.login)
- * 
- * 2. apiLimiter (Import from rateLimiter.js)
- *    - Purpose: General API endpoint protection
- *    - Limit: 50 requests per 1 minute
- *    - Bypass: Sysadmin users
- *    - Apply to: All POST, PUT, DELETE endpoints
- *    - Example: router.post('/create', apiLimiter, controller.create)
- * 
- * Usage in Routes:
- * ✅ const { authLimiter, apiLimiter } = require('../config/rateLimiter');
- * ✅ router.post('/login', authLimiter, authController.login);
- * ✅ router.post('/create', apiLimiter, controller.create);
- * ✅ router.put('/update', apiLimiter, controller.update);
- * ✅ router.delete('/remove', apiLimiter, controller.delete);
- * ✅ router.get('/list', controller.list); // No rate limit for GET
- * 
- * Rate Limit Exceeded Response (429):
- * {
- *   "success": false,
- *   "message": "Too many login attempts. Please try again in 15 minutes.",
- *   "retryAfter": 900
- * }
- * 
- * ❌ DO NOT USE (Not in your stack):
- * ❌ globalLimiter
- * ❌ uploadLimiter
- * ❌ searchLimiter
- * ❌ collegeLimiter
- * ❌ readLimiter
- * ❌ tenantLimiter
+ * ✅ Use .uuid() for IDs, .email() for emails, .valid() for enums
+ * ✅ Use .optional() and .default() where appropriate
+ * ✅ Use VALIDATION, STATUS, ROLES from constants.js
+ * ❌ No hardcoded error messages — use constants
+ * ❌ No magic numbers — use VALIDATION constants
  */
 
-// ============================================================================
-// DATABASE POOL USAGE - SINGLE DATABASE ONLY
-// ============================================================================
-
-/**
- * SINGLE DATABASE RULE:
- * All colleges, users, students, resources in ONE shared database
- * Always use: getMainPool() - that's it, no other pools
- * 
- * Pool Selection:
- * - getMainPool() → Returns connection pool to main PostgreSQL DB
- * - All queries go to same database
- * - Tenant isolation via college_id (row-level filtering)
- * 
- * ❌ NEVER DO THIS:
- * ❌ getPool(tenantId)
- * ❌ getPool(collegeId)
- * ❌ Switch between multiple databases
- * ❌ Use different connection pools for different colleges
- * ❌ Create separate databases for colleges
- * 
- * ✅ ALWAYS DO THIS:
- * ✅ const mainPool = getMainPool();
- * ✅ Filter by college_id in WHERE clause
- * ✅ Ensure ALL queries include college_id in WHERE
- * 
- * Example - Query colleges table:
- * const mainPool = getMainPool();
- * const { rows } = await mainPool.query(
- *   'SELECT * FROM colleges WHERE college_id = $1',
- *   [collegeId]
- * );
- * 
- * Example - Query users table:
- * const mainPool = getMainPool();
- * const { rows } = await mainPool.query(
- *   'SELECT * FROM users WHERE college_id = $1 AND user_id = $2',
- *   [collegeId, userId]
- * );
- * 
- * Tenant Isolation Pattern:
- * ALL queries to users/students/resources MUST include:
- * WHERE college_id = $X (required filter)
- * This ensures users only see/modify data for their college
- * 
- * Database Schema:
- * - colleges (main table, no parent)
- * - users (college_id FK to colleges)
- * - students (college_id FK to colleges)
- * - Any new tables must have college_id FK
- * 
- * ❌ NO TENANTS TABLE, NO DB_URL, NO MULTI-DB LOGIC
- */
-
-// ============================================================================
-// STEP-BY-STEP API CREATION PROCESS
-// ============================================================================
-
-/**
- * STEP 1: CREATE VALIDATOR
- * ============================================================================
- * File: src/validators/yourResourceValidator.js
- * 
- * What to do:
- * - Define Joi schema for request body validation
- * - Use error messages from constants.js (not hardcoded)
- * - Export schema with clear name
- * - Support query parameters if needed
- * - Use VALIDATION constants for min/max lengths
- * 
- * Validation Rules:
- * ✅ Use Joi for validation
- * ✅ Import VALIDATION, STATUS, ROLES from constants
- * ✅ Custom error messages for user clarity
- * ✅ Support optional fields with .optional()
- * ✅ Default values with .default()
- * ✅ UUID validation with .uuid()
- * ✅ Email validation with .email()
- * ✅ Enum validation with .valid()
- * ✅ Pattern validation with .pattern()
- * 
- * ❌ Do NOT:
- * ❌ Hardcode error messages
- * ❌ Use magic numbers
- * ❌ Validate things database should validate
- */
-
+// Example:
 const Joi = require('joi');
-const { VALIDATION, STATUS, ROLES } = require('../config/constants');
+const { VALIDATION, STATUS } = require('../config/constants');
 
-const createYourResourceSchema = Joi.object({
-  resource_name: Joi.string()
-    .min(VALIDATION.STRING_MIN_LENGTH)
-    .max(VALIDATION.STRING_MAX_LENGTH)
+const createDepartmentSchema = Joi.object({
+  dept_name: Joi.string()
+    .min(VALIDATION.NAME_MIN_LENGTH)
+    .max(VALIDATION.NAME_MAX_LENGTH)
     .required()
     .messages({
-      'string.empty': 'Resource name is required',
-      'string.min': `Minimum ${VALIDATION.STRING_MIN_LENGTH} characters`,
-      'any.required': 'Resource name is required'
+      'string.empty': 'Department name is required',
+      'any.required': 'Department name is required'
     }),
-  
-  resource_description: Joi.string()
-    .max(500)
-    .optional(),
-  
-  status: Joi.string()
-    .valid(STATUS.ACTIVE, STATUS.INACTIVE)
-    .optional()
-    .default(STATUS.ACTIVE),
-  
-  assigned_to: Joi.string()
-    .uuid()
-    .optional()
-    .messages({
-      'string.guid': 'Invalid user ID format'
-    })
+  dept_code: Joi.string().max(20).required(),
+  dept_type: Joi.string().valid('engineering', 'diploma', 'management', 'science').required(),
+  program_duration_years: Joi.number().integer().min(1).max(6).required(),
+  total_semesters: Joi.number().integer().min(1).max(12).required()
 });
 
-module.exports = {
-  createYourResourceSchema,
-  updateYourResourceSchema,
-  listYourResourcesSchema
-};
+// ============================================================================
+// STEP 2: CREATE SERVICE
+// ============================================================================
 
 /**
- * STEP 2: CREATE SERVICE
- * ============================================================================
- * File: src/services/yourResourceService.js
+ * File: src/services/{resource}Service.js
  * 
- * What to do:
- * - Database queries using getMainPool() ONLY
- * - Transaction handling for multi-step operations
- * - Use logger for errors and transactions only
- * - Return only data (no res.json)
- * - Throw errors for controller to handle
- * - College ID filtering on ALL queries (tenant isolation)
- * - NO business logic in controllers - all goes here
+ * - ALL business logic + DB queries go here
+ * - Always use getMainPool() — no other pools
+ * - Always filter by college_id in WHERE clause
+ * - Use transactions for multi-table inserts
+ * - Throw errors — don't return error objects
+ * - Return only data — no res.json() here
  * 
- * Service Rules:
- * ✅ Use getMainPool() for all queries
- * ✅ Filter by college_id on EVERY query
- * ✅ Use transactions for multi-step operations
- * ✅ Log TRANSACTION starts/commits/rollbacks
- * ✅ Log API_ERROR on exception
- * ✅ Throw errors, don't return error objects
- * ✅ Use parameterized queries ($1, $2 syntax)
- * ✅ Verify college_id exists before operations
- * ✅ Handle specific DB error codes
- * ✅ Return only necessary data
- * ✅ Use try-finally to release connections
+ * ✅ Parameterized queries ($1, $2 — never string concatenation)
+ * ✅ try-finally to release DB client connections
+ * ✅ Log TRANSACTION commits/rollbacks
+ * ✅ Handle DB error codes (23505 = unique, 23503 = FK, 23502 = NOT NULL)
+ * ❌ No HTTP responses in services
+ * ❌ No queries without college_id filter
  * 
- * ❌ Do NOT:
- * ❌ Use getPool(collegeId) or any other pool
- * ❌ Query without college_id filter
- * ❌ Mix business logic with DB operations
- * ❌ Return res or response objects
- * ❌ Handle HTTP responses in service
- * ❌ Use string concatenation for SQL
- * ❌ Catch and suppress errors
- * 
- * Example Structure:
- * - Class YourResourceService
- *   - create(data, collegeId)
- *   - getById(id, collegeId)
- *   - update(id, data, collegeId)
- *   - list(filters, collegeId, page, limit)
- *   - delete(id, collegeId)
+ * Transaction Pattern:
  */
 
+async function createJobPosting(jobData, collegeId) {
+  const mainPool = getMainPool();
+  const client = await mainPool.connect();
+  try {
+    await client.query('BEGIN');
+    logger.debug(`${LOG.TRANSACTION_PREFIX} Starting job posting creation`);
+
+    // 1. Insert job posting
+    const job = await client.query(
+      'INSERT INTO job_postings (college_id, ...) VALUES ($1, ...) RETURNING job_id',
+      [collegeId, ...]
+    );
+    const jobId = job.rows[0].job_id;
+
+    // 2. Insert positions
+    for (const pos of jobData.positions) {
+      await client.query(
+        'INSERT INTO job_positions (job_id, ...) VALUES ($1, ...)',
+        [jobId, ...]
+      );
+    }
+
+    // 3. Insert eligibility criteria
+    await client.query(
+      'INSERT INTO job_eligibility_criteria (job_id, ...) VALUES ($1, ...)',
+      [jobId, ...]
+    );
+
+    await client.query('COMMIT');
+    logger.info(`${LOG.TRANSACTION_PREFIX} Job posting committed`, { job_id: jobId });
+    return job.rows[0];
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error(`${LOG.TRANSACTION_PREFIX} Rolled back job posting creation`, {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ============================================================================
+// STEP 3: CREATE CONTROLLER
+// ============================================================================
+
 /**
- * STEP 3: CREATE CONTROLLER
- * ============================================================================
- * File: src/controllers/yourResourceController.js
+ * File: src/controllers/{resource}Controller.js
  * 
- * What to do:
- * - Log API_START only for POST/PUT/DELETE (state-changing)
- * - Log API_END only on success with duration_ms
- * - Log API_ERROR on failure with error message
- * - Call service functions only (NO direct DB queries)
+ * - HTTP layer only — calls service functions
+ * - Log API_START (for state-changing), API_END (success), API_ERROR (failure)
+ * - Track request duration with Date.now()
  * - Use responseHelper.success/error for responses
- * - Handle authorization checks
- * - Track request duration
+ * - Convert DB errors to user-friendly messages
  * 
- * Controller Rules:
- * ✅ Calculate startTime = Date.now() at beginning
- * ✅ Log API_START with user_id, college_id for state-changing ops
- * ✅ Check authorization (role, college_id)
- * ✅ Log SECURITY warnings for auth failures
- * ✅ Call service methods only
- * ✅ Calculate duration = Date.now() - startTime
- * ✅ Log API_END with resource_id, duration_ms
- * ✅ Log API_ERROR with error message, duration_ms
- * ✅ Return success/error using helper functions
- * ✅ Convert DB errors to user-friendly messages
- * ✅ Use appropriate HTTP status codes
- * ✅ Don't expose internal error details to client
- * 
- * ❌ Do NOT:
- * ❌ Query database directly
- * ❌ Log GET requests unless error
- * ❌ Mix business logic with HTTP handling
- * ❌ Return raw database errors to client
- * ❌ Hardcode error messages
- * ❌ Use res.status().json() directly
- * ❌ Forget duration_ms in logging
- * ❌ Skip authorization checks
- * 
- * HTTP Status Codes to Use:
- * - 200 OK: GET, PUT success
- * - 201 CREATED: POST success
- * - 204 NO CONTENT: DELETE success (optional)
- * - 400 BAD REQUEST: Validation error, invalid input
- * - 401 UNAUTHORIZED: No token or invalid token
- * - 403 FORBIDDEN: Insufficient permissions
- * - 404 NOT FOUND: Resource doesn't exist
- * - 409 CONFLICT: Duplicate entry, email exists
- * - 429 TOO_MANY_REQUESTS: Rate limited
- * - 500 INTERNAL_SERVER_ERROR: Unhandled error
+ * HTTP Status Codes:
+ * - 200: GET, PUT, PATCH success
+ * - 201: POST success (resource created)
+ * - 400: Validation error, invalid input
+ * - 401: Missing or invalid token
+ * - 403: Insufficient permissions
+ * - 404: Resource not found
+ * - 409: Duplicate entry (email exists, etc.)
+ * - 429: Rate limited
+ * - 500: Unhandled server error
  */
 
-async function createResource(req, res) {
+// Example controller:
+async function createDepartment(req, res) {
   const startTime = Date.now();
-  
-  logger.info(`${LOG.API_START_PREFIX} POST /api/v1/resources`, {
+
+  logger.info(`${LOG.API_START_PREFIX} POST /api/college/create_department`, {
     user_id: req.user?.id,
     college_id: req.user?.college_id
   });
 
   try {
     // Authorization check
-    if (req.user?.user_role !== ROLES.ADMIN && 
-        req.user?.user_role !== ROLES.SYSADMIN) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} Unauthorized resource creation attempt`,
-        {
-          user_id: req.user?.id,
-          user_role: req.user?.user_role
-        }
-      );
+    if (req.user?.user_role !== ROLES.COLLEGEADMIN) {
+      logger.warn(`${LOG.SECURITY_PREFIX} Unauthorized department creation`, {
+        user_id: req.user?.id,
+        user_role: req.user?.user_role
+      });
       return error(res, ERROR_MESSAGES.FORBIDDEN, HTTP_STATUS.FORBIDDEN);
     }
 
-    // Call service
-    const newResource = await yourResourceService.create(
+    const department = await departmentService.create(
       req.validated,
       req.user.college_id
     );
 
     const duration = Date.now() - startTime;
+    logger.info(`${LOG.API_END_PREFIX} POST /api/college/create_department`, {
+      dept_id: department.dept_id,
+      duration_ms: duration
+    });
 
-    logger.info(
-      `${LOG.API_END_PREFIX} POST /api/v1/resources`,
-      {
-        resource_id: newResource.id,
-        duration_ms: duration
-      }
-    );
-
-    return success(
-      res,
-      newResource,
-      'Resource created successfully',
-      HTTP_STATUS.CREATED
-    );
+    return success(res, department, SUCCESS_MESSAGES.DEPARTMENT_CREATED, HTTP_STATUS.CREATED);
 
   } catch (err) {
     const duration = Date.now() - startTime;
 
-    logger.error(
-      `${LOG.API_ERROR_PREFIX} POST /api/v1/resources`,
-      {
-        error: err.message,
-        duration_ms: duration
-      }
-    );
+    logger.error(`${LOG.API_ERROR_PREFIX} POST /api/college/create_department`, {
+      error: err.message,
+      stack: err.stack,
+      duration_ms: duration
+    });
 
-    // Error handling
     if (err.message.includes('already exists')) {
       return error(res, err.message, HTTP_STATUS.CONFLICT);
     }
-
     if (err.message.includes('not found')) {
-      return error(res, err.message, HTTP_STATUS.BAD_REQUEST);
+      return error(res, err.message, HTTP_STATUS.NOT_FOUND);
     }
-
     return error(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
   }
 }
 
+// ============================================================================
+// STEP 4: CREATE ROUTES
+// ============================================================================
+
 /**
- * STEP 4: CREATE ROUTES
- * ============================================================================
- * File: src/routes/yourResource.routes.js
+ * File: src/routes/{section}/{resource}.routes.js
  * 
- * What to do:
- * - Define routes with authMiddleware
- * - Add requireRole for authorization
- * - Apply validate() with appropriate schema
- * - Apply rate limiters correctly:
- *   * authLimiter: ONLY on login endpoints
- *   * apiLimiter: On POST, PUT, DELETE
- *   * No rate limiter: On GET
- * - Map to controller functions
+ * Middleware chain order:
+ * authMiddleware → requireRole → apiLimiter → validate(schema) → controller
  * 
- * Route Rules:
- * ✅ All endpoints except login: authMiddleware
- * ✅ State-changing operations: authMiddleware, requireRole, apiLimiter
- * ✅ Read operations: authMiddleware (no rate limiter)
- * ✅ Login endpoints: authLimiter (no authMiddleware)
- * ✅ Public endpoints: no auth middleware
- * ✅ Apply validate() for input validation
- * ✅ Require appropriate roles
- * 
- * ❌ Do NOT:
- * ❌ Forget authMiddleware on protected routes
- * ❌ Skip validation on endpoints
- * ❌ Apply rate limiter to GET endpoints
- * ❌ Forget college_id in queries
- * 
- * Example Route Structure:
- * router.post('/', authMiddleware, requireRole(ADMIN, SYSADMIN), apiLimiter, validate(schema), controller);
- * router.get('/', authMiddleware, controller);
- * router.get('/:id', authMiddleware, controller);
- * router.put('/:id', authMiddleware, requireRole(ADMIN, SYSADMIN), apiLimiter, validate(schema), controller);
- * router.delete('/:id', authMiddleware, requireRole(ADMIN, SYSADMIN), apiLimiter, controller);
+ * ✅ authLimiter: ONLY on login endpoints
+ * ✅ apiLimiter: On POST, PUT, PATCH, DELETE
+ * ✅ No rate limiter on GET endpoints
+ * ✅ validate() with Joi schema for input validation
+ * ✅ requireRole for authorization
  */
 
-const express = require('express');
+// Example:
 const router = express.Router();
-const controller = require('../controllers/yourResourceController');
-const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
-const validate = require('../middleware/validateRequest');
-const { authLimiter, apiLimiter } = require('../config/rateLimiter');
-const { ROLES } = require('../config/constants');
-const schemas = require('../validators/yourResourceValidator');
 
-// POST - Create (protected, rate limited)
+// POST - Create (protected, role-checked, rate-limited, validated)
 router.post(
-  '/',
+  '/create_department',
   authMiddleware,
-  requireRole(ROLES.ADMIN, ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
-  validate(schemas.createYourResourceSchema),
-  controller.createResource
+  validate(schemas.createDepartmentSchema),
+  controller.createDepartment
 );
 
-// GET - List (protected, not rate limited)
+// GET - List (protected, no rate limit)
 router.get(
-  '/',
+  '/get_all_departments',
   authMiddleware,
-  validate(schemas.listYourResourcesSchema),
-  controller.listResources
+  controller.getAllDepartments
 );
 
-// GET - Get single (protected, not rate limited)
+// GET - Single (protected, no rate limit)
 router.get(
-  '/:resourceId',
+  '/get_department/:deptId',
   authMiddleware,
-  controller.getResource
+  controller.getDepartment
 );
 
-// PUT - Update (protected, rate limited)
+// PUT - Update (protected, role-checked, rate-limited, validated)
 router.put(
-  '/:resourceId',
+  '/update_department/:deptId',
   authMiddleware,
-  requireRole(ROLES.ADMIN, ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
-  validate(schemas.updateYourResourceSchema),
-  controller.updateResource
+  validate(schemas.updateDepartmentSchema),
+  controller.updateDepartment
 );
 
-// DELETE - Delete (protected, rate limited)
-router.delete(
-  '/:resourceId',
+// PATCH - Status toggle (protected, role-checked, rate-limited)
+router.patch(
+  '/toggle_department_status/:deptId',
   authMiddleware,
-  requireRole(ROLES.ADMIN, ROLES.SYSADMIN),
+  requireRole(ROLES.COLLEGEADMIN),
   apiLimiter,
-  controller.deleteResource
+  validate(schemas.toggleStatusSchema),
+  controller.toggleDepartmentStatus
 );
 
-module.exports = router;
+// ============================================================================
+// STEP 5: ADD CONSTANTS
+// ============================================================================
 
 /**
- * STEP 5: ADD CONSTANTS
- * ============================================================================
  * File: src/config/constants.js
  * 
- * What to do:
- * - Add ONLY NEW error messages needed for this API
- * - Add ONLY NEW success messages needed
- * - Don't duplicate existing ones
- * - Keep alphabetical order within each section
+ * Before adding new messages, CHECK if they already exist.
+ * Only add what's missing. Keep alphabetical order within sections.
  * 
- * Messages already available:
- * 
- * ERROR_MESSAGES:
- * - FORBIDDEN
- * - NOT_FOUND
- * - SERVER_ERROR
- * - EMAIL_ALREADY_EXISTS
- * - INVALID_* (various)
- * - etc.
- * 
- * SUCCESS_MESSAGES:
- * - STUDENT_REGISTERED
- * - COLLEGE_CREATED
- * - USER_CREATED
- * - USER_UPDATED
- * - etc.
- * 
- * Only add if not already present:
- * RESOURCE_NOT_FOUND
- * RESOURCE_CREATED
- * RESOURCE_UPDATED
- * RESOURCE_DELETED
+ * Already available:
+ * - ERROR_MESSAGES: FORBIDDEN, NOT_FOUND, SERVER_ERROR, EMAIL_ALREADY_EXISTS, etc.
+ * - SUCCESS_MESSAGES: LOGIN_SUCCESSFUL, COLLEGE_CREATED, USER_CREATED, etc.
+ * - All LOG prefixes, HTTP_STATUS codes, ROLES, STATUS
  */
 
-// Add to constants.js if not already there
-const NEW_ERROR_MESSAGES = {
-  RESOURCE_NOT_FOUND: 'Resource not found',
-  RESOURCE_ALREADY_EXISTS: 'Resource with this name already exists',
-  INVALID_RESOURCE_STATUS: 'Invalid resource status'
-};
-
-const NEW_SUCCESS_MESSAGES = {
-  RESOURCE_CREATED: 'Resource created successfully',
-  RESOURCE_UPDATED: 'Resource updated successfully',
-  RESOURCE_DELETED: 'Resource deleted successfully'
-};
+// ============================================================================
+// STEP 6: UPDATE ROUTES INDEX
+// ============================================================================
 
 /**
- * STEP 6: UPDATE ROUTES INDEX
- * ============================================================================
  * File: src/routes/index.js
  * 
- * What to do:
- * - Import your new route file
- * - Add one line to use the route
- * - That's it!
- * 
- * Example:
- * const yourResourceRoutes = require('./yourResource.routes');
- * router.use('/resources', yourResourceRoutes);
+ * Import new route file and add one line:
+ * const departmentRoutes = require('./college/department.routes');
+ * router.use('/college', departmentRoutes);
  */
 
 // ============================================================================
-// STATUS CONSTANTS & ROLES TO USE
+// KEY FLOWS & BUSINESS LOGIC
 // ============================================================================
 
 /**
- * STATUS - Only these two exist:
- * - STATUS.ACTIVE = 'active'
- * - STATUS.INACTIVE = 'inactive'
+ * SYSADMIN:
+ * - Auth via .env credentials → JWT with role 'sysadmin'
+ * - Creates college + first admin user in a single TRANSACTION
+ * - Manages college status, features, academic year
  * 
- * ❌ Do NOT use:
- * - SUSPENDED
- * - PENDING
- * - Any other status
+ * COLLEGE ADMIN:
+ * - JWT payload: { user_id, college_id, role, dept_id }
+ * - Every query MUST have WHERE college_id = $X
+ * - Manages: departments, students, companies, jobs, placements, policies
  * 
- * ROLES - Only these four exist:
- * - ROLES.SYSADMIN = 'sysadmin'
- * - ROLES.ADMIN = 'admin'
- * - ROLES.TEACHER = 'teacher'
- * - ROLES.STUDENT = 'student'
+ * STUDENT:
+ * - Registered by college admin (single or bulk from frontend JSON array)
+ * - Fills profile sections (personal, academic, semesters, skills, projects, etc.)
+ * - Profile must be approved (profile_is_approved = true) before applying to jobs
+ * - Can apply → track rounds → accept/reject offers → submit feedback
  * 
- * ❌ Do NOT use:
- * - ROLES.OTHER
- * - Any other role
+ * BULK STUDENT REGISTRATION:
+ * - Frontend parses Excel/CSV and sends JSON array to backend
+ * - Backend receives array of student objects, validates each, bulk inserts
+ * - No file upload — data comes as JSON in request body
+ * - Returns: { success_count, failed_rows: [{ index, error }] }
+ * 
+ * JOB APPLICATION CHECKS (all must pass):
+ * 1. profile_is_approved === true
+ * 2. Student passes eligibility criteria
+ * 3. No active restrictions (bar_from_placements)
+ * 4. Application deadline not passed
+ * 5. Not already applied to this job
+ * 6. Job status === 'published'
+ * 
+ * PLACEMENT POLICIES:
+ * - Stored as individual rules per passout_year
+ * - Each row = one policy rule (title + description)
+ * - Check before creating placement results
+ * 
+ * All documents (offer letters, resumes, certificates):
+ * - Stored as URL links in database
+ * - No file uploads — user provides link to hosted document
  */
 
 // ============================================================================
-// CHECKLIST BEFORE WRITING CODE
+// RESPONSE FORMAT (Always consistent)
 // ============================================================================
 
 /**
- * Pre-Development:
- * ✅ Read this entire prompt
- * ✅ Understand single database architecture
- * ✅ Know your 2 rate limiters (authLimiter, apiLimiter)
- * ✅ Know your log prefixes (API_START, API_END, API_ERROR, SECURITY, TRANSACTION)
- * ✅ Know your status values (ACTIVE, INACTIVE only)
- * ✅ Know your roles (SYSADMIN, ADMIN, TEACHER, STUDENT)
- * ✅ Plan all validator schemas
- * ✅ Plan all service methods
- * ✅ Plan all database queries
- * ✅ Identify where college_id filtering is needed
- * ✅ Identify where transactions are needed
- * ✅ Identify where authorization checks are needed
- * 
- * While Writing Code:
- * ✅ Use getMainPool() ONLY
- * ✅ Filter by college_id on EVERY query
- * ✅ Use JSDoc comments on all functions
- * ✅ Use try-catch with duration tracking
- * ✅ Log API_START only for POST/PUT/DELETE with duration
- * ✅ Log API_END only on success with duration_ms
- * ✅ Log API_ERROR with error message
- * ✅ Log SECURITY warnings for auth failures
- * ✅ Log TRANSACTION commits/rollbacks
- * ✅ Use responseHelper.success/error
- * ✅ Use constants for error/success messages
- * ✅ Use Joi for validation
- * ✅ Use parameterized queries ($1, $2 syntax)
- * ✅ Apply authMiddleware to protected routes
- * ✅ Apply requireRole for authorization
- * ✅ Apply apiLimiter to POST/PUT/DELETE
- * ✅ Apply authLimiter to login endpoints only
- * ✅ No rate limiter on GET endpoints
- * ✅ Handle all error cases
- * ✅ Verify college_id on all operations
- * ✅ Use soft deletes (status = INACTIVE)
- * ✅ Return proper HTTP status codes
- * 
- * After Writing Code:
- * ✅ No console.log() - all use logger
- * ✅ No hardcoded strings - use constants
- * ✅ No direct HTTP responses in service
- * ✅ All inputs validated with Joi
- * ✅ All database queries parameterized
- * ✅ Authorization checks present
- * ✅ College isolation verified
- * ✅ Error handling complete
- * ✅ No sensitive data logged
- * ✅ Rate limiters applied correctly
- * ✅ Route added to routes/index.js
- * ✅ No tenant/multi-db references
- * ✅ All new constants added
- * ✅ No duplicates of existing messages
- */
-
-// ============================================================================
-// EXPORTS & CONVENTIONS
-// ============================================================================
-
-/**
- * File Naming Conventions:
- * - Validators: src/validators/entityValidator.js
- * - Services: src/services/entityService.js
- * - Controllers: src/controllers/entityController.js
- * - Routes: src/routes/entity.routes.js
- * 
- * Function Naming Conventions:
- * - Controllers: getEntity, listEntities, createEntity, updateEntity, deleteEntity
- * - Services: getById, create, update, list, delete
- * - Schemas: createEntitySchema, updateEntitySchema, listEntitiesSchema
- * 
- * Response Format (Always):
  * Success:
- * {
- *   "success": true,
- *   "data": { ... },
- *   "message": "Operation successful"
- * }
+ * { success: true, data: { ... }, message: "College created successfully" }
+ * 
+ * Success with pagination:
+ * { success: true, data: [...], pagination: { page, limit, total, totalPages }, message: "..." }
  * 
  * Error:
- * {
- *   "success": false,
- *   "message": "Error description",
- *   "details": { ... } (optional)
- * }
+ * { success: false, message: "Validation failed", details: [...] }
+ * 
+ * Pagination:
+ * - Default: page=1, limit=10, max limit=100
+ * - Always return { page, limit, total, totalPages }
+ * - Use OFFSET and LIMIT in SQL
  */
 
 // ============================================================================
-// ARCHITECTURE SUMMARY
+// SECURITY RULES
 // ============================================================================
 
 /**
- * Current Architecture:
- * ├─ Single Shared Database (PostgreSQL)
- * │ ├─ colleges table
- * │ ├─ users table
- * │ ├─ students table
- * │ └─ your_resources table (new)
- * │
- * ├─ College Isolation via college_id
- * │ └─ Every user/student/resource belongs to ONE college
- * │
- * ├─ Authentication
- * │ ├─ JWT tokens for users, students, sysadmin
- * │ └─ authMiddleware validates and parses token
- * │
- * ├─ Rate Limiting (2 limiters)
- * │ ├─ authLimiter: 5 attempts per 15 min (login only)
- * │ └─ apiLimiter: 50 requests per 1 min (state-changing)
- * │
- * ├─ Logging (Winston)
- * │ ├─ Essential logs only
- * │ ├─ Structured JSON output
- * │ └─ Environment-specific levels
- * │
- * ├─ Database Access
- * │ ├─ getMainPool() only - no other pools
- * │ ├─ All queries use college_id filter
- * │ └─ Transactions for multi-step operations
- * │
- * └─ Status & Roles (Fixed)
- *   ├─ STATUS: ACTIVE, INACTIVE (2 values)
- *   └─ ROLES: SYSADMIN, ADMIN, TEACHER, STUDENT (4 roles)
+ * ✅ Hash passwords with bcrypt (salt rounds: 10)
+ * ✅ JWT secret in .env (never in code)
+ * ✅ JWT expiry: 24h for college users, 7d for students
+ * ✅ Rate limiting on login APIs (authLimiter)
+ * ✅ CORS configured properly
+ * ✅ Helmet.js for security headers
+ * ✅ All inputs validated with Joi before DB
+ * ✅ Parameterized SQL queries ($1, $2 — no string concatenation)
+ * ✅ college_id ALWAYS from JWT, never from request body
+ * ✅ Soft deletes (status = INACTIVE) instead of hard delete
+ * ✅ Never return passwords in API responses
+ * ✅ Error messages don't expose internal details to client
+ */
+
+// ============================================================================
+// CHECKLIST PER API
+// ============================================================================
+
+/**
+ * Before coding:
+ * ✅ Plan validator schema
+ * ✅ Plan service methods + SQL queries
+ * ✅ Identify if transaction needed (multi-table insert)
+ * ✅ Identify which roles can access
+ * ✅ Identify where college_id filtering needed
  * 
- * ✅ Single database
- * ✅ Simple, clean architecture
- * ✅ Fast and performant
- * ✅ Easy to maintain
- * ✅ Production-ready
+ * While coding:
+ * ✅ getMainPool() only
+ * ✅ college_id in every WHERE clause
+ * ✅ Parameterized queries ($1, $2...)
+ * ✅ try-catch with duration tracking
+ * ✅ Log API_START for POST/PUT/PATCH/DELETE
+ * ✅ Log API_END with duration_ms on success
+ * ✅ Log API_ERROR with err.message + err.stack on failure
+ * ✅ responseHelper.success / error for responses
+ * ✅ Constants for all messages
+ * ✅ authMiddleware on protected routes
+ * ✅ requireRole for authorization
+ * ✅ apiLimiter on state-changing routes
+ * ✅ authLimiter on login routes only
+ * ✅ No rate limiter on GET routes
+ * 
+ * After coding:
+ * ✅ No console.log — all use logger
+ * ✅ No hardcoded strings — use constants
+ * ✅ No HTTP responses in services
+ * ✅ All inputs validated with Joi
+ * ✅ Route added to routes/index.js
+ * ✅ New constants added if needed
  */

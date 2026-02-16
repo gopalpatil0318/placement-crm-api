@@ -1,64 +1,73 @@
 /**
  * ============================================================================
- * LOGGER.JS - Winston Logger Configuration (OPTIMIZED)
+ * LOGGER.JS — Winston Logger with Request Correlation
  * ============================================================================
- * 
+ *
  * Features:
- * - Structured JSON logging
- * - Console output (development)
- * - File-based logging with rotation (production)
- * - Essential logs only (optimized for performance)
- * - Error stack trace logging
- * - Log level control via environment
- * 
+ * - Structured JSON logging for production
+ * - Colorized console output for development
+ * - Request correlation ID support (req.id)
+ * - File rotation: error.log, combined.log, exceptions.log
+ * - Morgan HTTP stream integration
+ * - Log level control via LOG_LEVEL env var
+ *
  * Log Levels:
- * - error: System errors, exceptions
- * - warn: Validation failures, security issues
- * - info: API operations, successful operations
- * - debug: Detailed flow (development only)
- * 
+ * - error: System errors, DB failures, unhandled exceptions
+ * - warn:  Validation failures, rate limits, auth issues
+ * - info:  API operations, server lifecycle, DB connections
+ * - debug: Detailed flow, query params, pool stats (dev only)
+ *
  * ============================================================================
  */
 
 const { createLogger, format, transports } = require('winston');
 const path = require('path');
 const fs = require('fs');
-const { LOG } = require('./constants');
 
 // ============================================================================
-// CREATE LOGS DIRECTORY
+// RESOLVE LOG DIRECTORY (standalone — no imports from other config files)
 // ============================================================================
 
-const logsDir = path.join(process.cwd(), 'logs');
+const LOG_DIR = process.env.LOG_DIR || path.join(process.cwd(), 'logs');
 
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+if (!fs.existsSync(LOG_DIR)) {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
 // ============================================================================
-// LOG FORMAT DEFINITIONS
+// LOG LEVEL VALIDATION
 // ============================================================================
 
-/**
- * Console Format (Human-readable)
- * Example: 2025-12-07T13:26:45.123Z [INFO]: [API_START] POST /endpoint user_id=123
- */
-const consoleFormat = format.printf(({ level, message, timestamp, meta, stack }) => {
-  const metaStr = meta && Object.keys(meta).length > 0
-    ? Object.entries(meta)
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-        .join(' ')
+const VALID_LEVELS = ['error', 'warn', 'info', 'debug'];
+const logLevel = VALID_LEVELS.includes(process.env.LOG_LEVEL)
+  ? process.env.LOG_LEVEL
+  : 'info';
+
+// ============================================================================
+// FORMAT: Console (Human-Readable, Colorized)
+// ============================================================================
+
+const consoleFormat = format.printf(({ level, message, timestamp, requestId, ...meta }) => {
+  const reqId = requestId ? ` [${requestId}]` : '';
+
+  // Build metadata string from remaining keys (exclude 'service', 'environment' defaults)
+  const filteredMeta = { ...meta };
+  delete filteredMeta.service;
+  delete filteredMeta.environment;
+
+  const metaStr = Object.keys(filteredMeta).length > 0
+    ? ' ' + Object.entries(filteredMeta)
+      .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+      .join(' ')
     : '';
 
-  const stackStr = stack ? `\n${stack}` : '';
-
-  return `${timestamp} [${level}]: ${message} ${metaStr}${stackStr}`;
+  return `${timestamp} [${level}]${reqId}: ${message}${metaStr}`;
 });
 
-/**
- * JSON Format (Structured)
- * For easy parsing and analysis
- */
+// ============================================================================
+// FORMAT: JSON (Structured — for production file logging)
+// ============================================================================
+
 const jsonFormat = format.combine(
   format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
   format.errors({ stack: true }),
@@ -66,70 +75,44 @@ const jsonFormat = format.combine(
 );
 
 // ============================================================================
-// DETERMINE LOG LEVEL
-// ============================================================================
-
-const logLevel = process.env.LOG_LEVEL || 'info';
-
-if (!['error', 'warn', 'info', 'debug'].includes(logLevel)) {
-  console.warn(`Invalid LOG_LEVEL: ${logLevel}. Defaulting to 'info'`);
-}
-
-// ============================================================================
 // TRANSPORTS
 // ============================================================================
 
-// Console Transport (All environments)
 const consoleTransport = new transports.Console({
   level: logLevel,
   format: format.combine(
     format.colorize(),
-    format.timestamp({ format: 'YYYY-MM-DDTHH:mm:ss.SSSZ' }),
+    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
     format.errors({ stack: true }),
     consoleFormat
-  )
+  ),
 });
 
-// Error Log File (Production & Staging)
 const errorFileTransport = new transports.File({
-  filename: path.join(logsDir, 'error.log'),
+  filename: path.join(LOG_DIR, 'error.log'),
   level: 'error',
-  maxsize: 10485760, // 10MB
+  maxsize: 10 * 1024 * 1024, // 10 MB
   maxFiles: 5,
-  format: jsonFormat
+  format: jsonFormat,
 });
 
-// Combined Log File (Production & Staging)
 const combinedFileTransport = new transports.File({
-  filename: path.join(logsDir, 'combined.log'),
+  filename: path.join(LOG_DIR, 'combined.log'),
   level: logLevel,
-  maxsize: 10485760, // 10MB
+  maxsize: 10 * 1024 * 1024,
   maxFiles: 10,
-  format: jsonFormat
-});
-
-// Info Log File (Production & Staging)
-const infoFileTransport = new transports.File({
-  filename: path.join(logsDir, 'info.log'),
-  level: 'info',
-  maxsize: 10485760, // 10MB
-  maxFiles: 5,
-  format: jsonFormat
+  format: jsonFormat,
 });
 
 // ============================================================================
 // BUILD TRANSPORTS ARRAY
 // ============================================================================
 
-let transportsList = [consoleTransport];
+const transportsList = [consoleTransport];
 
-if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
-  transportsList = [
-    consoleTransport,
-    errorFileTransport,
-    infoFileTransport,
-    combinedFileTransport
-  ];
+const env = process.env.NODE_ENV || 'development';
+if (env === 'production' || env === 'staging') {
+  transportsList.push(errorFileTransport, combinedFileTransport);
 }
 
 // ============================================================================
@@ -137,25 +120,36 @@ if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging')
 // ============================================================================
 
 const logger = createLogger({
+  level: logLevel,
   defaultMeta: {
-    service: 'college-crm-api',
-    environment: process.env.NODE_ENV || 'development'
+    service: 'placement-crm-api',
+    environment: env,
   },
   format: jsonFormat,
   transports: transportsList,
   exceptionHandlers: [
     new transports.File({
-      filename: path.join(logsDir, 'exceptions.log'),
-      format: jsonFormat
-    })
+      filename: path.join(LOG_DIR, 'exceptions.log'),
+      format: jsonFormat,
+    }),
   ],
   rejectionHandlers: [
     new transports.File({
-      filename: path.join(logsDir, 'rejections.log'),
-      format: jsonFormat
-    })
-  ]
+      filename: path.join(LOG_DIR, 'rejections.log'),
+      format: jsonFormat,
+    }),
+  ],
 });
+
+// ============================================================================
+// MORGAN STREAM (for HTTP request logging via Morgan → Winston)
+// ============================================================================
+
+logger.stream = {
+  write: (message) => {
+    logger.info(message.trim(), { source: 'http' });
+  },
+};
 
 // ============================================================================
 // EXPORT

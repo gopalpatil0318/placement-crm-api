@@ -1,138 +1,109 @@
 /**
  * ============================================================================
- * RATE LIMITER CONFIGURATION - express-rate-limit Setup
+ * RATE LIMITER — express-rate-limit v8 Configuration
  * ============================================================================
- * 
+ *
+ * Two limiters:
+ *   authLimiter  — 5 attempts per 15 min (login/forgot-password)
+ *   apiLimiter   — 50 requests per 1 min (general API)
+ *
  * Features:
- * - Auth rate limiting (5 attempts per 15 minutes)
- * - API rate limiting (50 requests per minute)
- * - Logging for rate limit violations
- * - Custom error responses
- * 
- * Usage:
- * router.post('/login', authLimiter, controller.login);
- * router.get('/colleges', apiLimiter, controller.listColleges);
+ *   - Human-friendly retry messages with countdown
+ *   - Sysadmin bypass for API limiter
+ *   - Security logging on rate limit violations
+ *   - Standard rate limit headers (RateLimit-*)
  * ============================================================================
  */
 
 const rateLimit = require('express-rate-limit');
-const { ipKeyGenerator } = require('express-rate-limit');
-
 const logger = require('./logger');
-const {
-  RATE_LIMIT,
-  HTTP_STATUS,
-  LOG,
-  ROLES
-} = require('./constants');
+const { RATE_LIMIT, HTTP_STATUS, LOG, ROLES } = require('./constants');
 
 // ============================================================================
-// HELPER: CUSTOM KEY GENERATOR
+// HELPERS
 // ============================================================================
 
 /**
- * Generate unique key for rate limiting
- * Combines IP address and user ID (if authenticated)
- * 
- * @param {Object} req - Express request
- * @returns {string} Unique key
+ * Format remaining milliseconds into "X min Y sec" string.
+ * @param {number} ms - Milliseconds remaining
+ * @returns {string}
  */
-function getKey(req) {
-  const ip = ipKeyGenerator(req); // Normalize IPv4/IPv6 correctly
-
-  if (req.user && req.user.id) {
-    return `${ip}:${req.user.id}`;
-  }
-  return ip;
+function formatRetryTime(ms) {
+  if (!ms || ms <= 0) return 'a few seconds';
+  const totalSec = Math.ceil(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min > 0 && sec > 0) return `${min} min ${sec} sec`;
+  if (min > 0) return `${min} min`;
+  return `${sec} sec`;
 }
 
-// ============================================================================
-// HELPER: SKIP CONDITION FOR SYSADMIN
-// ============================================================================
-
 /**
- * Skip rate limiting for system admins
- * 
- * @param {Object} req - Express request
- * @returns {boolean} True to skip limiting
+ * Skip rate limiting for sysadmin users.
  */
 function skipForSysAdmin(req) {
-  // Skip for system admin
-  if (req.user && req.user.role === ROLES.SYSADMIN) {
-    return true;
-  }
-  return false;
+  return req.user?.role === ROLES.SYSADMIN;
 }
 
 // ============================================================================
-// AUTH LIMITER (STRICT)
+// AUTH LIMITER (Strict — brute force protection)
 // ============================================================================
 
-/**
- * Strict rate limiter for authentication endpoints
- * - 5 attempts per 15 minutes
- * - No bypass for admins (security feature)
- */
 const authLimiter = rateLimit({
-  windowMs: RATE_LIMIT.WINDOW_MS_AUTH, // 15 minutes
-  max: RATE_LIMIT.MAX_REQUESTS_AUTH, // 5 attempts
-  keyGenerator: getKey,
-  skip: (req) => false, // Never skip for auth (even admins)
+  windowMs: RATE_LIMIT.WINDOW_MS_AUTH,
+  max: RATE_LIMIT.MAX_REQUESTS_AUTH,
+  skip: () => false, // Never skip for auth — even sysadmin
   handler: (req, res) => {
-    logger.warn(
-      `${LOG.SECURITY_PREFIX} Multiple login attempts - possible brute force`,
-      {
-        ip: req.ip,
-        user_email: req.body?.email || req.body?.student_email,
-        attempt_count: req.rateLimit?.current,
-        reset_time: req.rateLimit?.resetTime
-      }
-    );
+    const resetMs = req.rateLimit?.resetTime
+      ? req.rateLimit.resetTime.getTime() - Date.now()
+      : RATE_LIMIT.WINDOW_MS_AUTH;
+    const retryAfterSec = Math.ceil(resetMs / 1000);
+
+    logger.warn(`${LOG.SECURITY} Rate limit: multiple login attempts`, {
+      ip: req.ip,
+      email: req.body?.email || req.body?.student_email || 'unknown',
+      attempts: req.rateLimit?.current,
+    });
 
     return res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json({
       success: false,
-      message: 'Too many login attempts. Please try again in 15 minutes.',
-      retryAfter: Math.ceil((req.rateLimit?.resetTime - Date.now()) / 1000)
+      message: `Too many login attempts. Please try again in ${formatRetryTime(resetMs)}`,
+      retryAfter: retryAfterSec,
     });
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 });
 
 // ============================================================================
-// API LIMITER (MODERATE)
+// API LIMITER (Moderate — general traffic)
 // ============================================================================
 
-/**
- * Moderate rate limiter for general API endpoints
- * - 50 requests per minute
- * - Allows burst traffic
- * - Skips for sysadmin
- */
 const apiLimiter = rateLimit({
-  windowMs: RATE_LIMIT.WINDOW_MS_API, // 1 minute
-  max: RATE_LIMIT.MAX_REQUESTS_API, // 50 requests
-  keyGenerator: getKey,
+  windowMs: RATE_LIMIT.WINDOW_MS_API,
+  max: RATE_LIMIT.MAX_REQUESTS_API,
   skip: skipForSysAdmin,
   handler: (req, res) => {
-    logger.warn(
-      `${LOG.API_START_PREFIX} Rate limit exceeded`,
-      {
-        ip: req.ip,
-        user_id: req.user?.id,
-        method: req.method,
-        path: req.path
-      }
-    );
+    const resetMs = req.rateLimit?.resetTime
+      ? req.rateLimit.resetTime.getTime() - Date.now()
+      : RATE_LIMIT.WINDOW_MS_API;
+    const retryAfterSec = Math.ceil(resetMs / 1000);
+
+    logger.warn(`${LOG.SECURITY} API rate limit exceeded`, {
+      ip: req.ip,
+      method: req.method,
+      path: req.path,
+      userId: req.user?.id,
+    });
 
     return res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json({
       success: false,
-      message: 'Too many requests, please try again later',
-      retryAfter: req.rateLimit?.resetTime
+      message: `Too many requests. Please try again in ${formatRetryTime(resetMs)}`,
+      retryAfter: retryAfterSec,
     });
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 });
 
 // ============================================================================
@@ -142,6 +113,4 @@ const apiLimiter = rateLimit({
 module.exports = {
   authLimiter,
   apiLimiter,
-  getKey,
-  skipForSysAdmin
 };
