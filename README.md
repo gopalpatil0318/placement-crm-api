@@ -1,4 +1,4 @@
-# Placement CRM — Complete Backend Flow Document
+# Placement CRM — Complete Backend Flow Document 2.0
 
 > **Stack**: Node.js + Express.js + PostgreSQL (Supabase)
 > **Auth**: JWT (college users + students) | .env credentials (sysadmin)
