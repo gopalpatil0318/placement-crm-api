@@ -225,19 +225,23 @@ async function getAllColleges({ page, limit, offset, status, type, search }) {
 }
 
 // ============================================================================
-// GET COLLEGE BY ID
+// GET COLLEGE BY ID (with admin info)
 // ============================================================================
 
 async function getCollegeById(collegeId) {
     const result = await query(
         `SELECT
-       college_id, college_name, college_subdomain, college_type,
-       college_address, college_city, college_taluka, college_district,
-       college_state, college_pincode, college_status,
-       enabled_features, default_academic_year,
-       created_at, updated_at
-     FROM colleges
-     WHERE college_id = $1`,
+       c.college_id, c.college_name, c.college_subdomain, c.college_type,
+       c.college_address, c.college_city, c.college_taluka, c.college_district,
+       c.college_state, c.college_pincode, c.college_status,
+       c.enabled_features, c.default_academic_year,
+       c.created_at, c.updated_at,
+       u.user_name AS admin_name,
+       u.user_email AS admin_email
+     FROM colleges c
+     LEFT JOIN users u ON u.college_id = c.college_id AND u.user_role = 'collegeadmin'
+     WHERE c.college_id = $1
+     LIMIT 1`,
         [collegeId]
     );
 

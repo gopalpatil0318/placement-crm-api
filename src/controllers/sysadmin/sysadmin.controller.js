@@ -19,6 +19,8 @@ const sysadminService = require('../../services/sysadmin/sysadmin.service');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
 const { getPagination } = require('../../utils/pagination');
 const { SUCCESS_MESSAGES } = require('../../config/constants');
+const logger = require('../../config/logger');
+const { LOG } = require('../../config/constants');
 
 // Cookie options for JWT — HttpOnly, no JS access
 const COOKIE_OPTIONS = {
@@ -48,7 +50,23 @@ async function login(req, res) {
 }
 
 // ============================================================================
-// 2. POST /api/sysadmin/create_new_college
+// 2. POST /api/sysadmin/logout
+// ============================================================================
+
+async function logout(req, res) {
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'lax',
+    });
+
+    logger.info(`${LOG.AUTH} Sysadmin logged out`);
+
+    return sendSuccess(res, null, SUCCESS_MESSAGES.LOGOUT_SUCCESSFUL);
+}
+
+// ============================================================================
+// 3. POST /api/sysadmin/create_new_college
 // ============================================================================
 
 async function createNewCollege(req, res) {
@@ -138,6 +156,7 @@ async function updateAcademicYear(req, res) {
 
 module.exports = {
     login,
+    logout,
     createNewCollege,
     getAllColleges,
     getCollege,
