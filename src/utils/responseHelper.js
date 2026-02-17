@@ -1,44 +1,62 @@
 /**
  * ============================================================================
- * RESPONSE HELPER - Standardized Response Formatting
+ * RESPONSE HELPER — Standardized API Response Format
  * ============================================================================
- * Provides consistent response structure for success and error responses
- * 
- * Usage:
- * - success(res, data, message, status)
- * - error(res, message, status, details)
+ *
+ * Every API returns one of these shapes:
+ *
+ *   Success:    { success: true,  data: {...}, message: "..." }
+ *   Error:      { success: false, error: "...", details?: [...] }
+ *   Paginated:  { success: true,  data: [...], message: "...", pagination: {...} }
+ *
+ * ============================================================================
  */
 
+const { HTTP_STATUS } = require('../config/constants');
+
 /**
- * Send success response
- * 
- * @param {Object} res - Express response object
- * @param {*} data - Response payload (object, array, or empty object)
- * @param {string} message - Success message (optional, defaults to 'OK')
- * @param {number} status - HTTP status code (optional, defaults to 200)
- * @returns {Object} JSON response { success: true, message, data }
+ * Send a success response.
+ *
+ * @param {Object}  res     - Express response object
+ * @param {*}       data    - Response payload
+ * @param {string}  message - Success message
+ * @param {number}  status  - HTTP status code (default: 200)
  */
-function success(res, data = {}, message = 'OK', status = 200) {
+function sendSuccess(res, data = {}, message = 'OK', status = HTTP_STATUS.OK) {
   return res.status(status).json({
     success: true,
-    message: message,
-    data: data
+    message,
+    data,
   });
 }
 
 /**
- * Send error response
- * 
- * @param {Object} res - Express response object
- * @param {string} message - Error message (required)
- * @param {number} status - HTTP status code (required)
- * @param {Object} details - Additional error details (optional)
- * @returns {Object} JSON response { success: false, message, details? }
+ * Send a created (201) response.
+ *
+ * @param {Object}  res     - Express response object
+ * @param {*}       data    - Created resource data
+ * @param {string}  message - Success message
  */
-function error(res, message = 'Error', status = 400, details = null) {
+function sendCreated(res, data = {}, message = 'Created successfully') {
+  return res.status(HTTP_STATUS.CREATED).json({
+    success: true,
+    message,
+    data,
+  });
+}
+
+/**
+ * Send an error response.
+ *
+ * @param {Object}       res     - Express response object
+ * @param {string}       message - Error message (user-facing)
+ * @param {number}       status  - HTTP status code (default: 400)
+ * @param {Array|Object} details - Validation errors or extra info (optional)
+ */
+function sendError(res, message = 'Something went wrong', status = HTTP_STATUS.BAD_REQUEST, details = null) {
   const payload = {
     success: false,
-    message: message
+    error: message,
   };
 
   if (details) {
@@ -48,4 +66,27 @@ function error(res, message = 'Error', status = 400, details = null) {
   return res.status(status).json(payload);
 }
 
-module.exports = { success, error };
+/**
+ * Send a paginated list response.
+ *
+ * @param {Object} res        - Express response object
+ * @param {Array}  data       - Array of records
+ * @param {number} total      - Total record count (before pagination)
+ * @param {Object} pagination - { page, limit }
+ * @param {string} message    - Success message
+ */
+function sendPaginated(res, data, total, { page, limit }, message = 'Data retrieved successfully') {
+  return res.status(HTTP_STATUS.OK).json({
+    success: true,
+    message,
+    data,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  });
+}
+
+module.exports = { sendSuccess, sendCreated, sendError, sendPaginated };

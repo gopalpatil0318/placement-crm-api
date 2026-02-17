@@ -1,60 +1,78 @@
 /**
  * ============================================================================
- * JWT HELPER - JSON Web Token Utilities
+ * JWT HELPER — Token Generation & Verification
  * ============================================================================
- * Token generation and verification with logging
+ * Centralizes all JWT operations. Uses config for secret/expiry.
+ *
+ * Token payloads:
+ *   Sysadmin:     { role: 'sysadmin' }
+ *   College user: { user_id, college_id, role, dept_id }
+ *   Student:      { student_id, college_id }
+ * ============================================================================
  */
 
 const jwt = require('jsonwebtoken');
+const config = require('../config/env');
 const logger = require('../config/logger');
 const { LOG } = require('../config/constants');
 
 /**
- * Sign and generate JWT token
- * * @param {Object} payload - Token payload (user data)
- * @returns {string} JWT token
- * @throws {Error} If signing fails
+ * Generate a signed JWT token.
+ *
+ * @param {Object} payload - Data to encode (user_id, college_id, role, etc.)
+ * @param {Object} [options] - Override options (e.g. { expiresIn: '15m' })
+ * @returns {string} Signed JWT token
  */
-function sign(payload) {
+function generateToken(payload, options = {}) {
   try {
-    logger.debug(`${LOG.TRANSACTION_PREFIX} Generating JWT token`, {
-      user_id: payload.id,
-      role: payload.role
+    const token = jwt.sign(payload, config.jwtSecret, {
+      expiresIn: options.expiresIn || config.jwtExpiresIn,
+      ...options,
     });
 
-    const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+    logger.debug(`${LOG.AUTH} Token generated`, {
+      role: payload.role,
+      userId: payload.user_id || payload.student_id,
     });
 
     return token;
-
   } catch (err) {
-    logger.error(
-      `${LOG.TRANSACTION_PREFIX} Error signing JWT`,
-      { error: err.message }
-    );
+    logger.error(`${LOG.AUTH} Token generation failed`, { error: err.message });
     throw err;
   }
 }
 
 /**
- * Verify and decode JWT token
- * * @param {string} token - JWT token to verify
- * @returns {Object|null} Decoded payload or null if invalid/expired
+ * Verify and decode a JWT token.
+ *
+ * @param {string} token - JWT token string
+ * @returns {Object|null} Decoded payload, or null if invalid/expired
  */
-function verify(token) {
+function verifyToken(token) {
   try {
-    logger.debug(`${LOG.TRANSACTION_PREFIX} Verifying JWT token`);
-
-    return jwt.verify(token, process.env.JWT_SECRET);
-
+    const decoded = jwt.verify(token, config.jwtSecret);
+    return decoded;
   } catch (err) {
-    logger.warn(
-      `${LOG.TRANSACTION_PREFIX} JWT verification failed`,
-      { error: err.message }
-    );
+    logger.warn(`${LOG.AUTH} Token verification failed`, {
+      reason: err.name === 'TokenExpiredError' ? 'expired' : err.message,
+    });
     return null;
   }
 }
 
-module.exports = { sign, verify };
+/**
+ * Decode a JWT token WITHOUT verifying the signature.
+ * Useful for reading payload from expired tokens (e.g. password reset check).
+ *
+ * @param {string} token - JWT token string
+ * @returns {Object|null} Decoded payload or null
+ */
+function decodeToken(token) {
+  try {
+    return jwt.decode(token);
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { generateToken, verifyToken, decodeToken };

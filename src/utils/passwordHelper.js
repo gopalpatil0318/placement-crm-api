@@ -1,59 +1,60 @@
 /**
  * ============================================================================
- * PASSWORD HELPER - Password Hashing & Verification
+ * PASSWORD HELPER — Hashing & Comparison with bcrypt
  * ============================================================================
- * Secure password handling with bcrypt
+ * - Uses salt rounds from AUTH constants
+ * - Provides default password generator for bulk student registration
+ * ============================================================================
  */
 
 const bcrypt = require('bcrypt');
 const logger = require('../config/logger');
-const { LOG } = require('../config/constants');
-
-const SALT_ROUNDS = 10;
+const { AUTH, LOG } = require('../config/constants');
 
 /**
- * Hash plain text password
- * 
- * @param {string} plain - Plain text password
- * @returns {Promise<string>} Hashed password
- * @throws {Error} If hashing fails
+ * Hash a plain-text password.
+ *
+ * @param {string} plainPassword - The plain-text password
+ * @returns {Promise<string>} The bcrypt hash
  */
-async function hashPassword(plain) {
+async function hashPassword(plainPassword) {
   try {
-    logger.debug(`${LOG.TRANSACTION_PREFIX} Hashing password`);
-
-    return await bcrypt.hash(plain, SALT_ROUNDS);
-
+    const hash = await bcrypt.hash(plainPassword, AUTH.SALT_ROUNDS);
+    logger.debug(`${LOG.AUTH} Password hashed successfully`);
+    return hash;
   } catch (err) {
-    logger.error(
-      `${LOG.TRANSACTION_PREFIX} Error hashing password`,
-      { error: err.message }
-    );
+    logger.error(`${LOG.AUTH} Password hashing failed`, { error: err.message });
     throw err;
   }
 }
 
 /**
- * Compare plain text password with hashed password
- * 
- * @param {string} plain - Plain text password
- * @param {string} hash - Hashed password
+ * Compare a plain-text password against a bcrypt hash.
+ *
+ * @param {string} plainPassword - The plain-text password to check
+ * @param {string} hashedPassword - The stored bcrypt hash
  * @returns {Promise<boolean>} True if passwords match
- * @throws {Error} If comparison fails
  */
-async function compare(plain, hash) {
+async function comparePassword(plainPassword, hashedPassword) {
   try {
-    logger.debug(`${LOG.TRANSACTION_PREFIX} Comparing passwords`);
-
-    return await bcrypt.compare(plain, hash);
-
+    const isMatch = await bcrypt.compare(plainPassword, hashedPassword);
+    return isMatch;
   } catch (err) {
-    logger.error(
-      `${LOG.TRANSACTION_PREFIX} Error comparing passwords`,
-      { error: err.message }
-    );
+    logger.error(`${LOG.AUTH} Password comparison failed`, { error: err.message });
     throw err;
   }
 }
 
-module.exports = { hashPassword, compare };
+/**
+ * Generate a default password for bulk student registration.
+ * Format: firstname@passout_year (e.g. "rahul@2025")
+ *
+ * @param {string} firstName - Student's first name (lowercase)
+ * @param {number} passoutYear - Passout year
+ * @returns {string} Default password string
+ */
+function generateDefaultPassword(firstName, passoutYear) {
+  return `${firstName.toLowerCase()}@${passoutYear}`;
+}
+
+module.exports = { hashPassword, comparePassword, generateDefaultPassword };

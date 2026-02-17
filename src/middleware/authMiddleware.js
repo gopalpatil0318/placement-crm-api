@@ -1,21 +1,23 @@
 /**
  * ============================================================================
- * AUTH MIDDLEWARE - Authentication & Authorization (SIMPLIFIED)
+ * AUTH MIDDLEWARE — Authentication & Authorization
  * ============================================================================
- * Handles JWT validation and role-based access control
- * Single database - no multi-tenant pool logic
- * * Supports 4 user types:
- * 1. SYSADMIN - System administrator (NOT in database - from .env)
- * 2. ADMIN (users table) - College administrator
- * 3. TEACHER (users table) - College teacher
- * 4. STUDENT (students table) - College student
- * * * SECURITY NOTE:
- * Reads token from HttpOnly Cookie ('token')
- * Requires 'cookie-parser' middleware in app.js
+ * Single-database architecture — no multi-tenant pool logic
+ *
+ * Supports 5 user types:
+ *   SYSADMIN      → .env credentials (no DB lookup)
+ *   COLLEGEADMIN  → users table
+ *   TPO           → users table
+ *   HOD           → users table
+ *   TEACHER       → users table
+ *   STUDENT       → students table (separate table)
+ *
+ * Token source: HttpOnly cookie ('token')
  * ============================================================================
  */
 
-const jwtHelper = require('../utils/jwtHelper');
+const { verifyToken } = require('../utils/jwtHelper');
+const { sendError } = require('../utils/responseHelper');
 const logger = require('../config/logger');
 const { getMainPool } = require('../config/db');
 const {
@@ -23,291 +25,234 @@ const {
   ERROR_MESSAGES,
   HTTP_STATUS,
   LOG,
-  STATUS
+  STATUS,
 } = require('../config/constants');
 
-/**
- * Query user based on role
- * * SYSADMIN: No database query (verified during login)
- * ADMIN, TEACHER: Query users table
- * STUDENT: Query students table
- * * @param {Object} mainPool - Database connection pool
- * @param {string} userId - User ID
- * @param {string} role - User role from JWT payload
- * @returns {Object} User data or null
- */
-async function queryUserByRole(mainPool, userId, role) {
+// ============================================================================
+// ROLE → STUDENT check (students live in a different table)
+// ============================================================================
+
+const STUDENT_ROLE = 'student';
+
+// ============================================================================
+// queryUserByRole — Fetch active user from correct table
+// ============================================================================
+
+async function queryUserByRole(pool, userId, role) {
   try {
-    // ====================================================================
-    // SYSADMIN: No database lookup (verified during login from .env)
-    // ====================================================================
+    // ------------------------------------------------------------------
+    // SYSADMIN: No database lookup (verified at login via .env)
+    // ------------------------------------------------------------------
     if (role === ROLES.SYSADMIN) {
-      logger.debug(
-        `${LOG.TRANSACTION_PREFIX} Sysadmin token verified`,
-        { user_id: userId }
-      );
+      logger.debug(`${LOG.AUTH} Sysadmin token verified`, { userId });
       return {
         id: userId,
         user_status: STATUS.ACTIVE,
         college_id: null,
         user_role: ROLES.SYSADMIN,
-        college_status: STATUS.ACTIVE
+        college_status: STATUS.ACTIVE,
       };
     }
 
-    // ====================================================================
-    // STUDENT: Query from students table
-    // ====================================================================
-    if (role === ROLES.STUDENT) {
-      const studentQuery = `
-        SELECT 
-          s.student_id as id,
-         s.student_status AS user_status,
-
-          s.college_id,
-          $1 as user_role,
-          c.college_status
-        FROM students s
-        JOIN colleges c ON s.college_id = c.college_id
-        WHERE s.student_id = $2
-        LIMIT 1
-      `;
-
-      const { rows } = await mainPool.query(studentQuery, [
-        ROLES.STUDENT,
-        userId
-      ]);
-      return rows.length > 0 ? rows[0] : null;
+    // ------------------------------------------------------------------
+    // STUDENT: students table + college join
+    // ------------------------------------------------------------------
+    if (role === STUDENT_ROLE) {
+      const { rows } = await pool.query(
+        `SELECT
+           s.student_id  AS id,
+           s.student_status AS user_status,
+           s.college_id,
+           s.department_id,
+           $1::text       AS user_role,
+           c.college_status
+         FROM students s
+         JOIN colleges c ON s.college_id = c.college_id
+         WHERE s.student_id = $2
+         LIMIT 1`,
+        [STUDENT_ROLE, userId]
+      );
+      return rows[0] || null;
     }
 
-    // ====================================================================
-    // ADMIN, TEACHER: Query from users table
-    // ====================================================================
-    const userQuery = `
-      SELECT 
-        u.user_id as id,
-        u.user_status,
-        u.college_id,
-        u.user_role,
-        c.college_status
-      FROM users u
-      JOIN colleges c ON u.college_id = c.college_id
-      WHERE u.user_id = $1
-      LIMIT 1
-    `;
-
-    const { rows } = await mainPool.query(userQuery, [userId]);
-    return rows.length > 0 ? rows[0] : null;
-  } catch (err) {
-    logger.error(
-      `${LOG.TRANSACTION_PREFIX} Error querying user by role`,
-      { error: err.message, user_id: userId, role }
+    // ------------------------------------------------------------------
+    // COLLEGEADMIN / TPO / HOD / TEACHER: users table + college join
+    // ------------------------------------------------------------------
+    const { rows } = await pool.query(
+      `SELECT
+         u.user_id     AS id,
+         u.user_status,
+         u.college_id,
+         u.department_id,
+         u.user_role,
+         c.college_status
+       FROM users u
+       JOIN colleges c ON u.college_id = c.college_id
+       WHERE u.user_id = $1
+       LIMIT 1`,
+      [userId]
     );
+    return rows[0] || null;
+  } catch (err) {
+    logger.error(`${LOG.AUTH} Error querying user`, {
+      error: err.message,
+      userId,
+      role,
+    });
     return null;
   }
 }
 
-/**
- * Authentication Middleware
- * * Flow:
- * 1. Extract JWT token from HttpOnly Cookie (UPDATED)
- * 2. Verify JWT signature and expiration
- * 3. Query correct table based on role:
- * - SYSADMIN → No query (verified at login from .env)
- * - STUDENT → students table
- * - ADMIN/TEACHER → users table
- * 4. Verify user is active
- * 5. Verify college is active (if not sysadmin)
- * 6. Attach user to request
- */
-async function authMiddleware(req, res, next) {
+// ============================================================================
+// authenticate — Main authentication middleware
+// ============================================================================
+
+async function authenticate(req, res, next) {
   try {
-    // ====================================================================
-    // Step 1: Extract Token from Cookie
-    // ====================================================================
-    // CHANGED: Reading from req.cookies.token (matches res.cookie('token', ...))
-    const token = req.cookies && req.cookies.token;
+    // 1. Extract token from HttpOnly cookie
+    const token = req.cookies?.token;
 
     if (!token) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} Missing authentication cookie`,
-        { ip: req.ip, path: req.path }
-      );
-      
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: 'Authentication required' // Clearer message for frontend
+      logger.warn(`${LOG.SECURITY} Missing auth cookie`, {
+        ip: req.ip,
+        path: req.path,
       });
+      return sendError(res, ERROR_MESSAGES.UNAUTHORIZED, HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // ====================================================================
-    // Step 2: Verify JWT signature and expiration
-    // ====================================================================
-    logger.debug(`${LOG.TRANSACTION_PREFIX} Verifying JWT token`);
-
-    const payload = jwtHelper.verify(token);
+    // 2. Verify JWT
+    const payload = verifyToken(token);
 
     if (!payload) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} Invalid or expired token`,
-        { ip: req.ip }
-      );
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: ERROR_MESSAGES.INVALID_TOKEN
-      });
+      return sendError(res, ERROR_MESSAGES.INVALID_TOKEN, HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // ====================================================================
-    // Step 3: Validate user in correct table based on role
-    // ====================================================================
-    const mainPool = getMainPool();
-
-    logger.debug(`${LOG.TRANSACTION_PREFIX} Validating user in database`, {
-      user_id: payload.id,
-      role: payload.role
-    });
-
-    const dbUser = await queryUserByRole(mainPool, payload.id, payload.role);
+    // 3. Look up user in correct table
+    const pool = getMainPool();
+    const dbUser = await queryUserByRole(pool, payload.id, payload.role);
 
     if (!dbUser) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} User not found in database`,
-        {
-          user_id: payload.id,
-          role: payload.role,
-          ip: req.ip
-        }
-      );
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: ERROR_MESSAGES.INVALID_TOKEN
+      logger.warn(`${LOG.SECURITY} Authenticated user not found in DB`, {
+        userId: payload.id,
+        role: payload.role,
+        ip: req.ip,
       });
+      return sendError(res, ERROR_MESSAGES.INVALID_TOKEN, HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // Verify user is active
+    // 4. Check user is active
     if (dbUser.user_status !== STATUS.ACTIVE) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} User account is not active`,
-        {
-          user_id: payload.id,
-          status: dbUser.user_status,
-          role: payload.role,
-          ip: req.ip
-        }
-      );
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: 'User account is not active'
+      logger.warn(`${LOG.SECURITY} Inactive user attempted access`, {
+        userId: payload.id,
+        status: dbUser.user_status,
       });
+      return sendError(res, ERROR_MESSAGES.ACCOUNT_INACTIVE, HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // Verify college is active (skip for sysadmin - no college)
+    // 5. Check college is active (skip for sysadmin)
     if (payload.role !== ROLES.SYSADMIN && dbUser.college_status !== STATUS.ACTIVE) {
-      logger.warn(
-        `${LOG.SECURITY_PREFIX} College is not active`,
-        {
-          user_id: payload.id,
-          college_id: dbUser.college_id,
-          role: payload.role,
-          ip: req.ip
-        }
-      );
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        success: false,
-        message: 'College is not active'
+      logger.warn(`${LOG.SECURITY} Inactive college`, {
+        userId: payload.id,
+        collegeId: dbUser.college_id,
       });
+      return sendError(res, ERROR_MESSAGES.COLLEGE_INACTIVE, HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // ====================================================================
-    // Step 4: Attach user to request
-    // ====================================================================
+    // 6. Attach user to request
     req.user = {
-      ...payload,
+      id: dbUser.id,
+      role: dbUser.user_role || payload.role,
       college_id: dbUser.college_id,
-      
-      user_role: dbUser.user_role || payload.role
+      department_id: dbUser.department_id || null,
     };
 
-    logger.debug(
-      `${LOG.TRANSACTION_PREFIX} User authenticated successfully`,
-      {
-        user_id: payload.id,
-        role: payload.role,
-        college_id: dbUser.college_id
-      }
-    );
+    logger.debug(`${LOG.AUTH} Authenticated`, {
+      userId: req.user.id,
+      role: req.user.role,
+      collegeId: req.user.college_id,
+    });
 
     return next();
   } catch (err) {
-    logger.error(
-      `${LOG.TRANSACTION_PREFIX} Unexpected error in auth middleware`,
-      { error: err.message, ip: req.ip }
-    );
-    return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      success: false,
-      message: ERROR_MESSAGES.SERVER_ERROR
+    logger.error(`${LOG.AUTH} Auth middleware error`, {
+      error: err.message,
+      ip: req.ip,
     });
+    return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
   }
 }
 
+// ============================================================================
+// requireRole — RBAC middleware factory
+// ============================================================================
+
 /**
- * Role-Based Access Control (RBAC) Middleware
- * * Validates user has one of the required roles
+ * Allow only specified roles to access the route.
+ *
+ * @param {...string} allowedRoles - e.g. ROLES.SYSADMIN, ROLES.COLLEGEADMIN
+ * @returns {Function} Express middleware
+ *
+ * Usage:
+ *   router.get('/colleges', authenticate, requireRole(ROLES.SYSADMIN), handler);
  */
 function requireRole(...allowedRoles) {
   return (req, res, next) => {
-    try {
-      const user = req.user;
-
-      if (!user) {
-        logger.warn(
-          `${LOG.SECURITY_PREFIX} requireRole: No authenticated user`,
-          { ip: req.ip, path: req.path }
-        );
-        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-          success: false,
-          message: ERROR_MESSAGES.UNAUTHORIZED
-        });
-      }
-
-      if (!allowedRoles.includes(user.role)) {
-        logger.warn(
-          `${LOG.SECURITY_PREFIX} Insufficient permissions`,
-          {
-            user_id: user.id,
-            user_role: user.role,
-            required_roles: allowedRoles,
-            path: req.path,
-            ip: req.ip
-          }
-        );
-        return res.status(HTTP_STATUS.FORBIDDEN).json({
-          success: false,
-          message: ERROR_MESSAGES.FORBIDDEN
-        });
-      }
-
-      logger.debug(
-        `${LOG.TRANSACTION_PREFIX} Role validation passed`,
-        { user_id: user.id, role: user.role }
-      );
-
-      return next();
-    } catch (err) {
-      logger.error(
-        `${LOG.TRANSACTION_PREFIX} Unexpected error in requireRole`,
-        { error: err.message }
-      );
-      return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-        success: false,
-        message: ERROR_MESSAGES.SERVER_ERROR
-      });
+    if (!req.user) {
+      return sendError(res, ERROR_MESSAGES.UNAUTHORIZED, HTTP_STATUS.UNAUTHORIZED);
     }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      logger.warn(`${LOG.SECURITY} Insufficient permissions`, {
+        userId: req.user.id,
+        userRole: req.user.role,
+        requiredRoles: allowedRoles,
+        path: req.path,
+      });
+      return sendError(res, ERROR_MESSAGES.FORBIDDEN, HTTP_STATUS.FORBIDDEN);
+    }
+
+    return next();
   };
 }
 
+// ============================================================================
+// requireCollegeAccess — Ensure user belongs to the requested college
+// ============================================================================
+
+/**
+ * Verify that req.user.college_id matches req.params.collegeId.
+ * Sysadmin bypasses this check (can access any college).
+ */
+function requireCollegeAccess(req, res, next) {
+  if (!req.user) {
+    return sendError(res, ERROR_MESSAGES.UNAUTHORIZED, HTTP_STATUS.UNAUTHORIZED);
+  }
+
+  // Sysadmin can access any college
+  if (req.user.role === ROLES.SYSADMIN) {
+    return next();
+  }
+
+  const paramCollegeId = req.params.collegeId || req.params.college_id;
+
+  if (paramCollegeId && req.user.college_id !== paramCollegeId) {
+    logger.warn(`${LOG.SECURITY} College access denied`, {
+      userId: req.user.id,
+      userCollege: req.user.college_id,
+      requestedCollege: paramCollegeId,
+    });
+    return sendError(res, ERROR_MESSAGES.FORBIDDEN, HTTP_STATUS.FORBIDDEN);
+  }
+
+  return next();
+}
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
-  authMiddleware,
-  requireRole
+  authenticate,
+  requireRole,
+  requireCollegeAccess,
 };

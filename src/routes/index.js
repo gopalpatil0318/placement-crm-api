@@ -1,23 +1,30 @@
 /**
  * ============================================================================
- * ROUTES INDEX - API Routes (SIMPLIFIED)
+ * ROUTES INDEX — Central Route Registration
  * ============================================================================
- * Single Database Architecture
- * - No multi-tenant/tenant routes
- * - Only college, auth, students, users routes
+ * All routes are separated by user type:
+ *   /api/sysadmin/*   → System admin operations
+ *   /api/college/*    → College admin/TPO/HOD operations  (future)
+ *   /api/student/*    → Student operations                (future)
+ *   /api/auth/*       → Shared auth (verify, logout)      (future)
+ * ============================================================================
  */
 
 const express = require('express');
-const authRoutes = require('./auth.routes');
-const collegeRoutes = require('./college.routes');
-const studentRoutes = require('./student.routes');
-const userRoutes = require('./user.routes');
-
 const router = express.Router();
 
-router.use('/auth', authRoutes);
-router.use('/sysadmin', collegeRoutes);
-router.use('/students', studentRoutes);
-router.use('/college', userRoutes);
+// Route groups
+const sysadminRoutes = require('./sysadmin/sysadmin.routes');
+
+// ============================================================================
+// MOUNT ROUTES
+// ============================================================================
+
+router.use('/sysadmin', sysadminRoutes);
+
+// Future route groups (uncomment as implemented):
+// router.use('/college', collegeRoutes);
+// router.use('/student', studentRoutes);
+// router.use('/auth', authRoutes);
 
 module.exports = router;
