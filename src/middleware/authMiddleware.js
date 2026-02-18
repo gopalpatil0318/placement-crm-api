@@ -4,10 +4,11 @@
  * ============================================================================
  * Single-database architecture — no multi-tenant pool logic
  *
- * Supports 5 user types:
+ * Supports 6 user types:
  *   SYSADMIN      → .env credentials (no DB lookup)
  *   COLLEGEADMIN  → users table
  *   TPO           → users table
+ *   TPC           → users table
  *   HOD           → users table
  *   TEACHER       → users table
  *   STUDENT       → students table (separate table)
@@ -63,7 +64,7 @@ async function queryUserByRole(pool, userId, role) {
            s.student_id  AS id,
            s.student_status AS user_status,
            s.college_id,
-           s.department_id,
+           s.dept_id,
            $1::text       AS user_role,
            c.college_status
          FROM students s
@@ -83,7 +84,7 @@ async function queryUserByRole(pool, userId, role) {
          u.user_id     AS id,
          u.user_status,
          u.college_id,
-         u.department_id,
+         u.dept_id,
          u.user_role,
          c.college_status
        FROM users u
@@ -163,7 +164,7 @@ async function authenticate(req, res, next) {
       id: dbUser.id,
       role: dbUser.user_role || payload.role,
       college_id: dbUser.college_id,
-      department_id: dbUser.department_id || null,
+      dept_id: dbUser.dept_id || null,
     };
 
     logger.debug(`${LOG.AUTH} Authenticated`, {

@@ -77,6 +77,13 @@ const config = Object.freeze({
 
   // CORS
   frontendUrl: process.env.FRONTEND_URL || '*',
+
+  // Email / SMTP (only required in production)
+  smtpHost: process.env.SMTP_HOST || '',
+  smtpPort: parseIntSafe(process.env.SMTP_PORT, 587),
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  smtpFrom: process.env.SMTP_FROM || '"Placement CRM" <noreply@placementcrm.com>',
 });
 
 module.exports = config;

@@ -15,16 +15,14 @@ const router = express.Router();
 
 // Route groups
 const sysadminRoutes = require('./sysadmin/sysadmin.routes');
+const collegeUserRoutes = require('./college/user.routes');
 
 // ============================================================================
 // MOUNT ROUTES
 // ============================================================================
 
 router.use('/sysadmin', sysadminRoutes);
-
-// Future route groups (uncomment as implemented):
-// router.use('/college', collegeRoutes);
-// router.use('/student', studentRoutes);
+router.use('/college', collegeUserRoutes);
 // router.use('/auth', authRoutes);
 
 module.exports = router;

@@ -16,6 +16,7 @@ const ROLES = Object.freeze({
   TEACHER: 'teacher',
   HOD: 'hod',
   TPO: 'tpo',
+  TPC: 'tpc',
 });
 
 const ROLE_HIERARCHY = Object.freeze({
@@ -23,6 +24,7 @@ const ROLE_HIERARCHY = Object.freeze({
   [ROLES.COLLEGEADMIN]: 80,
   [ROLES.TPO]: 70,
   [ROLES.HOD]: 60,
+  [ROLES.TPC]: 55,
   [ROLES.TEACHER]: 50,
 });
 
