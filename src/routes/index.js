@@ -17,6 +17,7 @@ const router = express.Router();
 const sysadminRoutes = require('./sysadmin/sysadmin.routes');
 const collegeUserRoutes = require('./college/user.routes');
 const collegeDepartmentRoutes = require('./college/department.routes');
+const collegeStudentRoutes = require('./college/student.routes');
 
 // ============================================================================
 // MOUNT ROUTES
@@ -25,6 +26,7 @@ const collegeDepartmentRoutes = require('./college/department.routes');
 router.use('/sysadmin', sysadminRoutes);
 router.use('/college', collegeUserRoutes);
 router.use('/college', collegeDepartmentRoutes);
+router.use('/college', collegeStudentRoutes);
 // router.use('/auth', authRoutes);
 
 module.exports = router;
