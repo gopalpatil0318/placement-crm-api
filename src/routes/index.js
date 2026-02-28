@@ -23,6 +23,10 @@ const collegeStudentRoutes = require('./college/student.routes');
 
 // Route groups — Student
 const studentAuthRoutes = require('./student/auth.routes');
+const studentProfileRoutes = require('./student/profile.routes');
+const studentPersonalRoutes = require('./student/personal.routes');
+const studentAcademicRoutes = require('./student/academic.routes');
+const studentSemesterRoutes = require('./student/semester.routes');
 
 // ============================================================================
 // MOUNT ROUTES
@@ -33,5 +37,9 @@ router.use('/college', collegeUserRoutes);
 router.use('/college', collegeDepartmentRoutes);
 router.use('/college', collegeStudentRoutes);
 router.use('/student', studentAuthRoutes);
+router.use('/student', studentProfileRoutes);
+router.use('/student', studentPersonalRoutes);
+router.use('/student', studentAcademicRoutes);
+router.use('/student', studentSemesterRoutes);
 
 module.exports = router;
