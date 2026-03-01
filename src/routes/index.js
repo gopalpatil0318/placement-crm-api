@@ -20,6 +20,7 @@ const sysadminRoutes = require('./sysadmin/sysadmin.routes');
 const collegeUserRoutes = require('./college/user.routes');
 const collegeDepartmentRoutes = require('./college/department.routes');
 const collegeStudentRoutes = require('./college/student.routes');
+const collegeRestrictionRoutes = require('./college/restriction.routes');
 
 // Route groups — Student
 const studentAuthRoutes = require('./student/auth.routes');
@@ -43,6 +44,7 @@ router.use('/sysadmin', sysadminRoutes);
 router.use('/college', collegeUserRoutes);
 router.use('/college', collegeDepartmentRoutes);
 router.use('/college', collegeStudentRoutes);
+router.use('/college', collegeRestrictionRoutes);
 router.use('/student', studentAuthRoutes);
 router.use('/student', studentProfileRoutes);
 router.use('/student', studentPersonalRoutes);

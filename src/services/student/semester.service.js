@@ -66,9 +66,9 @@ async function addSemesterGrade(studentId, collegeId, deptId, data) {
             [
                 studentId, collegeId, deptId, data.semester_number,
                 data.academic_year || null,
-                data.sgpa || null,
-                data.cgpa || null,
-                data.backlogs_in_semester || 0,
+                data.sgpa != null ? data.sgpa : null,
+                data.cgpa != null ? data.cgpa : null,
+                data.backlogs_in_semester != null ? data.backlogs_in_semester : 0,
                 data.backlog_subjects || [],
                 data.semester_status || 'in_progress',
             ]

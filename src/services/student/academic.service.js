@@ -67,12 +67,13 @@ async function saveAcademicInfo(studentId, collegeId, data) {
              VALUES (${insertPlaceholders.join(', ')})
              ON CONFLICT (student_id)
              DO UPDATE SET ${updateSetClauses.join(', ')}
-             RETURNING *`,
+             RETURNING *,
+               (xmax = 0) AS is_new`,
             insertValues
         );
 
         const record = result.rows[0];
-        const isNew = Math.abs(new Date(record.created_at) - new Date(record.updated_at)) < 1000;
+        const isNew = record.is_new;
 
         logger.info(`${LOG.AUTH} Student academic info ${isNew ? 'created' : 'updated'}`, {
             studentId,

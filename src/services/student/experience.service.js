@@ -56,6 +56,11 @@ async function addExperience(studentId, collegeId, data) {
         data.end_date = null;
     }
 
+    // 3. Validate end_date >= start_date (when both provided and not current)
+    if (data.end_date && data.start_date && new Date(data.end_date) < new Date(data.start_date)) {
+        throw Object.assign(new Error('End date must be after start date'), { status: 400 });
+    }
+
     // 3. Auto-calculate duration if not provided
     if (!data.duration_months && data.start_date) {
         const start = new Date(data.start_date);

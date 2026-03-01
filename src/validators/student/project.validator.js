@@ -95,11 +95,9 @@ const addProjectSchema = Joi.object({
 
     end_date: Joi.date()
         .iso()
-        .min(Joi.ref('start_date'))
         .optional()
         .allow(null)
         .messages({
-            'date.min': 'End date must be after start date',
             'date.format': 'End date must be in YYYY-MM-DD format',
         }),
 

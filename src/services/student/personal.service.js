@@ -51,12 +51,32 @@ async function savePersonalInfo(studentId, collegeId, data) {
     }
 
     // 2. Handle same_as_permanent — copy permanent address to current
+    //    If permanent fields aren't in the request, fetch from DB first
     if (data.same_as_permanent === true) {
-        data.current_address = data.permanent_address || null;
-        data.current_city = data.permanent_city || null;
-        data.current_district = data.permanent_district || null;
-        data.current_state = data.permanent_state || null;
-        data.current_pincode = data.permanent_pincode || null;
+        const permFields = ['permanent_address', 'permanent_city', 'permanent_district', 'permanent_state', 'permanent_pincode'];
+        const hasPermanentInRequest = permFields.some(f => data[f] !== undefined);
+
+        let permSource = data;
+
+        if (!hasPermanentInRequest) {
+            // Fetch existing permanent address from DB
+            const existingResult = await query(
+                `SELECT permanent_address, permanent_city, permanent_district, permanent_state, permanent_pincode
+                 FROM student_personal_information
+                 WHERE student_id = $1 AND college_id = $2
+                 LIMIT 1`,
+                [studentId, collegeId]
+            );
+            if (existingResult.rows.length) {
+                permSource = existingResult.rows[0];
+            }
+        }
+
+        data.current_address = permSource.permanent_address || null;
+        data.current_city = permSource.permanent_city || null;
+        data.current_district = permSource.permanent_district || null;
+        data.current_state = permSource.permanent_state || null;
+        data.current_pincode = permSource.permanent_pincode || null;
     }
 
     // 3. Build columns and values for INSERT
@@ -80,14 +100,15 @@ async function savePersonalInfo(studentId, collegeId, data) {
          VALUES (${insertPlaceholders.join(', ')})
          ON CONFLICT (student_id)
          DO UPDATE SET ${updateSetClauses.join(', ')}
-         RETURNING *`,
+         RETURNING *,
+           (xmax = 0) AS is_new`,
         insertValues
     );
 
     const record = result.rows[0];
 
-    // 6. Determine if it was an insert or update (check if created_at ≈ updated_at)
-    const isNew = Math.abs(new Date(record.created_at) - new Date(record.updated_at)) < 1000;
+    // 6. Determine if it was an insert or update (xmax = 0 means INSERT, >0 means UPDATE)
+    const isNew = record.is_new;
 
     logger.info(`${LOG.AUTH} Student personal info ${isNew ? 'created' : 'updated'}`, {
         studentId,

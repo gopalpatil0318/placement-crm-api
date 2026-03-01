@@ -55,6 +55,11 @@ async function addProject(studentId, collegeId, data) {
         data.end_date = null;
     }
 
+    // 3. Validate end_date >= start_date (when both provided and not ongoing)
+    if (data.end_date && data.start_date && new Date(data.end_date) < new Date(data.start_date)) {
+        throw Object.assign(new Error('End date must be after start date'), { status: 400 });
+    }
+
     // 3. Build insert
     const fieldsToInsert = PROJECT_FIELDS.filter(f => data[f] !== undefined);
     const insertColumns = ['student_id', 'college_id', ...fieldsToInsert];
