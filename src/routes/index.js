@@ -30,6 +30,10 @@ const studentSemesterRoutes = require('./student/semester.routes');
 const studentSkillRoutes = require('./student/skill.routes');
 const studentProjectRoutes = require('./student/project.routes');
 const studentExperienceRoutes = require('./student/experience.routes');
+const studentAchievementRoutes = require('./student/achievement.routes');
+const studentCertificateRoutes = require('./student/certificate.routes');
+const studentActivityRoutes = require('./student/activity.routes');
+const studentProfileLinksRoutes = require('./student/profileLinks.routes');
 
 // ============================================================================
 // MOUNT ROUTES
@@ -47,5 +51,9 @@ router.use('/student', studentSemesterRoutes);
 router.use('/student', studentSkillRoutes);
 router.use('/student', studentProjectRoutes);
 router.use('/student', studentExperienceRoutes);
+router.use('/student', studentAchievementRoutes);
+router.use('/student', studentCertificateRoutes);
+router.use('/student', studentActivityRoutes);
+router.use('/student', studentProfileLinksRoutes);
 
 module.exports = router;
