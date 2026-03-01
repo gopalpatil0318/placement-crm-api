@@ -27,6 +27,9 @@ const studentProfileRoutes = require('./student/profile.routes');
 const studentPersonalRoutes = require('./student/personal.routes');
 const studentAcademicRoutes = require('./student/academic.routes');
 const studentSemesterRoutes = require('./student/semester.routes');
+const studentSkillRoutes = require('./student/skill.routes');
+const studentProjectRoutes = require('./student/project.routes');
+const studentExperienceRoutes = require('./student/experience.routes');
 
 // ============================================================================
 // MOUNT ROUTES
@@ -41,5 +44,8 @@ router.use('/student', studentProfileRoutes);
 router.use('/student', studentPersonalRoutes);
 router.use('/student', studentAcademicRoutes);
 router.use('/student', studentSemesterRoutes);
+router.use('/student', studentSkillRoutes);
+router.use('/student', studentProjectRoutes);
+router.use('/student', studentExperienceRoutes);
 
 module.exports = router;
