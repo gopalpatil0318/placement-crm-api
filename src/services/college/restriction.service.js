@@ -331,9 +331,13 @@ async function updateRestriction(restrictionId, collegeId, userId, data) {
         throw Object.assign(new Error(ERROR_MESSAGES.RESTRICTION_NOT_FOUND), { status: 404 });
     }
 
-    // 2. If resolving (is_active = false), auto-set resolved_by
+    // 2. Handle is_active changes
     if (data.is_active === false) {
+        // Resolving — auto-set resolved_by
         data.resolved_by = userId;
+    } else if (data.is_active === true && existing.rows[0].is_active === false) {
+        // Re-activating — clear resolved fields
+        data.resolved_by = null;
     }
 
     // 3. Validate valid_until >= today if provided

@@ -21,6 +21,11 @@ const collegeUserRoutes = require('./college/user.routes');
 const collegeDepartmentRoutes = require('./college/department.routes');
 const collegeStudentRoutes = require('./college/student.routes');
 const collegeRestrictionRoutes = require('./college/restriction.routes');
+const collegeCompanyRoutes = require('./college/company.routes');
+const collegeCompanyContactRoutes = require('./college/companyContact.routes');
+const collegeJobRoutes = require('./college/job.routes');
+const collegeJobPositionRoutes = require('./college/jobPosition.routes');
+const collegeJobCriteriaRoutes = require('./college/jobCriteria.routes');
 
 // Route groups — Student
 const studentAuthRoutes = require('./student/auth.routes');
@@ -45,6 +50,11 @@ router.use('/college', collegeUserRoutes);
 router.use('/college', collegeDepartmentRoutes);
 router.use('/college', collegeStudentRoutes);
 router.use('/college', collegeRestrictionRoutes);
+router.use('/college', collegeCompanyRoutes);
+router.use('/college', collegeCompanyContactRoutes);
+router.use('/college', collegeJobRoutes);
+router.use('/college', collegeJobPositionRoutes);
+router.use('/college', collegeJobCriteriaRoutes);
 router.use('/student', studentAuthRoutes);
 router.use('/student', studentProfileRoutes);
 router.use('/student', studentPersonalRoutes);

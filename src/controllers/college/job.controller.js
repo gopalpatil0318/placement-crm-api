@@ -1,15 +1,16 @@
 /**
  * ============================================================================
- * RESTRICTION CONTROLLER — Route Handlers for Student Restriction Management
+ * JOB CONTROLLER — Route Handlers for Job Posting Management
  * ============================================================================
- *   POST  /api/college/add_student_restriction/:studentId
- *   GET   /api/college/get_all_restrictions
- *   GET   /api/college/get_student_restrictions/:studentId
- *   PATCH /api/college/update_restriction/:restrictionId
+ *   POST  /api/college/create_job
+ *   GET   /api/college/get_all_jobs
+ *   GET   /api/college/get_job/:jobId
+ *   PUT   /api/college/update_job/:jobId
+ *   PATCH /api/college/update_job_status/:jobId
  * ============================================================================
  */
 
-const restrictionService = require('../../services/college/restriction.service');
+const jobService = require('../../services/college/job.service');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
 const {
     SUCCESS_MESSAGES,
@@ -18,19 +19,18 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
-// 1. ADD RESTRICTION
+// 1. CREATE JOB
 // ============================================================================
 
-async function addRestriction(req, res) {
+async function createJob(req, res) {
     try {
-        const result = await restrictionService.addRestriction(
-            req.params.studentId,
+        const result = await jobService.createJob(
             req.user.college_id,
             req.user.id,
             req.validated
         );
 
-        return sendCreated(res, result, SUCCESS_MESSAGES.RESTRICTION_ADDED);
+        return sendCreated(res, result, SUCCESS_MESSAGES.JOB_CREATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -40,35 +40,34 @@ async function addRestriction(req, res) {
 }
 
 // ============================================================================
-// 2. GET ALL RESTRICTIONS (with passout_year filter)
+// 2. GET ALL JOBS
 // ============================================================================
 
-async function getAllRestrictions(req, res) {
+async function getAllJobs(req, res) {
     try {
-        const { restrictions, total, page, limit } = await restrictionService.getAllRestrictions(
+        const { jobs, total, page, limit } = await jobService.getAllJobs(
             req.user.college_id,
             req.validated
         );
 
-        return sendPaginated(res, restrictions, total, { page, limit }, 'Restrictions retrieved successfully');
+        return sendPaginated(res, jobs, total, { page, limit }, 'Jobs retrieved successfully');
     } catch (err) {
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
     }
 }
 
 // ============================================================================
-// 3. GET STUDENT RESTRICTIONS
+// 3. GET JOB BY ID
 // ============================================================================
 
-async function getStudentRestrictions(req, res) {
+async function getJob(req, res) {
     try {
-        const result = await restrictionService.getStudentRestrictions(
-            req.params.studentId,
-            req.user.college_id,
-            req.validated || {}
+        const result = await jobService.getJobById(
+            req.params.jobId,
+            req.user.college_id
         );
 
-        return sendSuccess(res, result, 'Student restrictions retrieved successfully');
+        return sendSuccess(res, result, 'Job details retrieved successfully');
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -76,23 +75,46 @@ async function getStudentRestrictions(req, res) {
 }
 
 // ============================================================================
-// 4. UPDATE / RESOLVE RESTRICTION
+// 4. UPDATE JOB
 // ============================================================================
 
-async function updateRestriction(req, res) {
+async function updateJob(req, res) {
     try {
-        const result = await restrictionService.updateRestriction(
-            req.params.restrictionId,
+        const result = await jobService.updateJob(
+            req.params.jobId,
             req.user.college_id,
-            req.user.id,
             req.validated
         );
 
-        const message = req.validated.is_active === false
-            ? 'Restriction resolved successfully'
-            : SUCCESS_MESSAGES.RESTRICTION_UPDATED;
+        return sendSuccess(res, result, SUCCESS_MESSAGES.JOB_UPDATED);
+    } catch (err) {
+        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
+        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
+        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+}
 
-        return sendSuccess(res, result, message);
+// ============================================================================
+// 5. UPDATE JOB STATUS
+// ============================================================================
+
+async function updateJobStatus(req, res) {
+    try {
+        const { job_status } = req.validated;
+
+        const result = await jobService.updateJobStatus(
+            req.params.jobId,
+            req.user.college_id,
+            job_status
+        );
+
+        const statusMessages = {
+            published: SUCCESS_MESSAGES.JOB_PUBLISHED,
+            closed: SUCCESS_MESSAGES.JOB_CLOSED,
+            cancelled: 'Job posting cancelled',
+        };
+
+        return sendSuccess(res, result, statusMessages[job_status] || SUCCESS_MESSAGES.JOB_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -105,8 +127,9 @@ async function updateRestriction(req, res) {
 // ============================================================================
 
 module.exports = {
-    addRestriction,
-    getAllRestrictions,
-    getStudentRestrictions,
-    updateRestriction,
+    createJob,
+    getAllJobs,
+    getJob,
+    updateJob,
+    updateJobStatus,
 };

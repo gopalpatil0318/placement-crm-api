@@ -1,15 +1,16 @@
 /**
  * ============================================================================
- * RESTRICTION CONTROLLER — Route Handlers for Student Restriction Management
+ * COMPANY CONTROLLER — Route Handlers for Company Management
  * ============================================================================
- *   POST  /api/college/add_student_restriction/:studentId
- *   GET   /api/college/get_all_restrictions
- *   GET   /api/college/get_student_restrictions/:studentId
- *   PATCH /api/college/update_restriction/:restrictionId
+ *   POST  /api/college/create_company
+ *   GET   /api/college/get_all_companies
+ *   GET   /api/college/get_company/:companyId
+ *   PUT   /api/college/update_company/:companyId
+ *   PATCH /api/college/toggle_company_status/:companyId
  * ============================================================================
  */
 
-const restrictionService = require('../../services/college/restriction.service');
+const companyService = require('../../services/college/company.service');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
 const {
     SUCCESS_MESSAGES,
@@ -18,19 +19,71 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
-// 1. ADD RESTRICTION
+// 1. CREATE COMPANY
 // ============================================================================
 
-async function addRestriction(req, res) {
+async function createCompany(req, res) {
     try {
-        const result = await restrictionService.addRestriction(
-            req.params.studentId,
+        const result = await companyService.createCompany(
             req.user.college_id,
-            req.user.id,
             req.validated
         );
 
-        return sendCreated(res, result, SUCCESS_MESSAGES.RESTRICTION_ADDED);
+        return sendCreated(res, result, SUCCESS_MESSAGES.COMPANY_CREATED);
+    } catch (err) {
+        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
+        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+}
+
+// ============================================================================
+// 2. GET ALL COMPANIES
+// ============================================================================
+
+async function getAllCompanies(req, res) {
+    try {
+        const { companies, total, page, limit } = await companyService.getAllCompanies(
+            req.user.college_id,
+            req.validated
+        );
+
+        return sendPaginated(res, companies, total, { page, limit }, 'Companies retrieved successfully');
+    } catch (err) {
+        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+}
+
+// ============================================================================
+// 3. GET COMPANY BY ID (with contacts)
+// ============================================================================
+
+async function getCompany(req, res) {
+    try {
+        const result = await companyService.getCompanyById(
+            req.params.companyId,
+            req.user.college_id
+        );
+
+        return sendSuccess(res, result, 'Company retrieved successfully');
+    } catch (err) {
+        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
+        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+}
+
+// ============================================================================
+// 4. UPDATE COMPANY
+// ============================================================================
+
+async function updateCompany(req, res) {
+    try {
+        const result = await companyService.updateCompany(
+            req.params.companyId,
+            req.user.college_id,
+            req.validated
+        );
+
+        return sendSuccess(res, result, SUCCESS_MESSAGES.COMPANY_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -40,57 +93,22 @@ async function addRestriction(req, res) {
 }
 
 // ============================================================================
-// 2. GET ALL RESTRICTIONS (with passout_year filter)
+// 5. TOGGLE COMPANY STATUS
 // ============================================================================
 
-async function getAllRestrictions(req, res) {
+async function toggleCompanyStatus(req, res) {
     try {
-        const { restrictions, total, page, limit } = await restrictionService.getAllRestrictions(
+        const { company_status } = req.validated;
+
+        const result = await companyService.toggleCompanyStatus(
+            req.params.companyId,
             req.user.college_id,
-            req.validated
+            company_status
         );
 
-        return sendPaginated(res, restrictions, total, { page, limit }, 'Restrictions retrieved successfully');
-    } catch (err) {
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
-}
-
-// ============================================================================
-// 3. GET STUDENT RESTRICTIONS
-// ============================================================================
-
-async function getStudentRestrictions(req, res) {
-    try {
-        const result = await restrictionService.getStudentRestrictions(
-            req.params.studentId,
-            req.user.college_id,
-            req.validated || {}
-        );
-
-        return sendSuccess(res, result, 'Student restrictions retrieved successfully');
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
-}
-
-// ============================================================================
-// 4. UPDATE / RESOLVE RESTRICTION
-// ============================================================================
-
-async function updateRestriction(req, res) {
-    try {
-        const result = await restrictionService.updateRestriction(
-            req.params.restrictionId,
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
-
-        const message = req.validated.is_active === false
-            ? 'Restriction resolved successfully'
-            : SUCCESS_MESSAGES.RESTRICTION_UPDATED;
+        const message = company_status === 'active'
+            ? 'Company activated successfully'
+            : 'Company deactivated successfully';
 
         return sendSuccess(res, result, message);
     } catch (err) {
@@ -105,8 +123,9 @@ async function updateRestriction(req, res) {
 // ============================================================================
 
 module.exports = {
-    addRestriction,
-    getAllRestrictions,
-    getStudentRestrictions,
-    updateRestriction,
+    createCompany,
+    getAllCompanies,
+    getCompany,
+    updateCompany,
+    toggleCompanyStatus,
 };
