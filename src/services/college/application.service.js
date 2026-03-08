@@ -304,7 +304,7 @@ async function getApplication(applicationId, collegeId) {
     const answersResult = await query(
         `SELECT aa.answer_id, aa.question_id,
                 aq.question_text, aq.question_type, aq.question_options, aq.is_required, aq.question_order,
-                aa.answer_text, aa.selected_options
+                aa.answer_text, aa.answer_options, aa.answer_boolean
          FROM application_answers aa
          JOIN application_questions aq ON aa.question_id = aq.question_id
          WHERE aa.application_id = $1
@@ -314,7 +314,8 @@ async function getApplication(applicationId, collegeId) {
 
     // 3. Fetch round results for this application's student and job
     const roundResultsRes = await query(
-        `SELECT rr.result_id, rr.round_id, rr.result_status, rr.remarks, rr.result_date,
+        `SELECT rr.result_id, rr.round_id, rr.result_status, rr.score, rr.remarks,
+                rr.attended, rr.scheduled_at, rr.completed_at,
                 jr.round_name, jr.round_number, jr.round_type, jr.round_status
          FROM student_round_results rr
          JOIN job_rounds jr ON rr.round_id = jr.round_id
@@ -346,7 +347,8 @@ async function getApplication(applicationId, collegeId) {
             is_required: row.is_required,
             question_order: row.question_order,
             answer_text: row.answer_text ?? null,
-            selected_options: row.selected_options ?? null,
+            answer_options: row.answer_options ?? null,
+            answer_boolean: row.answer_boolean ?? null,
         })),
         round_results: roundResultsRes.rows.map(row => ({
             result_id: row.result_id,
@@ -356,8 +358,11 @@ async function getApplication(applicationId, collegeId) {
             round_type: row.round_type,
             round_status: row.round_status,
             result_status: row.result_status,
+            score: row.score !== null ? parseFloat(row.score) : null,
             remarks: row.remarks ?? null,
-            result_date: row.result_date ?? null,
+            attended: row.attended,
+            scheduled_at: row.scheduled_at ?? null,
+            completed_at: row.completed_at ?? null,
         })),
     };
 }
