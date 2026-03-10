@@ -11,9 +11,9 @@
  */
 
 const certificateService = require('../../services/student/certificate.service');
-const { sendSuccess, sendError } = require('../../utils/responseHelper');
+const { sendSuccess } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
-const { ERROR_MESSAGES, LOG, HTTP_STATUS } = require('../../config/constants');
+const { LOG, HTTP_STATUS } = require('../../config/constants');
 
 // ============================================================================
 // 1. ADD CERTIFICATE
@@ -27,37 +27,21 @@ async function addCertificate(req, res) {
         college_id: req.user.college_id,
     });
 
-    try {
-        const result = await certificateService.addCertificate(
-            req.user.id,
-            req.user.college_id,
-            req.validated
-        );
+    const result = await certificateService.addCertificate(
+        req.user.id,
+        req.user.college_id,
+        req.validated
+    );
 
-        const duration = Date.now() - startTime;
+    const duration = Date.now() - startTime;
 
-        logger.info(`${LOG.API_END} POST /api/student/add_certificate`, {
-            student_id: req.user.id,
-            certificate_id: result.certificate_id,
-            duration_ms: duration,
-        });
+    logger.info(`${LOG.API_END} POST /api/student/add_certificate`, {
+        student_id: req.user.id,
+        certificate_id: result.certificate_id,
+        duration_ms: duration,
+    });
 
-        return sendSuccess(res, result, 'Certificate added successfully', HTTP_STATUS.CREATED);
-    } catch (err) {
-        const duration = Date.now() - startTime;
-
-        logger.error(`${LOG.API_ERROR} POST /api/student/add_certificate`, {
-            error: err.message,
-            stack: err.stack,
-            student_id: req.user.id,
-            duration_ms: duration,
-        });
-
-        if (err.status === 400) {
-            return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        }
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, 'Certificate added successfully', HTTP_STATUS.CREATED);
 }
 
 // ============================================================================
@@ -86,40 +70,21 @@ async function updateCertificate(req, res) {
         college_id: req.user.college_id,
     });
 
-    try {
-        const result = await certificateService.updateCertificate(
-            certificateId,
-            req.user.id,
-            req.user.college_id,
-            req.validated
-        );
+    const result = await certificateService.updateCertificate(
+        certificateId,
+        req.user.id,
+        req.user.college_id,
+        req.validated
+    );
 
-        const duration = Date.now() - startTime;
+    const duration = Date.now() - startTime;
 
-        logger.info(`${LOG.API_END} PUT /api/student/update_certificate/${certificateId}`, {
-            student_id: req.user.id,
-            duration_ms: duration,
-        });
+    logger.info(`${LOG.API_END} PUT /api/student/update_certificate/${certificateId}`, {
+        student_id: req.user.id,
+        duration_ms: duration,
+    });
 
-        return sendSuccess(res, result, 'Certificate updated successfully');
-    } catch (err) {
-        const duration = Date.now() - startTime;
-
-        logger.error(`${LOG.API_ERROR} PUT /api/student/update_certificate/${certificateId}`, {
-            error: err.message,
-            stack: err.stack,
-            student_id: req.user.id,
-            duration_ms: duration,
-        });
-
-        if (err.status === 400) {
-            return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        }
-        if (err.status === 404) {
-            return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        }
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, 'Certificate updated successfully');
 }
 
 // ============================================================================
@@ -135,36 +100,20 @@ async function deleteCertificate(req, res) {
         college_id: req.user.college_id,
     });
 
-    try {
-        const result = await certificateService.deleteCertificate(
-            certificateId,
-            req.user.id,
-            req.user.college_id
-        );
+    const result = await certificateService.deleteCertificate(
+        certificateId,
+        req.user.id,
+        req.user.college_id
+    );
 
-        const duration = Date.now() - startTime;
+    const duration = Date.now() - startTime;
 
-        logger.info(`${LOG.API_END} DELETE /api/student/delete_certificate/${certificateId}`, {
-            student_id: req.user.id,
-            duration_ms: duration,
-        });
+    logger.info(`${LOG.API_END} DELETE /api/student/delete_certificate/${certificateId}`, {
+        student_id: req.user.id,
+        duration_ms: duration,
+    });
 
-        return sendSuccess(res, result, 'Certificate deleted successfully');
-    } catch (err) {
-        const duration = Date.now() - startTime;
-
-        logger.error(`${LOG.API_ERROR} DELETE /api/student/delete_certificate/${certificateId}`, {
-            error: err.message,
-            stack: err.stack,
-            student_id: req.user.id,
-            duration_ms: duration,
-        });
-
-        if (err.status === 404) {
-            return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        }
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, 'Certificate deleted successfully');
 }
 
 // ============================================================================

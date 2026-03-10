@@ -192,35 +192,35 @@ async function getAllRestrictions(collegeId, filters = {}) {
 
     const whereClause = conditions.join(' AND ');
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM student_restrictions sr
-         JOIN students s ON sr.student_id = s.student_id
-         WHERE ${whereClause}`,
-        params
-    );
+    // Count + Fetch in parallel
+    const [countResult, restrictionResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM student_restrictions sr
+             JOIN students s ON sr.student_id = s.student_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT sr.*,
+                    s.first_name || ' ' || s.last_name AS student_name,
+                    s.student_email,
+                    s.student_passout_year,
+                    d.dept_name,
+                    u.user_name AS restricted_by_name,
+                    ru.user_name AS resolved_by_name
+             FROM student_restrictions sr
+             JOIN students s ON sr.student_id = s.student_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             LEFT JOIN users u ON sr.restricted_by = u.user_id
+             LEFT JOIN users ru ON sr.resolved_by = ru.user_id
+             WHERE ${whereClause}
+             ORDER BY sr.is_active DESC, sr.created_at DESC
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch with JOINs for enriched data
-    const restrictionResult = await query(
-        `SELECT sr.*,
-                s.first_name || ' ' || s.last_name AS student_name,
-                s.student_email,
-                s.student_passout_year,
-                d.dept_name,
-                u.user_name AS restricted_by_name,
-                ru.user_name AS resolved_by_name
-         FROM student_restrictions sr
-         JOIN students s ON sr.student_id = s.student_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         LEFT JOIN users u ON sr.restricted_by = u.user_id
-         LEFT JOIN users ru ON sr.resolved_by = ru.user_id
-         WHERE ${whereClause}
-         ORDER BY sr.is_active DESC, sr.created_at DESC
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
 
     return {
         restrictions: restrictionResult.rows.map(formatRestriction),

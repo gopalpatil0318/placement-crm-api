@@ -26,6 +26,7 @@ const { ROLES } = require('../../config/constants');
 const {
     addSkillSchema,
     syncMySkillsSchema,
+    skillIdParamSchema,
 } = require('../../validators/student/skill.validator');
 
 // ============================================================================
@@ -47,6 +48,7 @@ router.delete(
     authenticate,
     requireRole(ROLES.COLLEGEADMIN, ROLES.TPO, ROLES.HOD, ROLES.TPC),
     apiLimiter,
+    validate(skillIdParamSchema, 'params'),
     asyncHandler(controller.deleteSkill)
 );
 

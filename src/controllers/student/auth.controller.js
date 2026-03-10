@@ -6,6 +6,7 @@
  *   POST  /api/student/login            — Student login
  *   POST  /api/student/logout           — Student logout
  *   POST  /api/student/forgot_password  — Send password reset email
+ *   POST  /api/student/reset_password   — Reset password from email link
  *   POST  /api/student/change_password  — Change own password
  * ============================================================================
  */
@@ -75,6 +76,18 @@ async function forgotPassword(req, res) {
 }
 
 // ============================================================================
+// 3b. RESET PASSWORD (from email link token)
+// ============================================================================
+
+async function resetPassword(req, res) {
+    const { token, new_password } = req.validated;
+
+    await authService.resetPassword(token, new_password);
+
+    return sendSuccess(res, null, 'Password has been reset successfully. Please log in with your new password.');
+}
+
+// ============================================================================
 // 4. CHANGE PASSWORD
 // ============================================================================
 
@@ -99,5 +112,6 @@ module.exports = {
     login,
     logout,
     forgotPassword,
+    resetPassword,
     changePassword,
 };

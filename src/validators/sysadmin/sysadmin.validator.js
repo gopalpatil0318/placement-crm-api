@@ -216,6 +216,19 @@ const listCollegesQuerySchema = Joi.object({
     search: Joi.string().trim().max(100).optional(),
 });
 
+// ============================================================================
+// College ID Param Validation (shared across routes with :collegeId)
+// ============================================================================
+const collegeIdParamSchema = Joi.object({
+    collegeId: Joi.string()
+        .uuid()
+        .required()
+        .messages({
+            'string.guid': 'Invalid college ID format',
+            'any.required': 'College ID is required',
+        }),
+});
+
 module.exports = {
     sysadminLoginSchema,
     createCollegeSchema,
@@ -224,4 +237,5 @@ module.exports = {
     updateCollegeFeaturesSchema,
     updateAcademicYearSchema,
     listCollegesQuerySchema,
+    collegeIdParamSchema,
 };

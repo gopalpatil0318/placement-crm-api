@@ -237,10 +237,22 @@ const updateCertificateSchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMA — certificateId
+// ============================================================================
+
+const certificateIdParamSchema = Joi.object({
+    certificateId: Joi.string().uuid().required().messages({
+        'string.guid': 'Certificate ID must be a valid UUID',
+        'any.required': 'Certificate ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addCertificateSchema,
     updateCertificateSchema,
+    certificateIdParamSchema,
 };

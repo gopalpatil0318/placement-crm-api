@@ -314,10 +314,22 @@ const updateExperienceSchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMAS (URL params — UUID validation)
+// ============================================================================
+
+const experienceIdParamSchema = Joi.object({
+    experienceId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid experience ID format',
+        'any.required': 'Experience ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addExperienceSchema,
     updateExperienceSchema,
+    experienceIdParamSchema,
 };

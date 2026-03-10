@@ -119,13 +119,20 @@ async function addQuestion(jobId, collegeId, data) {
         );
     }
 
-    // 3. Check duplicate question text within this job (case-insensitive)
-    const duplicateCheck = await query(
-        `SELECT question_id FROM application_questions
-         WHERE job_id = $1 AND LOWER(TRIM(question_text)) = LOWER(TRIM($2))
-         LIMIT 1`,
-        [jobId, data.question_text]
-    );
+    // 3. Check duplicate + calculate next order in parallel
+    const [duplicateCheck, maxResult] = await Promise.all([
+        query(
+            `SELECT question_id FROM application_questions
+             WHERE job_id = $1 AND LOWER(TRIM(question_text)) = LOWER(TRIM($2))
+             LIMIT 1`,
+            [jobId, data.question_text]
+        ),
+        query(
+            `SELECT COALESCE(MAX(question_order), 0) AS max_order
+             FROM application_questions WHERE job_id = $1`,
+            [jobId]
+        ),
+    ]);
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
@@ -134,12 +141,6 @@ async function addQuestion(jobId, collegeId, data) {
         );
     }
 
-    // 4. Auto-calculate next question_order
-    const maxResult = await query(
-        `SELECT COALESCE(MAX(question_order), 0) AS max_order
-         FROM application_questions WHERE job_id = $1`,
-        [jobId]
-    );
     const nextOrder = parseInt(maxResult.rows[0].max_order, 10) + 1;
 
     // 5. Sanitize options: null for non-MCQ types

@@ -80,7 +80,7 @@ const criteriaSchema = Joi.object({
         .optional()
         .allow(null),
     allowed_genders: Joi.array()
-        .items(Joi.string().valid('male', 'female', 'other'))
+        .items(Joi.string().valid('Male', 'Female', 'Other'))
         .optional()
         .allow(null),
     allowed_departments: Joi.array()
@@ -268,13 +268,20 @@ const createJobSchema = Joi.object({
         .optional()
         .allow(null, ''),
 
-    passout_year: Joi.number()
-        .integer()
-        .min(2020)
-        .max(2040)
+    passout_years: Joi.array()
+        .items(
+            Joi.number()
+                .integer()
+                .min(2020)
+                .max(2040)
+        )
+        .min(1)
+        .max(5)
         .required()
         .messages({
-            'any.required': 'Passout year is required',
+            'array.min': 'At least one passout year is required',
+            'array.max': 'Cannot specify more than 5 passout years',
+            'any.required': 'Passout years are required',
         }),
 
     application_deadline: Joi.date()
@@ -345,7 +352,7 @@ const listJobsSchema = Joi.object({
         .optional(),
 
     sort_by: Joi.string()
-        .valid('job_title', 'created_at', 'application_deadline', 'passout_year')
+        .valid('job_title', 'created_at', 'application_deadline')
         .optional()
         .default('created_at'),
 
@@ -425,10 +432,15 @@ const updateJobSchema = Joi.object({
         .optional()
         .allow(null, ''),
 
-    passout_year: Joi.number()
-        .integer()
-        .min(2020)
-        .max(2040)
+    passout_years: Joi.array()
+        .items(
+            Joi.number()
+                .integer()
+                .min(2020)
+                .max(2040)
+        )
+        .min(1)
+        .max(5)
         .optional(),
 
     application_deadline: Joi.date()
@@ -459,9 +471,25 @@ const updateJobStatusSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS — UUID validation for route parameters
+// ============================================================================
+
+const jobIdParamSchema = Joi.object({
+    jobId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid job ID format',
+        'any.required': 'Job ID is required',
+    }),
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
     createJobSchema,
     listJobsSchema,
     updateJobSchema,
     updateJobStatusSchema,
+    jobIdParamSchema,
 };

@@ -17,7 +17,7 @@
  */
 
 const { query } = require('../../config/db');
-const { generateToken } = require('../../utils/jwtHelper');
+const { generateToken, verifyToken } = require('../../utils/jwtHelper');
 const { hashPassword, comparePassword } = require('../../utils/passwordHelper');
 const { sendEmail } = require('../../utils/emailHelper');
 const { getPagination } = require('../../utils/pagination');
@@ -29,6 +29,7 @@ const {
     STATUS,
     ERROR_MESSAGES,
     SUCCESS_MESSAGES,
+    DB_ERROR_CODES,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -270,20 +271,27 @@ async function createUser(data, collegeId) {
     const hashedPassword = await hashPassword(user_password);
 
     // 4. Insert user
-    const result = await query(
-        `INSERT INTO users (user_name, user_email, user_password, user_role, college_id, dept_id, user_status)
+    try {
+        const result = await query(
+            `INSERT INTO users (user_name, user_email, user_password, user_role, college_id, dept_id, user_status)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING user_id, user_name, user_email, user_role, college_id, dept_id, user_status, created_at`,
-        [user_name, user_email, hashedPassword, user_role, collegeId, dept_id || null, STATUS.ACTIVE]
-    );
+            [user_name, user_email, hashedPassword, user_role, collegeId, dept_id || null, STATUS.ACTIVE]
+        );
 
-    logger.info(`${LOG.AUTH} College user created`, {
-        userId: result.rows[0].user_id,
-        role: user_role,
-        collegeId,
-    });
+        logger.info(`${LOG.AUTH} College user created`, {
+            userId: result.rows[0].user_id,
+            role: user_role,
+            collegeId,
+        });
 
-    return result.rows[0];
+        return result.rows[0];
+    } catch (err) {
+        if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
+            throw Object.assign(new Error(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS), { status: 409 });
+        }
+        throw err;
+    }
 }
 
 // ============================================================================
@@ -325,16 +333,14 @@ async function getAllUsers(collegeId, filters = {}) {
 
     const whereClause = conditions.join(' AND ');
 
-    // Count total
-    const countResult = await query(
-        `SELECT COUNT(*) AS total FROM users u WHERE ${whereClause}`,
-        params
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch page
-    const usersResult = await query(
-        `SELECT u.user_id, u.user_name, u.user_email, u.user_role,
+    // Count and fetch in parallel
+    const [countResult, usersResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total FROM users u WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT u.user_id, u.user_name, u.user_email, u.user_role,
                 u.user_status, u.dept_id, u.created_at, u.updated_at,
                 d.dept_name
          FROM users u
@@ -342,8 +348,11 @@ async function getAllUsers(collegeId, filters = {}) {
          WHERE ${whereClause}
          ORDER BY u.created_at DESC
          LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
+            [...params, limit, offset]
+        ),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
 
     return {
         users: usersResult.rows,
@@ -458,17 +467,24 @@ async function updateUser(userId, collegeId, data) {
     fields.push(`updated_at = NOW()`);
     values.push(userId, collegeId);
 
-    const result = await query(
-        `UPDATE users
+    try {
+        const result = await query(
+            `UPDATE users
          SET ${fields.join(', ')}
          WHERE user_id = $${paramIndex} AND college_id = $${paramIndex + 1}
          RETURNING user_id, user_name, user_email, user_role, user_status, dept_id, updated_at`,
-        values
-    );
+            values
+        );
 
-    logger.info(`${LOG.AUTH} College user updated`, { userId, collegeId });
+        logger.info(`${LOG.AUTH} College user updated`, { userId, collegeId });
 
-    return result.rows[0];
+        return result.rows[0];
+    } catch (err) {
+        if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
+            throw Object.assign(new Error(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS), { status: 409 });
+        }
+        throw err;
+    }
 }
 
 // ============================================================================
@@ -528,6 +544,46 @@ async function toggleUserStatus(userId, collegeId, newStatus) {
 }
 
 // ============================================================================
+// AUTH — 4. RESET PASSWORD (from email link)
+// ============================================================================
+
+async function resetPassword(token, newPassword) {
+    const payload = verifyToken(token);
+    if (!payload || payload.purpose !== 'password_reset') {
+        throw Object.assign(
+            new Error('Password reset link is invalid or has expired'),
+            { status: 400 }
+        );
+    }
+
+    const result = await query(
+        `SELECT user_id, user_name, user_email
+         FROM users
+         WHERE user_id = $1
+         LIMIT 1`,
+        [payload.id]
+    );
+
+    if (!result.rows.length) {
+        throw Object.assign(new Error(ERROR_MESSAGES.USER_NOT_FOUND), { status: 404 });
+    }
+
+    const user = result.rows[0];
+    const hashedNew = await hashPassword(newPassword);
+
+    await query(
+        `UPDATE users
+         SET user_password = $1, updated_at = NOW()
+         WHERE user_id = $2`,
+        [hashedNew, user.user_id]
+    );
+
+    logger.info(`${LOG.AUTH} User password reset successful`, { userId: user.user_id });
+
+    return { user_email: user.user_email };
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -536,6 +592,7 @@ module.exports = {
     loginCollegeUser,
     forgotPassword,
     changePassword,
+    resetPassword,
     // Management
     createUser,
     getAllUsers,

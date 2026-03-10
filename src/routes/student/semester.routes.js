@@ -23,6 +23,7 @@ const { apiLimiter } = require('../../config/rateLimiter');
 const {
     addSemesterGradeSchema,
     updateSemesterGradeSchema,
+    gradeIdParamSchema,
 } = require('../../validators/student/semester.validator');
 
 // ============================================================================
@@ -50,6 +51,7 @@ router.put(
     '/update_semester_grade/:gradeId',
     authenticate,
     apiLimiter,
+    validate(gradeIdParamSchema, 'params'),
     validate(updateSemesterGradeSchema),
     asyncHandler(controller.updateSemesterGrade)
 );

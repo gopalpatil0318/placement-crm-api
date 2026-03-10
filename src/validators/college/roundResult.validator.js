@@ -217,9 +217,29 @@ const updateRoundResultSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS
+// ============================================================================
+
+const roundIdParamSchema = Joi.object({
+    roundId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid round ID format',
+        'any.required': 'Round ID is required',
+    }),
+});
+
+const resultIdParamSchema = Joi.object({
+    resultId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid result ID format',
+        'any.required': 'Result ID is required',
+    }),
+});
+
 module.exports = {
     addRoundResultSchema,
     bulkAddRoundResultsSchema,
     listRoundResultsSchema,
     updateRoundResultSchema,
+    roundIdParamSchema,
+    resultIdParamSchema,
 };

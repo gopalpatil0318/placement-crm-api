@@ -24,6 +24,7 @@ const { apiLimiter } = require('../../config/rateLimiter');
 const {
     addProjectSchema,
     updateProjectSchema,
+    projectIdParamSchema,
 } = require('../../validators/student/project.validator');
 
 // ============================================================================
@@ -51,6 +52,7 @@ router.put(
     '/update_project/:projectId',
     authenticate,
     apiLimiter,
+    validate(projectIdParamSchema, 'params'),
     validate(updateProjectSchema),
     asyncHandler(controller.updateProject)
 );
@@ -60,6 +62,7 @@ router.delete(
     '/delete_project/:projectId',
     authenticate,
     apiLimiter,
+    validate(projectIdParamSchema, 'params'),
     asyncHandler(controller.deleteProject)
 );
 

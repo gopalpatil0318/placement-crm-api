@@ -31,7 +31,7 @@ const CRITERIA_FIELDS = [
 
 async function verifyJob(jobId, collegeId) {
     const result = await query(
-        `SELECT j.job_id, j.job_title, j.job_status, j.passout_year,
+        `SELECT j.job_id, j.job_title, j.job_status, j.passout_years,
                 c.company_name
          FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
@@ -80,9 +80,9 @@ async function setCriteria(jobId, collegeId, data) {
 
     // 3. Build dynamic INSERT
     const fieldsToInsert = CRITERIA_FIELDS.filter(f => data[f] !== undefined);
-    const columns = ['job_id', 'passout_year', ...fieldsToInsert];
+    const columns = ['job_id', 'passout_years', ...fieldsToInsert];
     const placeholders = columns.map((_, i) => `$${i + 1}`);
-    const values = [jobId, job.passout_year, ...fieldsToInsert.map(f => {
+    const values = [jobId, job.passout_years, ...fieldsToInsert.map(f => {
         // Arrays need to be handled for PostgreSQL
         if (Array.isArray(data[f])) return data[f];
         return data[f];
@@ -207,9 +207,9 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
     const conditions = [
         's.college_id = $1',
         's.student_status = $2',
-        's.student_passout_year = $3',
+        's.student_passout_year = ANY($3)',
     ];
-    const params = [collegeId, STATUS.STUDENT.ACTIVE, job.passout_year];
+    const params = [collegeId, STATUS.STUDENT.ACTIVE, job.passout_years];
     let paramIndex = 4;
 
     // 4. Add criteria-based conditions ONLY if criteria exists and fields are non-null
@@ -317,60 +317,58 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
 
     const whereClause = conditions.join(' AND ');
 
-    // 7. Count total eligible
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM students s
-         LEFT JOIN student_academic_information acad ON s.student_id = acad.student_id
-         LEFT JOIN student_personal_information pi ON s.student_id = pi.student_id
-         JOIN departments d ON s.dept_id = d.dept_id
-         WHERE ${whereClause}`,
-        params
-    );
+    // 7. Count eligible + Count total + Fetch paginated students in parallel
+    const [countResult, totalStudentsResult, studentsResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM students s
+             LEFT JOIN student_academic_information acad ON s.student_id = acad.student_id
+             LEFT JOIN student_personal_information pi ON s.student_id = pi.student_id
+             JOIN departments d ON s.dept_id = d.dept_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT COUNT(*) AS total FROM students
+             WHERE college_id = $1 AND student_passout_year = ANY($2) AND student_status = $3`,
+            [collegeId, job.passout_years, STATUS.STUDENT.ACTIVE]
+        ),
+        query(
+            `SELECT
+                s.student_id,
+                CONCAT(s.first_name, ' ', COALESCE(s.middle_name || ' ', ''), s.last_name) AS student_name,
+                s.student_email,
+                s.student_passout_year,
+                d.dept_name,
+                acad.overall_cgpa,
+                acad.total_live_kts,
+                acad.tenth_percentage,
+                acad.twelfth_or_diploma,
+                acad.twelfth_percentage,
+                acad.diploma_percentage,
+                acad.any_gap_during_education,
+                pi.gender,
+                s.profile_complete,
+                s.profile_is_approved
+             FROM students s
+             LEFT JOIN student_academic_information acad ON s.student_id = acad.student_id
+             LEFT JOIN student_personal_information pi ON s.student_id = pi.student_id
+             JOIN departments d ON s.dept_id = d.dept_id
+             WHERE ${whereClause}
+             ORDER BY acad.overall_cgpa DESC NULLS LAST, s.first_name ASC
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+    ]);
     const eligibleCount = parseInt(countResult.rows[0].total, 10);
-
-    // 8. Count total students for that passout year (for comparison)
-    const totalStudentsResult = await query(
-        `SELECT COUNT(*) AS total FROM students
-         WHERE college_id = $1 AND student_passout_year = $2 AND student_status = $3`,
-        [collegeId, job.passout_year, STATUS.STUDENT.ACTIVE]
-    );
     const totalStudents = parseInt(totalStudentsResult.rows[0].total, 10);
-
-    // 9. Fetch paginated eligible students
-    const studentsResult = await query(
-        `SELECT
-            s.student_id,
-            CONCAT(s.first_name, ' ', COALESCE(s.middle_name || ' ', ''), s.last_name) AS student_name,
-            s.student_email,
-            s.student_passout_year,
-            d.dept_name,
-            acad.overall_cgpa,
-            acad.total_live_kts,
-            acad.tenth_percentage,
-            acad.twelfth_or_diploma,
-            acad.twelfth_percentage,
-            acad.diploma_percentage,
-            acad.any_gap_during_education,
-            pi.gender,
-            s.profile_complete,
-            s.profile_is_approved
-         FROM students s
-         LEFT JOIN student_academic_information acad ON s.student_id = acad.student_id
-         LEFT JOIN student_personal_information pi ON s.student_id = pi.student_id
-         JOIN departments d ON s.dept_id = d.dept_id
-         WHERE ${whereClause}
-         ORDER BY acad.overall_cgpa DESC NULLS LAST, s.first_name ASC
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
 
     return {
         job: {
             job_id: job.job_id,
             job_title: job.job_title,
             company_name: job.company_name,
-            passout_year: job.passout_year,
+            passout_years: job.passout_years,
         },
         criteria,
         eligible_count: eligibleCount,

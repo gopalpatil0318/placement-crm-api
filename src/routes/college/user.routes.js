@@ -8,6 +8,7 @@
  *   POST   /login                       authLimiter + validate
  *   POST   /logout                      authenticate
  *   POST   /forgot_password             authLimiter + validate
+ *   POST   /reset_password              authLimiter + validate
  *   POST   /change_password             authenticate + validate
  *
  * Management (COLLEGEADMIN only):
@@ -33,10 +34,12 @@ const {
     collegeLoginSchema,
     forgotPasswordSchema,
     changePasswordSchema,
+    resetPasswordSchema,
     createUserSchema,
     updateUserSchema,
     listUsersSchema,
     toggleUserStatusSchema,
+    userIdParamSchema,
 } = require('../../validators/college/user.validator');
 
 // ============================================================================
@@ -61,6 +64,13 @@ router.post(
     authLimiter,
     validate(forgotPasswordSchema),
     asyncHandler(controller.forgotPassword)
+);
+
+router.post(
+    '/reset_password',
+    authLimiter,
+    validate(resetPasswordSchema),
+    asyncHandler(controller.resetPassword)
 );
 
 router.post(
@@ -97,6 +107,7 @@ router.get(
     authenticate,
     requireRole(ROLES.COLLEGEADMIN),
     apiLimiter,
+    validate(userIdParamSchema, 'params'),
     asyncHandler(controller.getUser)
 );
 
@@ -105,6 +116,7 @@ router.put(
     authenticate,
     requireRole(ROLES.COLLEGEADMIN),
     apiLimiter,
+    validate(userIdParamSchema, 'params'),
     validate(updateUserSchema),
     asyncHandler(controller.updateUser)
 );
@@ -114,6 +126,7 @@ router.patch(
     authenticate,
     requireRole(ROLES.COLLEGEADMIN),
     apiLimiter,
+    validate(userIdParamSchema, 'params'),
     validate(toggleUserStatusSchema),
     asyncHandler(controller.toggleUserStatus)
 );

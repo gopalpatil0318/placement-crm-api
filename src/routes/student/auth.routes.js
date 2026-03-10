@@ -8,6 +8,7 @@
  *   POST  /login            authLimiter + validate
  *   POST  /logout           authenticate
  *   POST  /forgot_password  authLimiter + validate
+ *   POST  /reset_password   authLimiter + validate
  *   POST  /change_password  authenticate + validate
  * ============================================================================
  */
@@ -25,6 +26,7 @@ const {
     studentLoginSchema,
     studentForgotPasswordSchema,
     studentChangePasswordSchema,
+    studentResetPasswordSchema,
 } = require('../../validators/student/auth.validator');
 
 // ============================================================================
@@ -52,6 +54,14 @@ router.post(
     authLimiter,
     validate(studentForgotPasswordSchema),
     asyncHandler(controller.forgotPassword)
+);
+
+// Reset password from email link (public, rate limited)
+router.post(
+    '/reset_password',
+    authLimiter,
+    validate(studentResetPasswordSchema),
+    asyncHandler(controller.resetPassword)
 );
 
 // Change password (must be authenticated)

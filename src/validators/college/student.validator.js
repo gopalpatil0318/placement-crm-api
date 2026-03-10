@@ -244,11 +244,45 @@ const toggleStudentStatusSchema = Joi.object({
 // ============================================================================
 
 const approveStudentProfileSchema = Joi.object({
-    profile_is_approved: Joi.boolean()
+    action: Joi.string()
+        .valid('approved', 'rejected')
         .required()
         .messages({
-            'boolean.base': 'profile_is_approved must be true or false',
-            'any.required': 'profile_is_approved is required',
+            'any.only': 'Action must be "approved" or "rejected"',
+            'any.required': 'Action is required',
+        }),
+    rejection_reason: Joi.string()
+        .max(500)
+        .when('action', {
+            is: 'rejected',
+            then: Joi.required(),
+            otherwise: Joi.optional().allow(null, ''),
+        })
+        .messages({
+            'any.required': 'Rejection reason is required when rejecting',
+            'string.max': 'Rejection reason must not exceed 500 characters',
+        }),
+});
+
+// ============================================================================
+// GET STUDENT FULL PROFILE (query params)
+// ============================================================================
+
+const getStudentFullProfileQuerySchema = Joi.object({
+    review: Joi.boolean()
+        .default(false),
+});
+
+/**
+ * Student ID param validation (for routes with :studentId)
+ */
+const studentIdParamSchema = Joi.object({
+    studentId: Joi.string()
+        .uuid()
+        .required()
+        .messages({
+            'string.guid': 'Invalid student ID format',
+            'any.required': 'Student ID is required',
         }),
 });
 
@@ -263,4 +297,6 @@ module.exports = {
     updateStudentSchema,
     toggleStudentStatusSchema,
     approveStudentProfileSchema,
+    getStudentFullProfileQuerySchema,
+    studentIdParamSchema,
 };

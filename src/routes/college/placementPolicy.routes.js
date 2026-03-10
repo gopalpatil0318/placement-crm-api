@@ -29,6 +29,7 @@ const {
     listPoliciesSchema,
     updatePolicySchema,
     togglePolicyStatusSchema,
+    policyIdParamSchema,
 } = require('../../validators/college/placementPolicy.validator');
 
 // All routes require COLLEGEADMIN or TPO
@@ -53,12 +54,14 @@ router.get(
 
 router.get(
     '/get_policy/:policyId',
+    validate(policyIdParamSchema, 'params'),
     asyncHandler(controller.getPolicy)
 );
 
 router.put(
     '/update_policy/:policyId',
     apiLimiter,
+    validate(policyIdParamSchema, 'params'),
     validate(updatePolicySchema),
     asyncHandler(controller.updatePolicy)
 );
@@ -66,6 +69,7 @@ router.put(
 router.patch(
     '/toggle_policy_status/:policyId',
     apiLimiter,
+    validate(policyIdParamSchema, 'params'),
     validate(togglePolicyStatusSchema),
     asyncHandler(controller.togglePolicyStatus)
 );
@@ -73,6 +77,7 @@ router.patch(
 router.delete(
     '/delete_policy/:policyId',
     apiLimiter,
+    validate(policyIdParamSchema, 'params'),
     asyncHandler(controller.deletePolicy)
 );
 

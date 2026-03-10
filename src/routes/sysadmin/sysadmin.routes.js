@@ -34,6 +34,7 @@ const {
     updateCollegeFeaturesSchema,
     updateAcademicYearSchema,
     listCollegesQuerySchema,
+    collegeIdParamSchema,
 } = require('../../validators/sysadmin/sysadmin.validator');
 
 // Shorthand: sysadmin-only middleware chain
@@ -84,6 +85,7 @@ router.get(
 router.get(
     '/get_college/:collegeId',
     ...sysadminAuth,
+    validate(collegeIdParamSchema, 'params'),
     asyncHandler(controller.getCollege)
 );
 
@@ -93,6 +95,7 @@ router.get(
 router.put(
     '/update_college/:collegeId',
     ...sysadminAuth,
+    validate(collegeIdParamSchema, 'params'),
     validate(updateCollegeSchema),
     asyncHandler(controller.updateCollege)
 );
@@ -103,6 +106,7 @@ router.put(
 router.patch(
     '/toggle_college_status/:collegeId',
     ...sysadminAuth,
+    validate(collegeIdParamSchema, 'params'),
     validate(toggleCollegeStatusSchema),
     asyncHandler(controller.toggleCollegeStatus)
 );
@@ -113,6 +117,7 @@ router.patch(
 router.patch(
     '/update_college_features/:collegeId',
     ...sysadminAuth,
+    validate(collegeIdParamSchema, 'params'),
     validate(updateCollegeFeaturesSchema),
     asyncHandler(controller.updateCollegeFeatures)
 );
@@ -123,6 +128,7 @@ router.patch(
 router.patch(
     '/update_academic_year/:collegeId',
     ...sysadminAuth,
+    validate(collegeIdParamSchema, 'params'),
     validate(updateAcademicYearSchema),
     asyncHandler(controller.updateAcademicYear)
 );

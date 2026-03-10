@@ -157,10 +157,22 @@ const updateSemesterGradeSchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMAS (URL params — UUID validation)
+// ============================================================================
+
+const gradeIdParamSchema = Joi.object({
+    gradeId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid grade ID format',
+        'any.required': 'Grade ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addSemesterGradeSchema,
     updateSemesterGradeSchema,
+    gradeIdParamSchema,
 };

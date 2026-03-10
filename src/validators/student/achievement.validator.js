@@ -256,10 +256,22 @@ const updateAchievementSchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMAS (URL params — UUID validation)
+// ============================================================================
+
+const achievementIdParamSchema = Joi.object({
+    achievementId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid achievement ID format',
+        'any.required': 'Achievement ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addAchievementSchema,
     updateAchievementSchema,
+    achievementIdParamSchema,
 };

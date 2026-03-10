@@ -85,6 +85,40 @@ const studentChangePasswordSchema = Joi.object({
 });
 
 // ============================================================================
+// RESET PASSWORD
+// ============================================================================
+
+const studentResetPasswordSchema = Joi.object({
+    token: Joi.string()
+        .required()
+        .messages({
+            'string.empty': 'Reset token is required',
+            'any.required': 'Reset token is required',
+        }),
+
+    new_password: Joi.string()
+        .min(VALIDATION.PASSWORD_MIN_LENGTH)
+        .max(VALIDATION.PASSWORD_MAX_LENGTH)
+        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+        .required()
+        .messages({
+            'string.empty': 'New password is required',
+            'string.min': `Password must be at least ${VALIDATION.PASSWORD_MIN_LENGTH} characters`,
+            'string.max': `Password cannot exceed ${VALIDATION.PASSWORD_MAX_LENGTH} characters`,
+            'string.pattern.base': 'Password must contain uppercase, lowercase, and numeric characters',
+            'any.required': 'New password is required',
+        }),
+
+    confirm_password: Joi.string()
+        .valid(Joi.ref('new_password'))
+        .required()
+        .messages({
+            'any.only': 'Passwords do not match',
+            'any.required': 'Please confirm your new password',
+        }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -92,4 +126,5 @@ module.exports = {
     studentLoginSchema,
     studentForgotPasswordSchema,
     studentChangePasswordSchema,
+    studentResetPasswordSchema,
 };

@@ -23,7 +23,7 @@ const {
 
 async function verifyJob(jobId, collegeId) {
     const result = await query(
-        `SELECT j.job_id, j.job_title, j.job_status, j.passout_year,
+        `SELECT j.job_id, j.job_title, j.job_status, j.passout_years,
                 j.application_deadline, j.company_id,
                 c.company_name
          FROM job_postings j
@@ -44,14 +44,14 @@ async function verifyJob(jobId, collegeId) {
 // HELPER — Build eligibility WHERE conditions (reuses jobCriteria logic)
 // ============================================================================
 
-async function buildEligibilityConditions(jobId, collegeId, passoutYear) {
-    // Base conditions: active students in this college with matching passout_year
+async function buildEligibilityConditions(jobId, collegeId, passoutYears) {
+    // Base conditions: active students in this college with matching passout year
     const conditions = [
         's.college_id = $1',
         's.student_status = $2',
-        's.student_passout_year = $3',
+        's.student_passout_year = ANY($3)',
     ];
-    const params = [collegeId, STATUS.STUDENT.ACTIVE, passoutYear];
+    const params = [collegeId, STATUS.STUDENT.ACTIVE, passoutYears];
     let paramIndex = 4;
 
     // Fetch criteria for this job
@@ -188,7 +188,7 @@ async function getEligibleNotApplied(jobId, collegeId, filters = {}) {
 
     // Build eligibility conditions
     let { conditions, params, paramIndex, criteria } =
-        await buildEligibilityConditions(jobId, collegeId, job.passout_year);
+        await buildEligibilityConditions(jobId, collegeId, job.passout_years);
 
     // Core filter: exclude students who already have an application for this job
     conditions.push(
@@ -237,56 +237,54 @@ async function getEligibleNotApplied(jobId, collegeId, filters = {}) {
         JOIN departments d ON s.dept_id = d.dept_id
     `;
 
-    // Count eligible not applied
-    const countResult = await query(
-        `SELECT COUNT(*) AS total ${fromClause} WHERE ${whereClause}`,
-        params
-    );
-    const eligibleNotAppliedCount = parseInt(countResult.rows[0].total, 10);
-
-    // Count total applications for this job
-    const appliedCountResult = await query(
-        `SELECT COUNT(*) AS total FROM student_applications
-         WHERE job_id = $1 AND college_id = $2`,
-        [jobId, collegeId]
-    );
-    const totalApplied = parseInt(appliedCountResult.rows[0].total, 10);
-
     // Sort
     const sortColumn = ELIGIBLE_SORTABLE[filters.sort_by] || ELIGIBLE_SORTABLE.overall_cgpa;
     const order = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
     const nullsHandling = sortColumn.includes('cgpa') ? ' NULLS LAST' : '';
 
-    // Fetch paginated eligible-not-applied students
-    const studentsResult = await query(
-        `SELECT
-            s.student_id,
-            CONCAT(s.first_name, ' ', COALESCE(s.middle_name || ' ', ''), s.last_name) AS student_name,
-            s.student_email,
-            s.student_passout_year,
-            d.dept_name,
-            acad.overall_cgpa,
-            acad.total_live_kts,
-            acad.tenth_percentage,
-            acad.twelfth_or_diploma,
-            acad.twelfth_percentage,
-            acad.diploma_percentage,
-            pi.gender,
-            s.profile_complete,
-            s.profile_is_approved
-         ${fromClause}
-         WHERE ${whereClause}
-         ORDER BY ${sortColumn} ${order}${nullsHandling}, s.first_name ASC
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
+    // Count + Applied count + Students (parallel — all independent)
+    const [countResult, appliedCountResult, studentsResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total ${fromClause} WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT COUNT(*) AS total FROM student_applications
+             WHERE job_id = $1 AND college_id = $2`,
+            [jobId, collegeId]
+        ),
+        query(
+            `SELECT
+                s.student_id,
+                CONCAT(s.first_name, ' ', COALESCE(s.middle_name || ' ', ''), s.last_name) AS student_name,
+                s.student_email,
+                s.student_passout_year,
+                d.dept_name,
+                acad.overall_cgpa,
+                acad.total_live_kts,
+                acad.tenth_percentage,
+                acad.twelfth_or_diploma,
+                acad.twelfth_percentage,
+                acad.diploma_percentage,
+                pi.gender,
+                s.profile_complete,
+                s.profile_is_approved
+             ${fromClause}
+             WHERE ${whereClause}
+             ORDER BY ${sortColumn} ${order}${nullsHandling}, s.first_name ASC
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+    ]);
+    const eligibleNotAppliedCount = parseInt(countResult.rows[0].total, 10);
+    const totalApplied = parseInt(appliedCountResult.rows[0].total, 10);
 
     return {
         job: {
             job_id: job.job_id,
             job_title: job.job_title,
             company_name: job.company_name,
-            passout_year: job.passout_year,
+            passout_years: job.passout_years,
             job_status: job.job_status,
             application_deadline: job.application_deadline,
         },
@@ -324,7 +322,7 @@ async function notifyEligibleStudents(jobId, collegeId, userId, data) {
         // Validate that these students are actually eligible and haven't applied
         // We still compute the eligible-not-applied set and intersect
         const { conditions, params, paramIndex } =
-            await buildEligibilityConditions(jobId, collegeId, job.passout_year);
+            await buildEligibilityConditions(jobId, collegeId, job.passout_years);
 
         // Exclude students who already applied
         conditions.push(
@@ -364,7 +362,7 @@ async function notifyEligibleStudents(jobId, collegeId, userId, data) {
     } else {
         // Notify ALL eligible-not-applied students
         const { conditions, params, paramIndex } =
-            await buildEligibilityConditions(jobId, collegeId, job.passout_year);
+            await buildEligibilityConditions(jobId, collegeId, job.passout_years);
 
         conditions.push(
             `NOT EXISTS (
@@ -522,43 +520,43 @@ async function getJobDenials(jobId, collegeId, filters = {}) {
     const sortColumn = DENIAL_SORTABLE[filters.sort_by] || DENIAL_SORTABLE.denied_at;
     const order = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM application_denials ad
-         JOIN students s ON ad.student_id = s.student_id
-         WHERE ${whereClause}`,
-        params
-    );
+    // Count + Data (parallel — both independent)
+    const [countResult, dataResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM application_denials ad
+             JOIN students s ON ad.student_id = s.student_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT
+                ad.denial_id,
+                ad.student_id,
+                CONCAT(s.first_name, ' ', COALESCE(s.middle_name || ' ', ''), s.last_name) AS student_name,
+                s.student_email,
+                d.dept_name,
+                s.student_passout_year,
+                ad.denial_reason,
+                ad.additional_comments,
+                ad.denied_at
+             FROM application_denials ad
+             JOIN students s ON ad.student_id = s.student_id
+             JOIN departments d ON s.dept_id = d.dept_id
+             WHERE ${whereClause}
+             ORDER BY ${sortColumn} ${order}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // Data
-    const dataResult = await query(
-        `SELECT
-            ad.denial_id,
-            ad.student_id,
-            CONCAT(s.first_name, ' ', COALESCE(s.middle_name || ' ', ''), s.last_name) AS student_name,
-            s.student_email,
-            d.dept_name,
-            s.student_passout_year,
-            ad.denial_reason,
-            ad.additional_comments,
-            ad.denied_at
-         FROM application_denials ad
-         JOIN students s ON ad.student_id = s.student_id
-         JOIN departments d ON s.dept_id = d.dept_id
-         WHERE ${whereClause}
-         ORDER BY ${sortColumn} ${order}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
 
     return {
         job: {
             job_id: job.job_id,
             job_title: job.job_title,
             company_name: job.company_name,
-            passout_year: job.passout_year,
+            passout_years: job.passout_years,
         },
         denials: dataResult.rows,
         total,

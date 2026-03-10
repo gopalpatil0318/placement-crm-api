@@ -28,6 +28,7 @@ const {
     listJobsSchema,
     updateJobSchema,
     updateJobStatusSchema,
+    jobIdParamSchema,
 } = require('../../validators/college/job.validator');
 
 // All job routes require COLLEGEADMIN or TPO
@@ -51,17 +52,20 @@ router.get(
 
 router.get(
     '/get_job/:jobId',
+    validate(jobIdParamSchema, 'params'),
     asyncHandler(controller.getJob)
 );
 
 router.put(
     '/update_job/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(updateJobSchema),
     asyncHandler(controller.updateJob)
 );
 
 router.patch(
     '/update_job_status/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(updateJobStatusSchema),
     asyncHandler(controller.updateJobStatus)
 );

@@ -25,6 +25,7 @@ const {
     listEligibleNotAppliedSchema,
     notifyEligibleSchema,
     listDenialsSchema,
+    jobIdParamSchema,
 } = require('../../validators/college/eligibleDenial.validator');
 
 // All routes require COLLEGEADMIN or TPO
@@ -36,6 +37,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 
 router.get(
     '/get_eligible_not_applied/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(listEligibleNotAppliedSchema, 'query'),
     asyncHandler(controller.getEligibleNotApplied)
 );
@@ -43,12 +45,14 @@ router.get(
 router.post(
     '/notify_eligible_students/:jobId',
     apiLimiter,
+    validate(jobIdParamSchema, 'params'),
     validate(notifyEligibleSchema),
     asyncHandler(controller.notifyEligibleStudents)
 );
 
 router.get(
     '/get_job_denials/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(listDenialsSchema, 'query'),
     asyncHandler(controller.getJobDenials)
 );

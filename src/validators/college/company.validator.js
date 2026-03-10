@@ -187,9 +187,25 @@ const toggleCompanyStatusSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS — UUID validation for route parameters
+// ============================================================================
+
+const companyIdParamSchema = Joi.object({
+    companyId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid company ID format',
+        'any.required': 'Company ID is required',
+    }),
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
     createCompanySchema,
     listCompaniesSchema,
     updateCompanySchema,
     toggleCompanyStatusSchema,
+    companyIdParamSchema,
 };

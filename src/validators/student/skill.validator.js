@@ -73,10 +73,22 @@ const syncMySkillsSchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMAS (URL params — UUID validation)
+// ============================================================================
+
+const skillIdParamSchema = Joi.object({
+    skillId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid skill ID format',
+        'any.required': 'Skill ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addSkillSchema,
     syncMySkillsSchema,
+    skillIdParamSchema,
 };

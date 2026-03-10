@@ -154,31 +154,37 @@ async function syncMySkills(studentId, collegeId, incomingSkills) {
 
         // 5. Execute changes
 
-        // ADD new skills
-        for (const skill of toAdd) {
+        // ADD new skills — multi-row INSERT
+        if (toAdd.length > 0) {
+            const skillIds = toAdd.map(s => s.skill_id);
+            const profLevels = toAdd.map(s => s.proficiency_level);
             await client.query(
                 `INSERT INTO student_skills (student_id, college_id, skill_id, proficiency_level)
-                 VALUES ($1, $2, $3, $4)`,
-                [studentId, collegeId, skill.skill_id, skill.proficiency_level]
+                 SELECT $1, $2, unnest($3::uuid[]), unnest($4::text[])`,
+                [studentId, collegeId, skillIds, profLevels]
             );
         }
 
-        // UPDATE proficiency
-        for (const skill of toUpdate) {
+        // UPDATE proficiency — batch using CASE
+        if (toUpdate.length > 0) {
+            const updateIds = toUpdate.map(s => s.student_skill_id);
+            const updateLevels = toUpdate.map(s => s.proficiency_level);
             await client.query(
                 `UPDATE student_skills
-                 SET proficiency_level = $1, updated_at = NOW()
-                 WHERE student_skill_id = $2 AND student_id = $3`,
-                [skill.proficiency_level, skill.student_skill_id, studentId]
+                 SET proficiency_level = u.level, updated_at = NOW()
+                 FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::text[]) AS level) u
+                 WHERE student_skill_id = u.id AND student_id = $3`,
+                [updateIds, updateLevels, studentId]
             );
         }
 
-        // REMOVE skills no longer in array
-        for (const skill of toRemove) {
+        // REMOVE skills no longer in array — batch DELETE
+        if (toRemove.length > 0) {
+            const removeIds = toRemove.map(s => s.student_skill_id);
             await client.query(
                 `DELETE FROM student_skills
-                 WHERE student_skill_id = $1 AND student_id = $2`,
-                [skill.student_skill_id, studentId]
+                 WHERE student_skill_id = ANY($1) AND student_id = $2`,
+                [removeIds, studentId]
             );
         }
 

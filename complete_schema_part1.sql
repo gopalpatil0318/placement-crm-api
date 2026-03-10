@@ -67,6 +67,11 @@ CREATE TABLE public.students (
   student_status TEXT NOT NULL DEFAULT 'active',
   profile_complete BOOLEAN DEFAULT FALSE,
   profile_is_approved BOOLEAN DEFAULT FALSE,
+  profile_approval_status TEXT DEFAULT 'pending',
+  approved_by UUID,
+  approved_at TIMESTAMP WITHOUT TIME ZONE,
+  profile_rejection_reason TEXT,
+  rejected_at TIMESTAMP WITHOUT TIME ZONE,
   created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   CONSTRAINT students_pkey PRIMARY KEY (student_id),
@@ -74,7 +79,9 @@ CREATE TABLE public.students (
   CONSTRAINT students_college_fkey FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT students_dept_fkey FOREIGN KEY (dept_id) REFERENCES departments(dept_id) ON DELETE RESTRICT,
   CONSTRAINT students_status_check CHECK (student_status IN ('active', 'inactive', 'suspended', 'graduated', 'dropout')),
-  CONSTRAINT students_year_check CHECK (current_year >= 1 AND current_year <= 6)
+  CONSTRAINT students_year_check CHECK (current_year >= 1 AND current_year <= 6),
+  CONSTRAINT profile_approval_status_check CHECK (profile_approval_status IN ('pending', 'approved', 'rejected')),
+  CONSTRAINT students_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_students_college ON public.students(college_id);
@@ -82,6 +89,8 @@ CREATE INDEX idx_students_email ON public.students(student_email);
 CREATE INDEX idx_students_dept ON public.students(dept_id);
 CREATE INDEX idx_students_passout_year ON public.students(student_passout_year);
 CREATE INDEX idx_students_status ON public.students(student_status);
+CREATE INDEX idx_students_approval_status ON public.students(college_id, profile_approval_status)
+  WHERE profile_complete = true;
 
 -- 5. STUDENT PERSONAL INFORMATION (No first/middle/last name, no email, no religion)
 CREATE TABLE public.student_personal_information (
@@ -279,16 +288,24 @@ CREATE TABLE public.student_experience (
   offer_letter_url TEXT,
   completion_certificate_url TEXT,
   is_verified BOOLEAN DEFAULT FALSE,
+  verification_status TEXT DEFAULT 'pending',
+  verified_by UUID,
+  verified_at TIMESTAMP WITHOUT TIME ZONE,
+  rejection_reason TEXT,
+  rejected_at TIMESTAMP WITHOUT TIME ZONE,
   created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   CONSTRAINT student_experience_pkey PRIMARY KEY (experience_id),
   CONSTRAINT fk_experience_student FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
   CONSTRAINT fk_experience_college FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT employment_type_check CHECK (employment_type IN ('internship', 'full-time', 'part-time', 'freelance', 'contract')),
-  CONSTRAINT work_mode_check CHECK (work_mode IN ('on-site', 'remote', 'hybrid'))
+  CONSTRAINT work_mode_check CHECK (work_mode IN ('on-site', 'remote', 'hybrid')),
+  CONSTRAINT exp_verification_status_check CHECK (verification_status IN ('pending', 'approved', 'rejected')),
+  CONSTRAINT fk_experience_verified_by FOREIGN KEY (verified_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_experience_student ON public.student_experience(student_id);
+CREATE INDEX idx_experience_verification ON public.student_experience(college_id, verification_status);
 
 -- 12. ACHIEVEMENTS
 CREATE TABLE public.student_achievements (
@@ -307,6 +324,11 @@ CREATE TABLE public.student_achievements (
   certificate_url TEXT,
   proof_url TEXT,
   is_verified BOOLEAN DEFAULT FALSE,
+  verification_status TEXT DEFAULT 'pending',
+  verified_by UUID,
+  verified_at TIMESTAMP WITHOUT TIME ZONE,
+  rejection_reason TEXT,
+  rejected_at TIMESTAMP WITHOUT TIME ZONE,
   is_featured BOOLEAN DEFAULT FALSE,
   display_order INTEGER,
   created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
@@ -315,10 +337,13 @@ CREATE TABLE public.student_achievements (
   CONSTRAINT fk_achievements_student FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
   CONSTRAINT fk_achievements_college FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT achievement_type_check CHECK (achievement_type IN ('competition', 'hackathon', 'award', 'certification', 'publication', 'research', 'sports', 'cultural')),
-  CONSTRAINT achievement_level_check CHECK (achievement_level IN ('international', 'national', 'state', 'university', 'college', 'departmental'))
+  CONSTRAINT achievement_level_check CHECK (achievement_level IN ('international', 'national', 'state', 'university', 'college', 'departmental')),
+  CONSTRAINT ach_verification_status_check CHECK (verification_status IN ('pending', 'approved', 'rejected')),
+  CONSTRAINT fk_achievements_verified_by FOREIGN KEY (verified_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_achievements_student ON public.student_achievements(student_id);
+CREATE INDEX idx_achievements_verification ON public.student_achievements(college_id, verification_status);
 
 -- 13. CERTIFICATES
 CREATE TABLE public.student_certificates (
@@ -338,15 +363,23 @@ CREATE TABLE public.student_certificates (
   skills_covered TEXT[],
   certificate_url TEXT,
   is_verified BOOLEAN DEFAULT FALSE,
+  verification_status TEXT DEFAULT 'pending',
+  verified_by UUID,
+  verified_at TIMESTAMP WITHOUT TIME ZONE,
+  rejection_reason TEXT,
+  rejected_at TIMESTAMP WITHOUT TIME ZONE,
   created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   CONSTRAINT student_certificates_pkey PRIMARY KEY (certificate_id),
   CONSTRAINT fk_certificates_student FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
   CONSTRAINT fk_certificates_college FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
-  CONSTRAINT certificate_type_check CHECK (certificate_type IN ('course', 'training', 'workshop', 'seminar', 'certification', 'bootcamp'))
+  CONSTRAINT certificate_type_check CHECK (certificate_type IN ('course', 'training', 'workshop', 'seminar', 'certification', 'bootcamp')),
+  CONSTRAINT cert_verification_status_check CHECK (verification_status IN ('pending', 'approved', 'rejected')),
+  CONSTRAINT fk_certificates_verified_by FOREIGN KEY (verified_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_certificates_student ON public.student_certificates(student_id);
+CREATE INDEX idx_certificates_verification ON public.student_certificates(college_id, verification_status);
 
 -- 14. EXTRA-CURRICULAR ACTIVITIES
 CREATE TABLE public.student_activities (
@@ -419,7 +452,7 @@ CREATE TABLE public.users (
   CONSTRAINT users_email_key UNIQUE (user_email),
   CONSTRAINT users_college_fkey FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT users_dept_fkey FOREIGN KEY (dept_id) REFERENCES departments(dept_id) ON DELETE SET NULL,
-  CONSTRAINT users_role_check CHECK (user_role IN ('sysadmin', 'collegeadmin', 'teacher', 'hod', 'tpo')),
+  CONSTRAINT users_role_check CHECK (user_role IN ('sysadmin', 'collegeadmin', 'teacher', 'hod', 'tpo', 'tpc')),
   CONSTRAINT users_status_check CHECK (user_status IN ('active', 'inactive'))
 ) TABLESPACE pg_default;
 

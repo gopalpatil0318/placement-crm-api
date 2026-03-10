@@ -25,6 +25,7 @@ const {
     setCriteriaSchema,
     updateCriteriaSchema,
     getEligibleStudentsSchema,
+    jobIdParamSchema,
 } = require('../../validators/college/jobCriteria.validator');
 
 // All criteria routes require COLLEGEADMIN or TPO
@@ -36,18 +37,21 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/set_job_criteria/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(setCriteriaSchema),
     asyncHandler(controller.setCriteria)
 );
 
 router.put(
     '/update_job_criteria/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(updateCriteriaSchema),
     asyncHandler(controller.updateCriteria)
 );
 
 router.get(
     '/get_eligible_students/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(getEligibleStudentsSchema, 'query'),
     asyncHandler(controller.getEligibleStudents)
 );

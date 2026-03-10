@@ -28,6 +28,7 @@ const {
     listCompaniesSchema,
     updateCompanySchema,
     toggleCompanyStatusSchema,
+    companyIdParamSchema,
 } = require('../../validators/college/company.validator');
 
 // All company routes require COLLEGEADMIN or TPO
@@ -51,17 +52,20 @@ router.get(
 
 router.get(
     '/get_company/:companyId',
+    validate(companyIdParamSchema, 'params'),
     asyncHandler(controller.getCompany)
 );
 
 router.put(
     '/update_company/:companyId',
+    validate(companyIdParamSchema, 'params'),
     validate(updateCompanySchema),
     asyncHandler(controller.updateCompany)
 );
 
 router.patch(
     '/toggle_company_status/:companyId',
+    validate(companyIdParamSchema, 'params'),
     validate(toggleCompanyStatusSchema),
     asyncHandler(controller.toggleCompanyStatus)
 );

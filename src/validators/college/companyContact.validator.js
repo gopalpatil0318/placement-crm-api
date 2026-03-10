@@ -155,9 +155,33 @@ const toggleContactStatusSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS — UUID validation for route parameters
+// ============================================================================
+
+const companyIdParamSchema = Joi.object({
+    companyId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid company ID format',
+        'any.required': 'Company ID is required',
+    }),
+});
+
+const contactIdParamSchema = Joi.object({
+    contactId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid contact ID format',
+        'any.required': 'Contact ID is required',
+    }),
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
     addContactSchema,
     listContactsSchema,
     updateContactSchema,
     toggleContactStatusSchema,
+    companyIdParamSchema,
+    contactIdParamSchema,
 };

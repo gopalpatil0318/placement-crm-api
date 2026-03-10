@@ -24,6 +24,7 @@ const { apiLimiter } = require('../../config/rateLimiter');
 const {
     addExperienceSchema,
     updateExperienceSchema,
+    experienceIdParamSchema,
 } = require('../../validators/student/experience.validator');
 
 // ============================================================================
@@ -51,6 +52,7 @@ router.put(
     '/update_experience/:experienceId',
     authenticate,
     apiLimiter,
+    validate(experienceIdParamSchema, 'params'),
     validate(updateExperienceSchema),
     asyncHandler(controller.updateExperience)
 );
@@ -60,6 +62,7 @@ router.delete(
     '/delete_experience/:experienceId',
     authenticate,
     apiLimiter,
+    validate(experienceIdParamSchema, 'params'),
     asyncHandler(controller.deleteExperience)
 );
 

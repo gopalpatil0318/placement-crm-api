@@ -72,6 +72,7 @@ async function updateContact(req, res) {
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
+        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
     }
 }

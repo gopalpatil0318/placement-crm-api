@@ -108,16 +108,14 @@ async function getAllDepartments(collegeId, filters = {}) {
 
     const whereClause = conditions.join(' AND ');
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total FROM departments d WHERE ${whereClause}`,
-        params
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch
-    const deptResult = await query(
-        `SELECT d.dept_id, d.dept_name, d.dept_code, d.dept_type,
+    // Count and fetch in parallel
+    const [countResult, deptResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total FROM departments d WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT d.dept_id, d.dept_name, d.dept_code, d.dept_type,
                 d.program_duration_years, d.total_semesters,
                 d.is_active, d.created_at,
                 COUNT(DISTINCT u.user_id)::int AS user_count,
@@ -129,8 +127,11 @@ async function getAllDepartments(collegeId, filters = {}) {
          GROUP BY d.dept_id
          ORDER BY d.dept_name ASC
          LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
+            [...params, limit, offset]
+        ),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
 
     return {
         departments: deptResult.rows,

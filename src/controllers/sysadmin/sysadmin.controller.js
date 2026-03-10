@@ -25,7 +25,7 @@ const { LOG } = require('../../config/constants');
 // Cookie options for JWT — HttpOnly, no JS access
 const COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: false,          // set true in production behind HTTPS
+    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
@@ -55,9 +55,9 @@ async function login(req, res) {
 
 async function logout(req, res) {
     res.clearCookie('token', {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
+        httpOnly: COOKIE_OPTIONS.httpOnly,
+        secure: COOKIE_OPTIONS.secure,
+        sameSite: COOKIE_OPTIONS.sameSite,
     });
 
     logger.info(`${LOG.AUTH} Sysadmin logged out`);
@@ -87,7 +87,7 @@ async function getAllColleges(req, res) {
         page, limit, offset, status, type, search,
     });
 
-    return sendPaginated(res, colleges, page, limit, total, SUCCESS_MESSAGES.FETCHED_SUCCESSFULLY);
+    return sendPaginated(res, colleges, total, { page, limit }, SUCCESS_MESSAGES.FETCHED_SUCCESSFULLY);
 }
 
 // ============================================================================
@@ -147,7 +147,7 @@ async function updateAcademicYear(req, res) {
 
     const updated = await sysadminService.updateAcademicYear(req.params.collegeId, default_academic_year);
 
-    return sendSuccess(res, updated, 'Academic year updated successfully');
+    return sendSuccess(res, updated, SUCCESS_MESSAGES.ACADEMIC_YEAR_UPDATED);
 }
 
 // ============================================================================

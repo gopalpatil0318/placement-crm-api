@@ -25,7 +25,7 @@ const UPDATABLE_FIELDS = [
     'salary_package', 'salary_min', 'salary_max',
     'bond_duration', 'bond_details', 'job_type',
     'internship_duration', 'internship_stipend',
-    'passout_year', 'application_deadline', 'allow_applications',
+    'passout_years', 'application_deadline', 'allow_applications',
 ];
 
 // Valid status transitions
@@ -54,7 +54,7 @@ async function createJob(collegeId, userId, data) {
         salary_package, salary_min, salary_max,
         bond_duration, bond_details, job_type,
         internship_duration, internship_stipend,
-        passout_year, application_deadline,
+        passout_years, application_deadline,
         positions, eligibility_criteria, rounds, questions,
     } = data;
 
@@ -109,7 +109,7 @@ async function createJob(collegeId, userId, data) {
                (college_id, company_id, job_title, job_description, job_location,
                 salary_package, salary_min, salary_max, bond_duration, bond_details,
                 job_type, internship_duration, internship_stipend,
-                passout_year, application_deadline, job_status, created_by)
+                passout_years, application_deadline, job_status, created_by)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
              RETURNING *`,
             [
@@ -117,24 +117,25 @@ async function createJob(collegeId, userId, data) {
                 salary_package ?? null, salary_min ?? null, salary_max ?? null,
                 bond_duration ?? null, bond_details ?? null,
                 job_type, internship_duration ?? null, internship_stipend ?? null,
-                passout_year, application_deadline, STATUS.JOB.DRAFT, userId,
+                passout_years, application_deadline, STATUS.JOB.DRAFT, userId,
             ]
         );
 
         const job = jobResult.rows[0];
         const jobId = job.job_id;
 
-        // 4b. Insert positions (required, at least 1)
-        const insertedPositions = [];
-        for (const pos of positions) {
-            const posResult = await client.query(
-                `INSERT INTO job_positions (job_id, position_name, position_description, vacancies)
-                 VALUES ($1, $2, $3, $4)
-                 RETURNING *`,
-                [jobId, pos.position_name, pos.position_description ?? null, pos.vacancies ?? null]
-            );
-            insertedPositions.push(posResult.rows[0]);
-        }
+        // 4b. Insert positions (required, at least 1) — multi-row INSERT
+        const posNames = positions.map(p => p.position_name);
+        const posDescs = positions.map(p => p.position_description ?? null);
+        const posVacancies = positions.map(p => p.vacancies ?? null);
+
+        const posResult = await client.query(
+            `INSERT INTO job_positions (job_id, position_name, position_description, vacancies)
+             SELECT $1, unnest($2::text[]), unnest($3::text[]), unnest($4::int[])
+             RETURNING *`,
+            [jobId, posNames, posDescs, posVacancies]
+        );
+        const insertedPositions = posResult.rows;
 
         // 4c. Insert eligibility criteria (optional, 1 per job)
         let insertedCriteria = null;
@@ -145,7 +146,7 @@ async function createJob(collegeId, userId, data) {
                    (job_id, min_overall_cgpa, max_live_kts,
                     min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
                     allowed_genders, allowed_departments, allowed_gap_statuses,
-                    passout_year, min_existing_package, max_existing_package,
+                    passout_years, min_existing_package, max_existing_package,
                     exclude_already_placed)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                  RETURNING *`,
@@ -159,7 +160,7 @@ async function createJob(collegeId, userId, data) {
                     ec.allowed_genders ?? null,
                     ec.allowed_departments ?? null,
                     ec.allowed_gap_statuses ?? null,
-                    passout_year,
+                    passout_years,
                     ec.min_existing_package ?? null,
                     ec.max_existing_package ?? null,
                     ec.exclude_already_placed ?? false,
@@ -168,47 +169,45 @@ async function createJob(collegeId, userId, data) {
             insertedCriteria = criteriaResult.rows[0];
         }
 
-        // 4d. Insert rounds (optional)
-        const insertedRounds = [];
+        // 4d. Insert rounds (optional) — multi-row INSERT
+        let insertedRounds = [];
         if (rounds && rounds.length > 0) {
-            for (const round of rounds) {
-                const roundResult = await client.query(
-                    `INSERT INTO job_rounds
-                       (job_id, round_number, round_name, round_description,
-                        round_type, round_date, round_venue)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7)
-                     RETURNING *`,
-                    [
-                        jobId, round.round_number, round.round_name,
-                        round.round_description || null,
-                        round.round_type || null,
-                        round.round_date || null,
-                        round.round_venue || null,
-                    ]
-                );
-                insertedRounds.push(roundResult.rows[0]);
-            }
+            const roundNumbers = rounds.map(r => r.round_number);
+            const roundNames = rounds.map(r => r.round_name);
+            const roundDescs = rounds.map(r => r.round_description || null);
+            const roundTypes = rounds.map(r => r.round_type || null);
+            const roundDates = rounds.map(r => r.round_date || null);
+            const roundVenues = rounds.map(r => r.round_venue || null);
+
+            const roundResult = await client.query(
+                `INSERT INTO job_rounds
+                   (job_id, round_number, round_name, round_description, round_type, round_date, round_venue)
+                 SELECT $1, unnest($2::int[]), unnest($3::text[]), unnest($4::text[]),
+                        unnest($5::text[]), unnest($6::timestamptz[]), unnest($7::text[])
+                 RETURNING *`,
+                [jobId, roundNumbers, roundNames, roundDescs, roundTypes, roundDates, roundVenues]
+            );
+            insertedRounds = roundResult.rows;
         }
 
-        // 4e. Insert application questions (optional)
-        const insertedQuestions = [];
+        // 4e. Insert application questions (optional) — multi-row INSERT
+        let insertedQuestions = [];
         if (questions && questions.length > 0) {
-            for (const q of questions) {
-                const qResult = await client.query(
-                    `INSERT INTO application_questions
-                       (job_id, question_text, question_type, question_options,
-                        is_required, question_order)
-                     VALUES ($1,$2,$3,$4,$5,$6)
-                     RETURNING *`,
-                    [
-                        jobId, q.question_text, q.question_type,
-                        q.question_options || null,
-                        q.is_required !== undefined ? q.is_required : true,
-                        q.question_order,
-                    ]
-                );
-                insertedQuestions.push(qResult.rows[0]);
-            }
+            const qTexts = questions.map(q => q.question_text);
+            const qTypes = questions.map(q => q.question_type);
+            const qOptions = questions.map(q => q.question_options ? JSON.stringify(q.question_options) : null);
+            const qRequired = questions.map(q => q.is_required !== undefined ? q.is_required : true);
+            const qOrders = questions.map(q => q.question_order);
+
+            const qResult = await client.query(
+                `INSERT INTO application_questions
+                   (job_id, question_text, question_type, question_options, is_required, question_order)
+                 SELECT $1, unnest($2::text[]), unnest($3::text[]), unnest($4::jsonb[]),
+                        unnest($5::boolean[]), unnest($6::int[])
+                 RETURNING *`,
+                [jobId, qTexts, qTypes, qOptions, qRequired, qOrders]
+            );
+            insertedQuestions = qResult.rows;
         }
 
         await client.query('COMMIT');
@@ -263,8 +262,8 @@ async function getAllJobs(collegeId, filters = {}) {
     let paramIndex = 2;
 
     if (filters.passout_year) {
-        conditions.push(`j.passout_year = $${paramIndex}`);
-        params.push(filters.passout_year);
+        conditions.push(`$${paramIndex} = ANY(j.passout_years)`);
+        params.push(Number(filters.passout_year));
         paramIndex++;
     }
 
@@ -301,47 +300,46 @@ async function getAllJobs(collegeId, filters = {}) {
         job_title: 'j.job_title',
         created_at: 'j.created_at',
         application_deadline: 'j.application_deadline',
-        passout_year: 'j.passout_year',
     };
     const sortCol = SORTABLE[filters.sort_by] || 'j.created_at';
     const sortOrd = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM job_postings j
-         JOIN companies c ON j.company_id = c.company_id
-         WHERE ${whereClause}`,
-        params
-    );
+    // Count + Fetch in parallel
+    const [countResult, jobResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM job_postings j
+             JOIN companies c ON j.company_id = c.company_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT j.*,
+                    c.company_name,
+                    c.company_logo,
+                    COALESCE(pos.cnt, 0) AS positions_count,
+                    COALESCE(app.cnt, 0) AS applications_count,
+                    u.user_name AS created_by_name
+             FROM job_postings j
+             JOIN companies c ON j.company_id = c.company_id
+             LEFT JOIN users u ON j.created_by = u.user_id
+             LEFT JOIN (
+                 SELECT job_id, COUNT(*) AS cnt
+                 FROM job_positions WHERE position_status = 'active'
+                 GROUP BY job_id
+             ) pos ON j.job_id = pos.job_id
+             LEFT JOIN (
+                 SELECT job_id, COUNT(*) AS cnt
+                 FROM student_applications
+                 GROUP BY job_id
+             ) app ON j.job_id = app.job_id
+             WHERE ${whereClause}
+             ORDER BY ${sortCol} ${sortOrd}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch with enriched data
-    const jobResult = await query(
-        `SELECT j.*,
-                c.company_name,
-                c.company_logo,
-                COALESCE(pos.cnt, 0) AS positions_count,
-                COALESCE(app.cnt, 0) AS applications_count,
-                u.user_name AS created_by_name
-         FROM job_postings j
-         JOIN companies c ON j.company_id = c.company_id
-         LEFT JOIN users u ON j.created_by = u.user_id
-         LEFT JOIN (
-             SELECT job_id, COUNT(*) AS cnt
-             FROM job_positions WHERE position_status = 'active'
-             GROUP BY job_id
-         ) pos ON j.job_id = pos.job_id
-         LEFT JOIN (
-             SELECT job_id, COUNT(*) AS cnt
-             FROM student_applications
-             GROUP BY job_id
-         ) app ON j.job_id = app.job_id
-         WHERE ${whereClause}
-         ORDER BY ${sortCol} ${sortOrd}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
 
     return {
         jobs: jobResult.rows.map(row => ({

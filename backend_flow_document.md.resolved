@@ -1,7 +1,8 @@
 # Placement CRM — Complete Backend Flow Document
 
-> **Stack**: Node.js + Express.js + PostgreSQL (Supabase)
-> **Auth**: JWT (college users + students) | .env credentials (sysadmin)
+> **Stack**: Node.js + Express v5 + PostgreSQL (Supabase)
+> **Auth**: JWT via HttpOnly cookies (college users + students) | .env credentials (sysadmin)
+> **Last Updated**: March 10, 2026 — reflects full implemented codebase (188 endpoints across 43 modules)
 
 ---
 
@@ -10,94 +11,174 @@
 ```
 src/
 ├── config/
-│   ├── constants.js            # All enums, messages, config values
-│   ├── db.js                   # PostgreSQL pool (getMainPool)
-│   ├── logger.js               # Winston logger setup
-│   └── rateLimiter.js          # authLimiter + apiLimiter
+│   ├── constants.js            # All enums, messages, config values (LOG, STATUS, ROLES, VALIDATION, ERROR_MESSAGES, SUCCESS_MESSAGES)
+│   ├── db.js                   # PostgreSQL pool — query(), getClient(), getMainPool()
+│   ├── env.js                  # Validated environment variables via dotenv
+│   ├── logger.js               # Winston logger (file + console)
+│   └── rateLimiter.js          # authLimiter (auth routes) + apiLimiter (write routes)
 ├── middleware/
-│   ├── authMiddleware.js       # JWT verify + requireRole
-│   └── validateRequest.js      # Joi validation middleware
+│   ├── authMiddleware.js       # authenticate (JWT verify) + requireRole(...roles)
+│   ├── errorHandler.js         # Global error handler — formats all thrown errors
+│   ├── requestLogger.js        # Morgan HTTP logging
+│   └── validateRequest.js      # Joi validation → req.validated (stripUnknown, abortEarly: false)
 ├── routes/
-│   ├── index.js                # Route aggregator
-│   ├── sysadmin/               # Sysadmin routes
-│   ├── college/                # College admin routes
-│   └── student/                # Student routes
-├── controllers/                # Request handlers (HTTP layer)
-├── services/                   # Business logic + DB queries
-├── validators/                 # Joi schemas
+│   ├── index.js                # Route aggregator — mounts /api/sysadmin, /api/college, /api/student
+│   ├── sysadmin/               # 1 route file
+│   ├── college/                # 21 route files
+│   └── student/                # 18 route files
+├── controllers/                # HTTP layer — extracts req.validated + req.user, calls service, sends response
+│   ├── sysadmin/
+│   ├── college/                # 21 controller files
+│   └── student/                # 18 controller files
+├── services/                   # Business logic + all DB queries
+│   ├── sysadmin/               # 1 service file
+│   ├── college/                # 21 service files
+│   └── student/                # 18 service files
+├── validators/                 # Joi schemas — one file per module
+│   ├── sysadmin/
+│   ├── college/
+│   └── student/
 ├── utils/
-│   ├── responseHelper.js       # { success, data, message } format
-│   └── pagination.js           # Page, limit, offset, total
-├── app.js                      # Express app setup
-└── server.js                   # Listen on PORT
+│   ├── asyncHandler.js         # Wraps async controllers to forward errors to next()
+│   ├── emailHelper.js          # sendEmail() via nodemailer
+│   ├── jwtHelper.js            # generateToken(payload, options) + verifyToken(token)
+│   ├── pagination.js           # getPagination(filters) → { page, limit, offset }
+│   ├── passwordHelper.js       # hashPassword(plain) + comparePassword(plain, hash)
+│   └── responseHelper.js       # sendSuccess, sendCreated, sendError, sendPaginated
+├── app.js                      # Express app setup (middleware chain, route mounting)
+└── server.js                   # HTTP server startup on PORT
 ```
+
+### Total Endpoints: 168
+| Scope | Modules | Endpoints |
+|-------|---------|-----------|
+| Sysadmin | 1 | 9 |
+| College | 21 | 93 |
+| Student | 18 | 66 |
 
 ---
 
 ## 🔐 Things to Keep in Mind (Best Practices)
 
 ### 1. Standardized API Response
-Every API must return the same shape:
+Every API returns the same shape via `responseHelper.js`:
 ```js
-// Success
-{ success: true, data: {...}, message: "College created successfully" }
+// Success (sendSuccess)
+{ success: true, message: "College created successfully", data: {...} }
 
-// Error
+// Created (sendCreated → 201)
+{ success: true, message: "Resource created", data: {...} }
+
+// List with pagination (sendPaginated)
+{ success: true, message: "...", data: [...], pagination: { page, limit, total, totalPages } }
+
+// Error (sendError — used by global errorHandler)
 { success: false, error: "Validation failed", details: [...] }
-
-// List with pagination
-{ success: true, data: [...], pagination: { page: 1, limit: 10, total: 250 } }
 ```
 
 ### 2. Authentication & Authorization Flow
 ```
-Request → authMiddleware (verify JWT)
-        → roleMiddleware (check user_role)
-        → collegeIsolation (inject college_id from token)
-        → Controller
+Request
+  → authLimiter / apiLimiter   (rate limiting)
+  → validate(schema)           (Joi → req.validated, 422 on failure)
+  → authenticate               (verify JWT cookie → req.user = { id, role, college_id, dept_id? })
+  → requireRole(...roles)      (optional role check → 403 if not allowed)
+  → asyncHandler(controller)   (catches async errors → errorHandler)
+  → Service layer              (DB queries, business logic)
 ```
 
 > [!IMPORTANT]
-> **Every query MUST include `college_id` in the WHERE clause.** This is the foundation of multi-college isolation. Never allow one college to see another college's data.
+> **Every data query MUST include `college_id` in the WHERE clause.** The `college_id` always comes from `req.user.college_id` (injected from JWT) — never from request body or params. This is the foundation of multi-tenant isolation.
 
-### 3. Input Validation (BEFORE touching DB)
-- Use **Joi** or **Zod** to validate every request body, params, and query
-- Validate UUIDs, emails, phone numbers, dates, enum values
-- Return 400 with clear error messages if validation fails
+### 3. JWT Token Internals
+```js
+// College user token payload:
+{ id: user_id, college_id, role: 'collegeadmin'|'tpo'|'hod'|'teacher'|'tpc' }
+
+// Student token payload:
+{ id: student_id, college_id, role: 'student' }
+
+// Sysadmin token payload:
+{ id: 'sysadmin', role: 'sysadmin' }    // no college_id
+
+// Password reset token payload (15 min expiry):
+// College: { id: user_id, purpose: 'password_reset' }
+// Student: { id: student_id, purpose: 'password_reset', type: 'student' }
+
+// JWT stored as HttpOnly cookie named 'token'
+// College/student token expiry: 7 days
+// Reset token expiry: 15 minutes
+```
+
+### 4. Input Validation (BEFORE touching DB)
+- **Joi** schemas in `/validators/` — one file per module
+- `validate(schema)` for body, `validate(schema, 'query')` for query params, `validate(schema, 'params')` for URL params
+- Validated data on `req.validated` — unknown fields stripped automatically
+- Returns **422** with field-level error details array on failure
 - **Never trust frontend data** — always validate on backend
 
-### 4. Password Handling
-- Hash passwords with **bcrypt** (salt rounds: 10-12)
+### 5. Password Handling
+- Hash passwords with **bcrypt** (salt rounds: 10)
 - Never store plain text passwords
-- Never return passwords in API responses (use `SELECT` without password field)
+- Never return passwords in API responses
+- `hashPassword(plain)` and `comparePassword(plain, hash)` from `utils/passwordHelper.js`
 
-### 5. Pagination on All List APIs
-- Default: `page=1, limit=10`
+### 6. Pagination on All List APIs
+- Default: `page=1, limit=10`, max: `limit=100`
 - Always return `{ data, pagination: { page, limit, total, totalPages } }`
 - Use `OFFSET` and `LIMIT` in SQL queries
+- `getPagination(filters)` → `{ page, limit, offset }` from `utils/pagination.js`
 
-### 6. Error Handling
-- Have a global error handler middleware
-- Return proper HTTP status codes: 200, 201, 400, 401, 403, 404, 409, 500
-- Log errors with `err.message` + `err.stack` (never just `err` as string)
-- Don't expose internal errors to client
+### 7. Error Handling
+- Global `errorHandler` middleware in `middleware/errorHandler.js`
+- Throw errors with `Object.assign(new Error('message'), { status: 404 })` in services
+- Return proper HTTP status codes: 200, 201, 400, 401, 403, 404, 409, 422, 500
+- Log errors with `err.message` + `err.stack` (never `${err}` as string)
+- Don't expose internal stack traces to client
 
-### 7. SQL Injection Prevention
-- Always use **parameterized queries** (`$1, $2, $3...`)
-- Never concatenate user input into SQL strings
+### 8. SQL Injection Prevention
+- Always use **parameterized queries** (`$1, $2, $3...`) via `query(sql, params)` from `db.js`
+- For dynamic ORDER BY columns: use a **whitelist array** — never interpolate sort field directly
+- Dynamic WHERE clauses: build conditions array + params array programmatically
 
-### 8. Documents (Resume, Offer Letters, Certificates)
+### 9. Documents (Resume, Offer Letters, Certificates)
 - **No file uploads** — all documents stored as URL links
 - User provides hosted link (Google Drive, etc.) and we save the URL in database
-- This applies to: offer letters, resumes, certificates, project links, profile photos
+- Applies to: offer letters, resumes, certificates, project links, profile photos
 
-### 9. Soft Delete vs Hard Delete
-- Prefer **status change** (`is_active = false`, `student_status = 'inactive'`) over deletion
+### 10. Soft Delete vs Hard Delete
+- Prefer **status change** (`student_status = 'inactive'`, `user_status = 'inactive'`) over deletion
 - Only hard delete where it makes sense (draft questions, temp data)
 
-### 10. Transaction Usage
-- Use **database transactions** when inserting into multiple tables
-- Example: Creating a job posting (job_postings + job_positions + job_eligibility_criteria + job_rounds) → all or nothing
+### 11. Transaction Usage
+Use `getClient()` with `BEGIN/COMMIT/ROLLBACK` when writing to multiple tables atomically:
+```js
+const { getClient } = require('../../config/db');
+
+async function doMultiTableWrite(data) {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    // ... multiple inserts/updates ...
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error(`${LOG.TRANSACTION} Rolled back: ${err.message}`, { stack: err.stack });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+```
+_Required for: college creation (colleges + users), placement creation (placement_results + application status update)._
+
+### 12. Performance Patterns
+- **No N+1 queries**: All list endpoints use JOINs or LEFT JOIN aggregates
+- **Promise.all() for independent queries**: Parallel DB hits wherever queries are not interdependent
+- **Specific column SELECT**: Never `SELECT *` in production queries — list only needed columns
+- **COALESCE for null safety**: All aggregation results wrapped (`COALESCE(COUNT(*), 0)`, etc.)
+- **Index-aware WHERE**: Always filter by indexed columns first (`college_id`, `student_id`, `job_id`)
 
 ---
 
@@ -105,20 +186,37 @@ Request → authMiddleware (verify JWT)
 
 ### How Sysadmin Auth Works
 ```
-┌──────────────────────────────────────────────────┐
-│ Sysadmin credentials stored in .env file:        │
-│   SYSADMIN_EMAIL=admin@system.com                │
-│   SYSADMIN_PASSWORD=hashed_password_here         │
-│                                                  │
-│ POST /api/sysadmin/login                         │
-│   → Compare email + password with .env values    │
-│   → If match → return JWT with role: 'sysadmin'  │
-│   → If not → return 401                          │
-│                                                  │
-│ All sysadmin routes use sysadminAuth middleware   │
-│   → Verify JWT + check role === 'sysadmin'       │
-└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ Sysadmin credentials stored in .env file:                │
+│   SYSADMIN_EMAIL=admin@system.com                        │
+│   SYSADMIN_PASSWORD=hashed_password_here                 │
+│                                                          │
+│ POST /api/sysadmin/login                                 │
+│   → Compare email + bcrypt compare password from .env   │
+│   → If match → generate JWT with { id: 'sysadmin',      │
+│                role: 'sysadmin' }                        │
+│   → Set JWT in HttpOnly cookie 'token'                   │
+│   → If not → return 401                                  │
+│                                                          │
+│ POST /api/sysadmin/logout                                │
+│   → Clear 'token' cookie                                 │
+│                                                          │
+│ All sysadmin routes: authenticate → requireRole('sysadmin') │
+└──────────────────────────────────────────────────────────┘
 ```
+
+### Sysadmin Endpoints (9 total)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/sysadmin/login | Sysadmin login |
+| POST | /api/sysadmin/logout | Sysadmin logout |
+| POST | /api/sysadmin/create_new_college | Create college + first admin user (transaction) |
+| GET | /api/sysadmin/get_all_colleges | List all colleges (paginated) |
+| GET | /api/sysadmin/get_college/:collegeId | Get college details |
+| PUT | /api/sysadmin/update_college/:collegeId | Update college info |
+| PATCH | /api/sysadmin/toggle_college_status/:collegeId | Activate/deactivate college |
+| PATCH | /api/sysadmin/update_college_features/:collegeId | Update enabled features |
+| PATCH | /api/sysadmin/update_academic_year/:collegeId | Update default academic year |
 
 ### Flow: Creating a College
 
@@ -131,17 +229,17 @@ sequenceDiagram
     SA->>API: POST /api/sysadmin/create_new_college
     Note right of API: Body: college_name, subdomain,<br/>address, type, academic_year,<br/>admin_email, admin_password
 
-    API->>API: Validate input (Joi/Zod)
+    API->>API: Validate input (Joi)
     API->>DB: Check subdomain uniqueness
     DB-->>API: No duplicate found
 
-    API->>API: Hash admin password (bcrypt)
+    API->>API: Hash admin password (bcrypt, 10 rounds)
 
     API->>DB: BEGIN TRANSACTION
     API->>DB: INSERT into colleges table
     DB-->>API: college_id returned
 
-    API->>DB: INSERT into users table<br/>(college_id, admin_email, hashed_password,<br/>role='collegeadmin')
+    API->>DB: INSERT into users table<br/>(college_id, admin_email, hashed_password,<br/>user_role='collegeadmin')
     DB-->>API: user_id returned
 
     API->>DB: COMMIT
@@ -149,33 +247,67 @@ sequenceDiagram
 ```
 
 > [!IMPORTANT]
-> **When creating a college, also create the first college admin user** in a single transaction. This is the user who will log in and manage everything for that college.
+> **When creating a college, also create the first college admin user** in a single transaction. This ensures a valid login always exists for every college in the system.
 
 ### College Status Management
 ```js
 // PATCH /api/sysadmin/toggle_college_status/:collegeId
-// Body: { status: "inactive" }
+// Body: { college_status: "inactive" }
 
 // When college is deactivated:
-// 1. Update college_status = 'inactive'
-// 2. All college users and students should NOT be able to login
-//    → Check college_status in login APIs
-//    → If college is inactive → return 403 "College account is deactivated"
+// 1. Update college.college_status = 'inactive'
+// 2. All college users AND students are blocked from login:
+//    → Both login services check college_status === 'active'
+//    → If inactive → throw 403 "College account has been deactivated"
 ```
 
 ### Enabled Features
 ```js
 // PATCH /api/sysadmin/update_college_features/:collegeId
-// Body: { features: ["core", "training", "feedback", "interview_questions"] }
+// Body: { enabled_features: ["core", "training", "feedback", "interview_questions"] }
 
-// Store as JSONB array in colleges.enabled_features
+// Stored as JSONB array in colleges.enabled_features
 // College admin can only access features that are enabled
-// → Check features in middleware or at route level
+```
+
+### Academic Year Management
+```js
+// PATCH /api/sysadmin/update_academic_year/:collegeId
+// Body: { default_academic_year: 2026 }
+
+// Sets the default passout_year used when college browses students
+// College can still filter by any year — this is just the default
 ```
 
 ---
 
 ## 🟢 SECTION 2: COLLEGE ADMIN FLOW
+
+### College User Roles
+| Role | DB value | Who they are |
+|------|----------|-------------|
+| College Admin | `collegeadmin` | Created by sysadmin. Full admin access. |
+| TPO | `tpo` | Training & Placement Officer. Manages placements. |
+| TPC | `tpc` | Training & Placement Coordinator. Similar to TPO. |
+| HOD | `hod` | Head of Department. Department-scoped access. |
+| Teacher | `teacher` | Faculty member. Limited access. |
+
+> [!NOTE]
+> `tpc` role was added to the `users_role_check` DB constraint. All five non-sysadmin roles are valid: `collegeadmin`, `tpo`, `tpc`, `hod`, `teacher`.
+
+### College User Endpoints (9 total)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/college/login | public + authLimiter | College user login |
+| POST | /api/college/logout | authenticate | Logout (clear cookie) |
+| POST | /api/college/forgot_password | public + authLimiter | Send reset email |
+| POST | /api/college/reset_password | public + authLimiter | Reset password from email link token |
+| POST | /api/college/change_password | authenticate | Change own password |
+| POST | /api/college/create_user | authenticate + requireRole(collegeadmin) | Create new college user |
+| GET | /api/college/get_all_users | authenticate + requireRole(collegeadmin) | List all users (paginated, filterable) |
+| GET | /api/college/get_user/:userId | authenticate + requireRole(collegeadmin) | Get user details |
+| PUT | /api/college/update_user/:userId | authenticate + requireRole(collegeadmin) | Update user |
+| PATCH | /api/college/toggle_user_status/:userId | authenticate + requireRole(collegeadmin) | Activate/deactivate user |
 
 ### College User Login Flow
 
@@ -188,45 +320,62 @@ sequenceDiagram
     U->>API: POST /api/college/login
     Note right of API: Body: email, password
 
-    API->>DB: SELECT user + college WHERE email = $1
+    API->>DB: SELECT user + college WHERE LOWER(user_email) = LOWER($1)
     DB-->>API: User record found
 
-    API->>API: Check college_status === 'active'
+    API->>API: Check college.college_status === 'active'
     Note over API: If inactive → 403
 
-    API->>API: Check user_status === 'active'
+    API->>API: Check user.user_status === 'active'
     Note over API: If inactive → 403
 
-    API->>API: Compare password with bcrypt
+    API->>API: bcrypt.compare(password, user.user_password)
     Note over API: If wrong → 401
 
-    API->>API: Generate JWT with:<br/>user_id, college_id, role, dept_id
+    API->>API: generateToken({ id: user_id, college_id, role: user_role })
+    API->>API: Set JWT in HttpOnly cookie 'token'
 
-    API-->>U: { token, user: { name, role, college_name } }
+    API-->>U: { user: { user_id, user_name, user_role, college_name, ... } }
 ```
 
 > [!IMPORTANT]
-> **JWT Payload must contain**: `user_id`, `college_id`, `role`, `dept_id` (if applicable). The `college_id` is used in EVERY subsequent query for data isolation.
+> JWT Payload: `{ id: user_id, college_id, role }`. The `college_id` is used in EVERY subsequent query for data isolation.
 
-### Forgot Password Flow
+### Forgot Password / Reset Password Flow
+
 ```
-1. POST /forgot-password → { email }
-2. Find user by email → if exists, generate reset token (UUID or JWT with 15min expiry)
-3. Save token hash in DB or in-memory (Redis)
-4. Send email with reset link: https://app.com/reset-password?token=xxx
-5. POST /reset-password → { token, new_password }
-6. Verify token → hash new password → update in DB → delete token
+FORGOT PASSWORD:
+1. POST /api/college/forgot_password → { email }
+2. Find user by email (email enumeration prevented — always return same message)
+3. Generate reset JWT: { id: user_id, purpose: 'password_reset' } with 15 min expiry
+4. Send email with link: ${FRONTEND_URL}/reset-password?token=<jwt>
+5. Return 200 with generic success message (never reveal whether email exists)
+
+RESET PASSWORD:
+1. POST /api/college/reset_password → { token, new_password, confirm_password }
+2. verifyToken(token) — checks JWT signature + expiry
+3. Validate payload: payload.purpose === 'password_reset'
+4. Find user by payload.id in users table
+5. Hash new password, UPDATE users SET user_password = $1
+6. Return success — user must now log in fresh
 ```
+
+> [!IMPORTANT]
+> Token is a **stateless JWT** (no DB storage, no Redis needed). The 15-minute expiry is enforced by JWT signature verification. A used token remains technically valid until expiry — this implementation assumes the frontend redirects away after use.
 
 ### Department Management
 
 ```
-POST /api/college/departments → { dept_name, dept_code, dept_type, program_duration_years, total_semesters }
+POST   /api/college/create_department    → { dept_name, dept_code, dept_type, program_duration_years, total_semesters }
+GET    /api/college/get_all_departments  → paginated + filterable
+GET    /api/college/get_department/:id
+PUT    /api/college/update_department/:id
+PATCH  /api/college/toggle_department_status/:id
 
 // Key points:
-// 1. Always include college_id from JWT token (don't accept from body)
-// 2. Check uniqueness: same dept_name should not exist in same college
-// 3. program_duration_years and total_semesters are important for semester grading
+// 1. college_id always from JWT req.user.college_id — never accept from body
+// 2. Uniqueness check: dept_name must not already exist in same college
+// 3. program_duration_years and total_semesters matter for semester grade validation
 //    e.g. Engineering = 4 years, 8 semesters | Diploma = 3 years, 6 semesters
 ```
 
@@ -241,11 +390,11 @@ sequenceDiagram
     CA->>API: POST /api/college/register_student
     Note right of API: Body: first_name, last_name,<br/>email, password, dept_id,<br/>passout_year, current_year
 
-    API->>API: Validate input
-    API->>API: Hash password (bcrypt)
-    API->>DB: Check email uniqueness in college
+    API->>API: Validate input (Joi)
+    API->>API: Hash password (bcrypt, 10 rounds)
+    API->>DB: Check email uniqueness within same college
     API->>DB: INSERT into students table
-    Note over DB: profile_complete = false<br/>profile_is_approved = false
+    Note over DB: profile_complete = false<br/>profile_is_approved = false<br/>student_status = 'active'
     API-->>CA: { success: true, data: student }
 ```
 
@@ -409,11 +558,14 @@ stateDiagram-v2
 ### Eligibility Check Logic
 
 ```js
-// When student tries to apply or when admin checks eligible students:
+// The actual eligibility check queries both the students table (academic data)
+// and the job_eligibility_criteria table, then compares field by field.
 
+// Fields checked:
 function checkEligibility(student, criteria) {
   const reasons = [];
 
+  // Academic thresholds
   if (criteria.min_overall_cgpa && student.overall_cgpa < criteria.min_overall_cgpa)
     reasons.push(`CGPA ${student.overall_cgpa} below minimum ${criteria.min_overall_cgpa}`);
 
@@ -423,19 +575,26 @@ function checkEligibility(student, criteria) {
   if (criteria.min_tenth_percentage && student.tenth_percentage < criteria.min_tenth_percentage)
     reasons.push(`10th: ${student.tenth_percentage}% below ${criteria.min_tenth_percentage}%`);
 
-  // Check department eligibility
+  if (criteria.min_twelfth_percentage && student.twelfth_percentage < criteria.min_twelfth_percentage)
+    reasons.push(`12th percentage below minimum`);
+
+  // Department eligibility (stored as JSONB array of dept names)
   if (criteria.allowed_departments?.length > 0) {
     if (!criteria.allowed_departments.includes(student.dept_name))
       reasons.push(`Department ${student.dept_name} not eligible`);
   }
 
-  // Check if already placed (if exclude_already_placed = true)
+  // Already placed check — uses placement_results table
+  // (NOT application status — placement_results with status NOT IN ('cancelled','rejected'))
   if (criteria.exclude_already_placed && student.is_placed)
     reasons.push('Already placed');
 
   return { eligible: reasons.length === 0, reasons };
 }
 ```
+
+> [!CAUTION]
+> The `exclude_already_placed` check queries `placement_results` table (not `student_applications`). A student is considered "placed" if they have any row in `placement_results` with a status that is NOT `cancelled` or `rejected`.
 
 ### Application & Selection Round Flow
 
@@ -486,99 +645,228 @@ sequenceDiagram
 ### Placement Result Flow
 
 ```
-POST /api/college/placements
+POST /api/college/create_placement
 Body: {
   student_id, job_id, company_id,
-  placement_type: 'full-time' | 'internship',
-  fulltime_package: 600000,
+  placement_type: 'full_time' | 'internship' | 'ppo',
+  fulltime_package: 600000,       // for full_time
+  internship_stipend: 15000,      // for internship
   offer_letter_url: 'https://...',
-  placement_status: 'offered'
+  placement_status: 'offered'     // starting status
 }
 
 Status lifecycle: offered → accepted → joined
-                  offered → rejected (by student)
-                  offered → rescinded (by company - rare)
+                  offered → rejected  (by student)
+                  offered → rescinded (by company — rare)
 
-// IMPORTANT: Check placement policies before creating:
-// 1. Has the student exceeded max placements allowed?
-// 2. Is the student restricted/barred?
-// 3. These are validation checks - read from placement_policies table
+// IMPORTANT: createPlacement uses a TRANSACTION:
+// 1. INSERT into placement_results
+// 2. UPDATE student_applications SET application_status = 'selected'
+//    WHERE student_id + job_id, atomically
+// If either fails, both roll back.
 ```
+
+> [!IMPORTANT]
+> `createPlacement` is wrapped in a **database transaction** (INSERT + UPDATE student application status). This ensures placement results and application status are always in sync.
 
 ### Placement Policies — Usage Pattern
 
 ```js
-// Policies are stored as individual rules — read them at enforcement time:
+// Policies are stored as display/governance rules.
+// Read them at enforcement time before creating a placement:
 
-// Example: When creating a placement result, check policies:
-const policies = await db.query(
-  'SELECT * FROM placement_policies WHERE college_id = $1 AND passout_year = $2 AND is_active = true',
+const policies = await query(
+  `SELECT * FROM placement_policies
+   WHERE college_id = $1 AND passout_year = $2 AND is_active = true
+   ORDER BY policy_order ASC`,
   [college_id, passout_year]
 );
 
-// Iterate and enforce:
-for (const policy of policies.rows) {
-  // Parse policy_title and policy_description to determine what to check
-  // You can also add a policy_key field like 'max_placements' for programmatic checks
-  // OR handle it purely as display rules for admins to manually enforce
-}
+// Current enforcement checks (in createPlacement service):
+// 1. Is the student restricted (bar_from_placements)? → Block
+// 2. Does this student already have max placements (if max_placements policy exists)?
+//    → Block with policy message
 
-// TIP: For rules you want to enforce automatically (like max placements),
-// you could add a policy_key column and handle them in code.
-// For purely informational rules (like dress code), just display them.
+// The reorder endpoint (PUT /api/college/placement_policies/reorder) takes
+// an ordered array of policy IDs and updates policy_order for each.
 ```
 
 ### Student Restrictions
 
 ```
-POST /api/college/students/:studentId/restrictions
-Body: {
-  restriction_type: 'bar_from_placements',  // or 'warning', 'probation', etc.
+POST   /api/college/restrictions              — Add restriction to a student
+GET    /api/college/restrictions              — List all restrictions (paginated, filterable)
+PATCH  /api/college/restrictions/:id/resolve  — Resolve/lift a restriction
+GET    /api/college/restrictions/:studentId/student — Get all restrictions for a specific student
+
+// Body for creating restriction:
+{
+  student_id: "uuid",
+  restriction_type: 'bar_from_placements' | 'warning' | 'probation' | 'temporary_suspension',
   reason: 'Backed out after accepting offer from TCS',
-  valid_until: '2025-06-30'  // null = permanent until resolved
+  valid_until: '2025-06-30'  // null = permanent until manually resolved
 }
 
-// ENFORCEMENT: Before allowing student to apply for any job:
-// 1. Check: SELECT * FROM student_restrictions WHERE student_id = $1
-//           AND is_active = true AND restriction_type IN ('bar_from_placements', 'temporary_suspension')
-// 2. If found → block application with clear message
+// ENFORCEMENT (in checkApplicationBlockers — runs before every application):
+SELECT * FROM student_restrictions
+WHERE student_id = $1
+  AND is_active = true
+  AND restriction_type IN ('bar_from_placements', 'temporary_suspension')
+  AND (valid_until IS NULL OR valid_until > NOW())
+// If found → 403 with restriction details
 ```
 
 ### Training Programs Flow
 
 ```
-1. College admin creates program → POST /api/college/training
-2. Students enroll → POST /api/student/training/:programId/enroll
-3. Admin tracks progress → PATCH /api/college/training/enrollments/:id
-   (update sessions_attended, completion_status)
-4. Student submits feedback → POST /api/student/training/enrollments/:id/feedback
+College side:
+  POST   /api/college/training                          — Create training program
+  GET    /api/college/training                          — List programs
+  GET    /api/college/training/:id                      — Program details
+  PUT    /api/college/training/:id                      — Update program
+  PATCH  /api/college/training/:id/status               — Toggle active/inactive
+  GET    /api/college/training/:id/enrollments          — View enrolled students
+  PATCH  /api/college/training/enrollments/:id          — Update enrollment progress
+
+Student side:
+  GET    /api/student/training                          — Browse available programs
+  POST   /api/student/training/:programId/enroll        — Enroll in program
+  GET    /api/student/training/my_enrollments           — My enrollments + progress
+  POST   /api/student/training/enrollments/:id/feedback — Submit feedback on completion
 ```
 
 ### Notification System
 
 ```js
-// POST /api/college/notifications (single)
-// POST /api/college/notifications/bulk (by dept, passout_year, etc.)
+// College sends notifications:
+// POST /api/college/notifications       — Single notification to one student
+// POST /api/college/notifications/bulk  — Bulk to department/passout_year/all
 
-// For bulk: Query matching students, insert one notification per student
-// Notification types: 'new_job', 'status_change', 'offer_received', 'deadline_reminder', etc.
+// Bulk target options: { target_type: 'dept', dept_id, passout_year }
+//                      { target_type: 'passout_year', passout_year }
+//                      { target_type: 'all' }
+// Queries matching students → INSERT one notification row per student
 
-// Student side:
-// GET /api/student/notifications → WHERE student_id = $1 ORDER BY created_at DESC
-// GET /api/student/notifications/unread-count → COUNT WHERE is_read = false
-// PATCH /notificaitons/:id/read → UPDATE SET is_read = true, read_at = NOW()
+// Notification types: 'new_job', 'status_change', 'offer_received',
+//                     'deadline_reminder', 'general', 'training', 'result'
+
+// Student reads notifications:
+// GET    /api/student/notifications            — List (paginated, unread-first)
+// GET    /api/student/notifications/unread_count → { unread_count }
+// PATCH  /api/student/notifications/:id/read   — Mark one as read
+// PATCH  /api/student/notifications/read_all   — Mark all as read
+```
+
+### Override Request (Job Eligibility Override)
+
+Students who fail eligibility can request a manual override from TPO/admin.
+
+**Student side** (`/api/student` — requires `authenticate`):
+```
+GET  /api/student/check_override_eligibility/:jobId  — Check if override is possible for this job
+POST /api/student/request_job_override/:jobId        — Submit override request + reason (apiLimiter)
+GET  /api/student/get_my_override_requests           — List all own override requests across jobs
+```
+
+**College side** (`/api/college` — requires `authenticate + requireRole(COLLEGEADMIN, TPO, TPC)`):
+```
+GET   /api/college/get_job_override_requests/:jobId  — All override requests for a specific job (paginated)
+GET   /api/college/get_all_override_requests         — Dashboard: all pending requests across jobs (paginated)
+PATCH /api/college/review_override_request/:overrideId — Approve/deny a single request (apiLimiter)
+POST  /api/college/bulk_review_overrides             — Bulk approve/deny multiple requests (apiLimiter)
+```
+
+```
+When an override request is submitted (POST request_job_override):
+  → Notification is inserted for all users with role IN ('tpo', 'collegeadmin', 'tpc')
+     WHERE college_id = student's college AND user_status = 'active'
+```
+
+---
+
+### Student Data Verification Flow
+
+College users can review and approve/reject student-submitted profile data. Any authenticated college user can perform verifications (no `requireRole` restriction).
+
+**Verification status fields** (on `student_experience`, `student_achievements`, `student_certificates`; profile uses `profile_approval_status`):
+- `verification_status`: `'pending'` → `'approved'` | `'rejected'`
+- `is_verified`: boolean
+- `verified_by`: FK to `users.user_id`
+- `verified_at`: timestamp
+
+**Endpoints** (`/api/college` — `authenticate + apiLimiter`):
+
+```
+GET  /api/college/get_pending_verification_counts  — Dashboard widget: counts of pending items per type
+                                                     Returns: { profiles, experiences, achievements, certificates, total }
+                                                     (profiles counted via profile_complete=true AND profile_approval_status='pending')
+
+GET  /api/college/get_pending_profiles             — Paginated list of profiles awaiting review
+GET  /api/college/get_pending_experiences          — Paginated list of pending experience entries
+GET  /api/college/get_pending_achievements         — Paginated list of pending achievement entries
+GET  /api/college/get_pending_certificates         — Paginated list of pending certificate entries
+     (all paginated list endpoints accept sort/filter query params via pendingListSchema)
+
+PATCH /api/college/verify_student_profile/:studentId    — Approve or reject one profile
+PATCH /api/college/verify_experience/:experienceId      — Approve or reject one experience
+PATCH /api/college/verify_achievement/:achievementId    — Approve or reject one achievement
+PATCH /api/college/verify_certificate/:certificateId    — Approve or reject one certificate
+      Body (single): verifyActionSchema → { action: 'approved'|'rejected', rejection_reason? }
+
+PATCH /api/college/bulk_verify_profiles      — Bulk approve/reject multiple profiles
+PATCH /api/college/bulk_verify_experiences   — Bulk approve/reject multiple experiences
+PATCH /api/college/bulk_verify_achievements  — Bulk approve/reject multiple achievements
+PATCH /api/college/bulk_verify_certificates  — Bulk approve/reject multiple certificates
+      Body (bulk): bulkVerifySchema → { ids: [...], action: 'approved'|'rejected', rejection_reason? }
 ```
 
 ---
 
 ## 🔵 SECTION 3: STUDENT FLOW
 
+### Student Auth Endpoints (5 total)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/student/login | public + authLimiter | Student login |
+| POST | /api/student/logout | authenticate | Logout (clear cookie) |
+| POST | /api/student/forgot_password | public + authLimiter | Send reset email |
+| POST | /api/student/reset_password | public + authLimiter | Reset password from email link token |
+| POST | /api/student/change_password | authenticate | Change own password |
+
+### Student Login Flow
+```
+1. POST /api/student/login → { email, password }
+2. SELECT student JOIN colleges WHERE LOWER(student_email) = LOWER($1)
+3. Check college.college_status === 'active' → 403 if not
+4. Check student.student_status === 'active' → 403 if not
+5. bcrypt.compare(password, student.student_password) → 401 if wrong
+6. generateToken({ id: student_id, college_id, role: 'student' })
+7. Set JWT in HttpOnly cookie 'token'
+8. Return student profile data (no password field)
+```
+
+### Student Forgot/Reset Password Flow
+```
+FORGOT:
+  POST /api/student/forgot_password → { email }
+  → Token payload: { id: student_id, purpose: 'password_reset', type: 'student' }
+  → Email link: ${FRONTEND_URL}/student/reset-password?token=<jwt>
+
+RESET:
+  POST /api/student/reset_password → { token, new_password, confirm_password }
+  → verifyToken(token): checks signature + expiry
+  → Validates payload.purpose === 'password_reset' AND payload.type === 'student'
+     (the 'type' check prevents college reset tokens from working on student endpoint)
+  → SELECT from students WHERE student_id = payload.id
+  → Hash new password, UPDATE students SET student_password = $1
+```
+
 ### Student First Login & Profile Setup
 
 ```mermaid
 flowchart TD
     A[Student Registered by College Admin] --> B[Login with email + default password]
-    B --> C[Force Password Change on First Login]
+    B --> C[Change Password on First Login]
     C --> D[Profile Dashboard - Empty]
     D --> E[Fill Personal Information]
     D --> F[Fill Academic Information]
@@ -590,8 +878,8 @@ flowchart TD
     D --> L[Add Profile Links]
 
     E & F & G & H --> M{All required sections filled?}
-    M -->|Yes| N[profile_complete = true]
-    N --> O[Admin Reviews Profile]
+    M -->|Yes| N[Student sets profile_complete = true]
+    N --> O[Admin Reviews Full Profile]
     O -->|Approved| P[profile_is_approved = true]
     O -->|Rejected| Q[Student updates & resubmits]
     P --> R[Can apply for jobs]
@@ -601,25 +889,36 @@ flowchart TD
 
 ```js
 // GET /api/student/profile/completion
-// Calculate what % of profile is filled
+// Checks presence of data across multiple tables (parallel queries for performance)
 
-function getProfileCompletion(studentId) {
-  // Check each table for data existence:
-  const checks = {
-    personal_info: await hasPersonalInfo(studentId),        // 20%
-    academic_info: await hasAcademicInfo(studentId),        // 20%
-    semester_grades: await hasSemesterGrades(studentId),    // 15%
-    skills: await hasSkills(studentId),                     // 15%
-    profile_links: await hasProfileLinks(studentId),       // 10%
-    projects: await hasProjects(studentId),                 // 10%
-    experience: await hasExperience(studentId),             // 5%
-    certificates: await hasCertificates(studentId),         // 5%
-  };
+const completionWeights = {
+  personal_info:   20,  // student_personal_info table
+  academic_info:   20,  // student_academic_info table
+  semester_grades: 15,  // student_semester_grades table (at least 1 row)
+  skills:          15,  // student_skills table (at least 1 skill)
+  profile_links:   10,  // student_profile_links table
+  projects:        10,  // student_projects table (at least 1)
+  experience:       5,  // student_experience table
+  certificates:     5,  // student_certificates table
+};
 
-  // Return percentage + which sections are missing
-  return { percentage: 85, missing: ['experience', 'certificates'] };
-}
+// Returns: { percentage: 85, missing: ['experience'], sections: { ... } }
+// All 8 section checks run as Promise.all() in parallel
 ```
+
+### Student Profile Sections
+| Section | Table | Max Items | Notes |
+|---------|-------|-----------|-------|
+| Personal | student_personal_info | 1 | DOB, gender, phone, address, aadhaar (never returned in API) |
+| Academic | student_academic_info | 1 | 10th, 12th, entrance exam scores |
+| Semester grades | student_semester_grades | per program | CGPA per semester |
+| Skills | student_skills | unlimited | Links to skills master catalog |
+| Projects | student_projects | max 10 | Title, description, tech stack, URL |
+| Experience | student_experience | max 10 | Company, role, duration |
+| Achievements | student_achievements | max 10 | Awards, competitions |
+| Certificates | student_certificates | max 15 | Course name, issuer, URL |
+| Activities | student_activities | max 10 | Clubs, volunteering |
+| Profile links | student_profile_links | 1 | LinkedIn, GitHub, portfolio |
 
 ### Student Job Application Flow
 
@@ -629,74 +928,90 @@ sequenceDiagram
     participant API as Backend
     participant DB as Database
 
-    S->>API: GET /student/jobs (browse published jobs)
-    API->>DB: SELECT jobs WHERE status='published'<br/>AND deadline > NOW()
-    DB-->>API: List of jobs
+    S->>API: GET /api/student/jobs (browse published jobs)
+    API->>DB: SELECT jobs WHERE status='published'<br/>AND application_deadline > NOW()
+    DB-->>API: List of jobs (with position_count, total_applications as aggregates)
     API-->>S: Available jobs
 
-    S->>API: GET /student/jobs/:jobId/eligibility
-    API->>DB: Get student academic data
-    API->>DB: Get job criteria
-    API->>API: Run eligibility checks
-    API-->>S: { eligible: true } or { eligible: false, reasons: [...] }
+    S->>API: GET /api/student/jobs/:jobId/check_eligibility
+    API->>DB: [parallel] verifyJob + getStudentProfile + getEligibilityCriteria
+    API->>API: Run eligibility checks + checkApplicationBlockers
+    API-->>S: { eligible, reasons, blockers }
 
-    S->>API: POST /student/jobs/:jobId/apply
+    S->>API: POST /api/student/jobs/:jobId/apply
     API->>API: Verify: profile_is_approved = true
-    API->>API: Verify: eligible
-    API->>API: Verify: not restricted
+    API->>API: Verify: student passes eligibility OR has approved override
+    API->>API: Verify: no active bar_from_placements restriction
     API->>API: Verify: deadline not passed
     API->>API: Verify: not already applied
-    API->>DB: INSERT application + answers
-    API-->>S: Application submitted
+    API->>DB: INSERT student_applications + INSERT application_answers (batch)
+    API-->>S: { application_id, application_status: 'pending' }
 ```
 
 > [!WARNING]
-> **Before allowing application, check ALL of these:**
+> **All application blockers run as parallel queries (Promise.all) before insert:**
 > 1. `profile_is_approved = true`
-> 2. Student passes eligibility criteria
-> 3. No active restrictions (bar_from_placements)
-> 4. Application deadline hasn't passed
-> 5. Student hasn't already applied to this job
-> 6. Job status is 'published'
+> 2. Student passes all eligibility criteria (or has approved override)
+> 3. No active `bar_from_placements` or `temporary_suspension` restriction
+> 4. Application deadline has not passed
+> 5. Student has not already applied to this job
+> 6. Job status is `published`
+
+### Student application answers are bulk-inserted
+```js
+// Instead of one INSERT per answer, answers are inserted as a single multi-row INSERT:
+const values = answers.map((_, i) => `($${i*3+1}, $${i*3+2}, $${i*3+3})`).join(', ');
+await query(
+  `INSERT INTO application_answers (application_id, question_id, answer_text) VALUES ${values}`,
+  answers.flatMap(a => [applicationId, a.question_id, a.answer_text])
+);
+```
 
 ### Student Views Own Application Progress
 
 ```js
-// GET /api/student/applications
-// Returns:
+// GET /api/student/my_applications
+// Returns list with round results nested per application
 
 [
   {
     application_id: "...",
     company_name: "TCS",
+    company_industry: "Information Technology",  // field is 'industry_type' in API response
     job_title: "Software Developer",
     applied_at: "2025-01-15",
-    application_status: "in_progress",  // or shortlisted, selected, rejected
+    application_status: "in_progress",   // pending | in_progress | shortlisted | selected | rejected | withdrawn
     rounds: [
-      { round_name: "Aptitude", status: "passed", marks: 78 },
-      { round_name: "Technical", status: "passed", marks: 85 },
-      { round_name: "HR", status: "pending" }
+      { round_name: "Aptitude",  round_type: "written", status: "passed",  marks: 78 },
+      { round_name: "Technical", round_type: "technical", status: "passed", marks: 85 },
+      { round_name: "HR",        round_type: "hr",       status: "pending" }
     ]
   }
 ]
+
+// Additional endpoints:
+// GET  /api/student/jobs/:jobId/my_application  — Single application details
+// POST /api/student/jobs/:jobId/deny            — Opt-out of a job (eligible but choosing not to apply)
+// POST /api/student/applications/:id/withdraw   — Withdraw a submitted application
 ```
 
 ### Placement Accept/Reject
 
 ```
-Student gets offer → GET /student/placements
-Student accepts   → PATCH /student/placements/:id/accept
-Student rejects   → PATCH /student/placements/:id/reject
+Student gets offer  → GET  /api/student/my_placements
+Student accepts     → PATCH /api/student/placements/:id/accept
+Student rejects     → PATCH /api/student/placements/:id/reject
 
 // On REJECT:
-// 1. Update placement_status = 'rejected'
+// 1. UPDATE placement_results SET placement_status = 'rejected'
 // 2. Check placement policies — does rejecting trigger a restriction?
-//    (e.g., backing out after accepting → bar_from_placements)
-// 3. If yes → auto-create restriction
+//    (e.g., policy: "backing out after accepting = bar_from_placements")
+// 3. If policy triggered → auto-create row in student_restrictions
 
 // On ACCEPT:
-// 1. Update placement_status = 'accepted'
-// 2. Check if max_placements reached → block further applications if so
+// 1. UPDATE placement_results SET placement_status = 'accepted'
+// 2. Check if max_placements policy threshold reached
+//    → If reached → block further placement for this student
 ```
 
 ### Feedback & Interview Questions
@@ -704,24 +1019,32 @@ Student rejects   → PATCH /student/placements/:id/reject
 ```
 // After placement drive is complete, student can submit feedback:
 POST /api/student/feedback
-Body: { job_id, company_id, rating: 4, feedback_text: "..." }
+Body: { job_id, company_id, rating: 4, feedback_text: "Great process, transparent rounds." }
+// → is_approved = false by default → college admin reviews + approves
+// → Admin endpoint: PATCH /api/college/feedback/:id/approve OR reject
 
-// Student shares interview questions for next batch:
-POST /api/student/interview-questions
+// Student shares interview questions for next batches:
+POST /api/student/interview_questions
 Body: {
   company_id, job_id,
   question_description: "Given an array, find two numbers that sum to target",
   topic: "Arrays",
   sample_answer: "Use HashMap approach, O(n) time..."
 }
+// → is_approved = false → admin approves → visible to future students
+// → Browse approved Q&A: GET /api/student/interview_questions?company_id=xxx
 
-// → is_approved = false by default
-// → College admin reviews and approves → visible to future students
+// College admin endpoints:
+GET   /api/college/feedback                     — List all feedback
+PATCH /api/college/feedback/:id/approve         — Approve feedback
+PATCH /api/college/feedback/:id/reject          — Reject feedback
+GET   /api/college/interview_questions          — List all Q&A
+PATCH /api/college/interview_questions/:id/approve  — Approve Q&A
 ```
 
 ---
 
-## ⚙️ Common Patterns to Implement
+## ⚙️ Common Patterns (Implemented)
 
 ### Async Handler Wrapper
 ```js
@@ -729,133 +1052,261 @@ Body: {
 const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-// Usage in controller:
-const getStudents = asyncHandler(async (req, res) => {
-  const students = await studentService.getAll(req.query, req.user.college_id);
-  res.json({ success: true, data: students });
-});
+// Usage in routes:
+router.post('/login', authLimiter, validate(schema), asyncHandler(controller.login));
+// All async errors automatically forwarded to errorHandler middleware
 ```
 
-### College Isolation Middleware
+### Middleware Chain Examples
 ```js
-// middleware/collegeIsolation.js
-// This middleware injects college_id from JWT into req object
-// so controllers don't need to manually extract it
+// Public auth endpoint (login, forgot/reset password):
+router.post('/login', authLimiter, validate(loginSchema), asyncHandler(controller.login));
 
-const collegeIsolation = (req, res, next) => {
-  if (!req.user?.college_id) {
-    return res.status(403).json({ success: false, error: 'College access required' });
-  }
-  // Attach to body for INSERT operations
-  req.body.college_id = req.user.college_id;
-  next();
-};
+// Authenticated read:
+router.get('/profile', authenticate, asyncHandler(controller.getProfile));
+
+// Authenticated write:
+router.post('/apply', authenticate, apiLimiter, validate(schema), asyncHandler(controller.apply));
+
+// Role-restricted write (COLLEGEADMIN only):
+router.post('/create_user',
+  authenticate,
+  requireRole(ROLES.COLLEGEADMIN),
+  apiLimiter,
+  validate(createUserSchema),
+  asyncHandler(controller.createUser)
+);
+```
+
+### DB Query Patterns
+```js
+// Simple query (utils/db.js):
+const result = await query('SELECT * FROM students WHERE college_id = $1', [collegeId]);
+
+// Transaction:
+const client = await getClient();
+try {
+  await client.query('BEGIN');
+  const r1 = await client.query('INSERT INTO ...', [...]);
+  await client.query('UPDATE ...', [...]);
+  await client.query('COMMIT');
+  return r1.rows[0];
+} catch (err) {
+  await client.query('ROLLBACK');
+  throw err;
+} finally {
+  client.release();
+}
+
+// Parallel independent queries:
+const [jobResult, studentResult, criteriaResult] = await Promise.all([
+  query('SELECT * FROM job_postings WHERE job_id = $1', [jobId]),
+  query('SELECT * FROM students WHERE student_id = $1', [studentId]),
+  query('SELECT * FROM job_eligibility_criteria WHERE job_id = $1', [jobId]),
+]);
+```
+
+### Dynamic WHERE Builder
+```js
+// Pattern used in all list/filter endpoints:
+const conditions = ['s.college_id = $1'];
+const params = [collegeId];
+let idx = 2;
+
+if (filters.dept_id) { conditions.push(`s.dept_id = $${idx++}`); params.push(filters.dept_id); }
+if (filters.status)  { conditions.push(`s.student_status = $${idx++}`); params.push(filters.status); }
+
+const where = conditions.join(' AND ');
+const sql = `SELECT * FROM students s WHERE ${where} ORDER BY s.first_name ASC LIMIT $${idx} OFFSET $${idx+1}`;
+params.push(pagination.limit, pagination.offset);
 ```
 
 ### Pagination Helper
 ```js
 // utils/pagination.js
-function getPagination(query) {
-  const page = parseInt(query.page) || 1;
-  const limit = Math.min(parseInt(query.limit) || 10, 100); // Max 100
+function getPagination(filters) {
+  const page = Math.max(1, parseInt(filters.page) || 1);
+  const limit = Math.min(Math.max(1, parseInt(filters.limit) || 10), 100);
   const offset = (page - 1) * limit;
   return { page, limit, offset };
 }
 
-function formatPaginationResponse(data, total, { page, limit }) {
-  return {
-    data,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
-}
+// In controller (using sendPaginated):
+const { rows: data, rowCount } = await query(countSql + dataSql, params);
+return sendPaginated(res, data, total, { page, limit }, 'Retrieved successfully');
 ```
 
-### Activate / Inactivate Pattern
+### Sort Column Whitelist
 ```js
-// PATCH /api/college/departments/:deptId/status
-// Body: { is_active: false }
-
-// This same pattern applies to: departments, companies, contacts,
-// training programs, students (student_status), users (user_status), policies
-
-// Controller:
-const toggleStatus = asyncHandler(async (req, res) => {
-  const { is_active } = req.body;
-  const result = await db.query(
-    'UPDATE departments SET is_active = $1 WHERE dept_id = $2 AND college_id = $3 RETURNING *',
-    [is_active, req.params.deptId, req.user.college_id]
-  );
-  if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Not found' });
-  res.json({ success: true, data: result.rows[0], message: `Department ${is_active ? 'activated' : 'deactivated'}` });
-});
+// Prevent ORDER BY injection by whitelisting allowed sort columns:
+const ALLOWED_SORT = ['first_name', 'last_name', 'created_at', 'student_passout_year'];
+const sortCol = ALLOWED_SORT.includes(filters.sort_by) ? filters.sort_by : 'created_at';
+const sortDir = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
+const sql = `... ORDER BY s.${sortCol} ${sortDir}`;
 ```
 
 ---
 
-## 📋 Development Order (Recommended)
+## 📋 Complete Module & Endpoint Reference
 
-Build APIs in this order since each depends on the previous:
+### SYSADMIN (1 module, 9 endpoints)
+Base: `/api/sysadmin` — all routes: `authenticate + requireRole('sysadmin')`
 
-| Phase | APIs | Reason |
-|-------|------|--------|
-| **1** | Sysadmin login + College CRUD | Foundation — creates colleges |
-| **2** | College auth (login, forgot/reset password) | Needed for all college APIs |
-| **3** | User management | Create TPO, HOD who manage placement |
-| **4** | Departments | Students belong to departments |
-| **5** | Student registration (single + bulk) | Core entity |
-| **6** | Student profile APIs (personal, academic, semesters, skills, projects, experience, achievements, certificates, activities, links) | Students fill their profiles |
-| **7** | Student auth (login, password) | Students access portal |
-| **8** | Skills master | Needed before student skills |
-| **9** | Company + contacts | Needed before job postings |
-| **10** | Job postings + positions + criteria + rounds + questions | Core placement flow |
-| **11** | Student applications + eligibility check | Students apply |
-| **12** | Round results | Admin processes rounds |
-| **13** | Placement results | Final outcomes |
-| **14** | Placement policies | Rules & governance |
-| **15** | Student restrictions | Enforcement |
-| **16** | Training programs + enrollments | Extra feature |
-| **17** | Notifications | Communication |
-| **18** | Feedback + Interview Questions | Post-placement |
-| **19** | Dashboard/Statistics | Analytics |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /login | Login |
+| POST | /logout | Logout |
+| POST | /create_new_college | Create college + admin user (transaction) |
+| GET | /get_all_colleges | List colleges (paginated) |
+| GET | /get_college/:collegeId | College details |
+| PUT | /update_college/:collegeId | Update college |
+| PATCH | /toggle_college_status/:collegeId | Activate/deactivate |
+| PATCH | /update_college_features/:collegeId | Update features |
+| PATCH | /update_academic_year/:collegeId | Update default year |
+
+### COLLEGE (23 modules, 110 endpoints)
+Base: `/api/college`
+
+| # | Module | Key Endpoints |
+|---|--------|---------------|
+| 1 | **User** (auth + user mgmt) | login, logout, forgot_password, **reset_password**, change_password, create_user, get_all_users, get_user/:id, update_user/:id, toggle_user_status/:id |
+| 2 | **Department** | create, get_all, get/:id, update/:id, toggle_status/:id |
+| 3 | **Student** | register_student, bulk_register_students, get_all_students, get_student/:id, get_student_full_profile/:id, approve_profile/:id, update_student/:id, toggle_student_status/:id |
+| 4 | **Restriction** | create_restriction, get_all_restrictions, resolve_restriction/:id, get_student_restrictions/:studentId |
+| 5 | **Company** | create_company, get_all_companies, get_company/:id, update_company/:id, toggle_company_status/:id |
+| 6 | **Company Contact** | create_contact, get_contacts/:companyId, update_contact/:id, delete_contact/:id |
+| 7 | **Job** | create_job, get_all_jobs, get_job/:id, update_job/:id, toggle_job_status/:id |
+| 8 | **Job Position** | add_position, get_positions/:jobId, delete_position/:id |
+| 9 | **Job Criteria** | set_criteria/:jobId, get_criteria/:jobId, update_criteria/:jobId |
+| 10 | **Job Round** | add_round, get_rounds/:jobId, delete_round/:id |
+| 11 | **Job Question** | add_question, get_questions/:jobId, update_question/:id, delete_question/:id |
+| 12 | **Application** | get_job_applications/:jobId, get_application/:id, update_application_status/:id, bulk_update_application_status |
+| 13 | **Round Result** | add_result, get_results/:roundId, update_result/:id, bulk_push_to_next_round/:roundId |
+| 14 | **Placement** | create_placement, get_all_placements, get_placement/:id, update_placement/:id, verify_offer_letter/:id, update_placement_status/:id |
+| 15 | **Placement Policy** | create_policy, get_policies, get_policy/:id, update_policy/:id, delete_policy/:id, reorder_policies |
+| 16 | **Eligible Denial** | get_eligible_students/:jobId, get_denial_records/:jobId, get_denial/:id |
+| 17 | **Training** | create_program, get_all_programs, get_program/:id, update_program/:id, toggle_status/:id, get_enrollments/:id, update_enrollment/:id |
+| 18 | **Notification** | send_notification, send_bulk_notification, get_notifications |
+| 19 | **Feedback** | get_feedback, approve_feedback/:id, reject_feedback/:id, get_interview_questions, approve_question/:id |
+| 20 | **Skill** | get_all_skills, create_skill |
+| 21 | **Dashboard** | overview, placement_stats, placement_funnel, student_readiness, diversity, training_overview, dept_wise, company_wise, year_comparison |
+| 22 | **Job Override** | get_job_override_requests/:jobId, get_all_override_requests, review_override_request/:overrideId, bulk_review_overrides — role: COLLEGEADMIN, TPO, TPC |
+| 23 | **Verification** | get_pending_verification_counts, get_pending_profiles/experiences/achievements/certificates, verify_student_profile/:id, verify_experience/:id, verify_achievement/:id, verify_certificate/:id, bulk_verify_profiles/experiences/achievements/certificates (13 endpoints total) |
+
+### STUDENT (19 modules, 69 endpoints)
+Base: `/api/student` — all non-auth routes require `authenticate`
+
+| # | Module | Key Endpoints |
+|---|--------|---------------|
+| 1 | **Auth** | login, logout, forgot_password, **reset_password**, change_password |
+| 2 | **Profile** | get_basic_profile, get_full_profile, get_completion_percentage |
+| 3 | **Personal** | get_personal_info, upsert_personal_info |
+| 4 | **Academic** | get_academic_info, upsert_academic_info |
+| 5 | **Semester** | get_semesters, add_semester, update_semester/:id |
+| 6 | **Skill** | get_all_skills (browse catalog), get_my_skills, sync_skills (full replace) |
+| 7 | **Project** | get_projects, add_project, update_project/:id, delete_project/:id |
+| 8 | **Experience** | get_experience, add_experience, update_experience/:id, delete_experience/:id |
+| 9 | **Achievement** | get_achievements, add_achievement, update_achievement/:id, delete_achievement/:id |
+| 10 | **Certificate** | get_certificates, add_certificate, update_certificate/:id, delete_certificate/:id |
+| 11 | **Activity** | get_activities, add_activity, update_activity/:id, delete_activity/:id |
+| 12 | **Profile Links** | get_profile_links, upsert_profile_links |
+| 13 | **Job** | get_jobs, get_job/:id, check_eligibility/:jobId, apply/:jobId, deny/:jobId, get_my_applications, get_my_application/:jobId, withdraw_application/:id |
+| 14 | **Placement** | get_my_placements, accept_placement/:id, reject_placement/:id |
+| 15 | **Restriction** | get_my_restrictions, submit_appeal/:id |
+| 16 | **Training** | get_available_programs, enroll/:programId, get_my_enrollments, submit_feedback/:enrollmentId |
+| 17 | **Notification** | get_notifications, get_unread_count, mark_read/:id, mark_all_read |
+| 18 | **Feedback** | submit_feedback, get_my_feedback, submit_interview_question, get_interview_questions |
+| 19 | **Job Override** | check_override_eligibility/:jobId, request_job_override/:jobId, get_my_override_requests |
 
 ---
 
 ## 🛡️ Security Checklist
 
-- [ ] All passwords hashed with bcrypt
-- [ ] JWT secret stored in .env (never in code)
-- [ ] JWT expiry set (e.g., 24h for users, 7d for students)
-- [ ] Rate limiting on login APIs (prevent brute force)
-- [ ] CORS configured properly
-- [ ] Helmet.js for security headers
-- [ ] Input validation on every route
-- [ ] SQL parameterized queries (no string concatenation)
-- [ ] Error messages don't expose internal details
-- [ ] college_id always from JWT, never from request body/params
-- [ ] Sensitive fields excluded from responses (passwords, aadhaar)
-- [ ] Logger uses err.message + err.stack (never `${err}` as string)
+- [x] All passwords hashed with bcrypt (10 rounds)
+- [x] JWT secret stored in .env (never in code)
+- [x] JWT expiry set (7d for users/students, 15m for reset tokens)
+- [x] JWT delivered via HttpOnly cookie (not Authorization header)
+- [x] Rate limiting: `authLimiter` on login/forgot/reset, `apiLimiter` on writes
+- [x] CORS configured with credentials support
+- [x] Helmet.js security headers
+- [x] Input validation on every route (Joi → 422 on failure)
+- [x] SQL parameterized queries (no string concatenation of user data)
+- [x] Error messages don't expose internal stack traces to client
+- [x] `college_id` always from JWT — never accepted from request body/params
+- [x] Passwords excluded from all SELECT responses
+- [x] Aadhaar numbers excluded from all responses
+- [x] Logger uses `err.message + err.stack` (never `${err}`)
+- [x] Email enumeration prevented in forgot_password (always same response)
+- [x] Reset token uses `purpose` + `type` fields to prevent cross-endpoint use
+- [x] `users_role_check` DB constraint covers all 6 valid roles including `tpc`
 
 ---
 
-## 📦 NPM Packages You'll Need
+## 📦 NPM Packages
 
 | Package | Purpose |
 |---------|---------|
-| `express` | Web framework |
-| `pg` | PostgreSQL client |
-| `bcryptjs` | Password hashing |
-| `jsonwebtoken` | JWT auth |
-| `joi` | Input validation |
-| `cors` | Cross-origin requests |
+| `express` | Web framework (v5) |
+| `pg` | PostgreSQL client — `query()`, `getClient()`, `getMainPool()` |
+| `bcryptjs` | Password hashing (10 rounds) |
+| `jsonwebtoken` | JWT sign/verify — `generateToken()` + `verifyToken()` |
+| `joi` | Input validation schemas |
+| `cors` | Cross-origin requests with credentials |
 | `helmet` | Security headers |
-| `winston` | Structured logging |
-| `nodemailer` | Send emails (forgot password) |
-| `express-rate-limit` | Rate limiting |
-| `dotenv` | Environment variables |
-| `morgan` | HTTP request logging |
-| `uuid` | Generate UUIDs (if not using DB) |
+| `winston` | Structured logging (file + console transport) |
+| `morgan` | HTTP request logging (via requestLogger middleware) |
+| `nodemailer` | Send emails — forgot/reset password email flow |
+| `express-rate-limit` | `authLimiter` (auth routes) + `apiLimiter` (write routes) |
+| `dotenv` | Environment variables via `config/env.js` |
+| `compression` | Gzip response compression |
+
+## 🗄️ Database Schema Key Facts
+
+- **36 tables** in a single PostgreSQL database
+- **Multi-tenant**: All tables scoped by `college_id` — complete data isolation per college
+- **UUID primary keys**: All tables use `gen_random_uuid()` as default
+- **Status enums**: All use CHECK constraints — values must match constants.js `STATUS` object
+- **Timestamps**: All tables have `created_at` + `updated_at` defaulting to `NOW()`
+- **`companies.industry`**: Column is `industry` TEXT (not `industry_type`). API responses expose it as `industry_type` via SQL alias `c.industry AS industry_type` for frontend compatibility — do NOT change the API response key
+- **`users_role_check`**: Valid values are `sysadmin`, `collegeadmin`, `teacher`, `hod`, `tpo`, `tpc`
+- **`students` table**: Uses `student_email`, `student_password`, `student_status` (not generic column names)
+- **`users` table**: Uses `user_email`, `user_password`, `user_role`, `user_status`, `user_name`
+
+## 📄 Frontend API Documentation Files (11 files)
+
+These files document the API contract for the frontend team:
+
+| File | Covers |
+|------|--------|
+| `college_dashboard_api_doc.md` | Dashboard overview + 8 analytics endpoints |
+| `college_training_programs_api_doc.md` | College training management |
+| `college_skill_api_doc.md` | Skills master catalog |
+| `college_notification_api_doc.md` | Bulk + single notifications |
+| `college_feedback_api_doc.md` | Feedback + interview Q&A approval |
+| `student_notification_api_doc.md` | Student notification endpoints |
+| `student_job_browsing_applications_api_doc.md` | Job browsing, eligibility, apply, applications |
+| `student_feedback_api_doc.md` | Student feedback + interview Q submission |
+| `student_placement_results_api_doc.md` | Student placement accept/reject |
+| `student_restrictions_api_doc.md` | Student restriction view + appeal |
+| `student_training_programs_api_doc.md` | Student training enrollment |
+
+## 🔧 Known Bugs Fixed
+
+### Round 1
+1. Training ambiguous `college_id` column in JOIN
+2. Enrollment race condition — added duplicate check
+3. NaN in summary stats — added COALESCE wrappers
+4. Leading pipe in withdrawal remarks — fixed CASE WHEN
+5–10. Multiple N+1 query patterns converted to JOINs + Promise.all()
+
+### Round 2
+1. **`industry_type` → `industry`** (companies table column) — fixed in student/job + student/placement services with SQL alias
+2. **`exclude_already_placed`** — was checking wrong table; now checks `placement_results`
+3. **`createPlacement` missing transaction** — now wrapped in BEGIN/COMMIT/ROLLBACK
+4. **`unplaced_count` can go negative** — added `GREATEST(0, total - placed)` in dashboard CTE
+5–13. Parallelized independent queries in multiple service functions
+
+### Round 3 (Latest)
+1. **SQL column bug in `jobOverride.service.js`** — `u.role` → `u.user_role`, `u.is_active = true` → `u.user_status = 'active'` (notification fan-out query to TPO/admin)
+2. **Missing `reset_password` endpoints** — `forgotPassword` emailed a link but there was no endpoint to accept the token. Added `POST /api/college/reset_password` and `POST /api/student/reset_password` end-to-end (service → controller → validator → route)
+3. **`tpc` missing from `users_role_check`** — DB CHECK constraint was missing `'tpc'` despite TPC role being used throughout the codebase

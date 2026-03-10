@@ -24,6 +24,7 @@ const { apiLimiter } = require('../../config/rateLimiter');
 const {
     addActivitySchema,
     updateActivitySchema,
+    activityIdParamSchema,
 } = require('../../validators/student/activity.validator');
 
 // ============================================================================
@@ -51,6 +52,7 @@ router.put(
     '/update_activity/:activityId',
     authenticate,
     apiLimiter,
+    validate(activityIdParamSchema, 'params'),
     validate(updateActivitySchema),
     asyncHandler(controller.updateActivity)
 );
@@ -60,6 +62,7 @@ router.delete(
     '/delete_activity/:activityId',
     authenticate,
     apiLimiter,
+    validate(activityIdParamSchema, 'params'),
     asyncHandler(controller.deleteActivity)
 );
 

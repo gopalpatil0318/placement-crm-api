@@ -68,6 +68,20 @@ async function saveProfileLinks(studentId, collegeId, data) {
         is_new: isNew,
     });
 
+    // Auto-reset profile approval when student updates profile links (skip on first insert)
+    if (!isNew) {
+        await query(
+            `UPDATE students
+             SET profile_approval_status = 'pending', profile_is_approved = false,
+                 approved_by = NULL, approved_at = NULL,
+                 profile_rejection_reason = NULL, rejected_at = NULL,
+                 updated_at = NOW()
+             WHERE student_id = $1 AND college_id = $2
+               AND profile_approval_status != 'pending'`,
+            [studentId, collegeId]
+        );
+    }
+
     return {
         is_new: isNew,
         data: formatProfileLinks(record),

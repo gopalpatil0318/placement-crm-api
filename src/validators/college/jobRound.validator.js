@@ -129,8 +129,32 @@ const updateRoundStatusSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS — UUID validation for route parameters
+// ============================================================================
+
+const jobIdParamSchema = Joi.object({
+    jobId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid job ID format',
+        'any.required': 'Job ID is required',
+    }),
+});
+
+const roundIdParamSchema = Joi.object({
+    roundId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid round ID format',
+        'any.required': 'Round ID is required',
+    }),
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
     addRoundSchema,
     updateRoundSchema,
     updateRoundStatusSchema,
+    jobIdParamSchema,
+    roundIdParamSchema,
 };

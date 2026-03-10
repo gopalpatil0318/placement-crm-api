@@ -113,7 +113,15 @@ async function updateCertificate(certificateId, studentId, collegeId, data) {
 
     const setClauses = fieldsToUpdate
         .map((field, index) => `${field} = $${index + 4}`)
-        .concat(['updated_at = NOW()']);
+        .concat([
+            'updated_at = NOW()',
+            "verification_status = 'pending'",
+            'is_verified = false',
+            'verified_by = NULL',
+            'verified_at = NULL',
+            'rejection_reason = NULL',
+            'rejected_at = NULL',
+        ]);
 
     const values = [
         certificateId, studentId, collegeId,
@@ -191,6 +199,11 @@ function formatCertificate(record) {
         skills_covered: record.skills_covered,
         certificate_url: record.certificate_url,
         is_verified: record.is_verified,
+        verification_status: record.verification_status,
+        verified_by: record.verified_by,
+        verified_at: record.verified_at,
+        rejection_reason: record.rejection_reason,
+        rejected_at: record.rejected_at,
         created_at: record.created_at,
         updated_at: record.updated_at,
     };

@@ -192,8 +192,32 @@ const updateQuestionSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS — UUID validation for route parameters
+// ============================================================================
+
+const jobIdParamSchema = Joi.object({
+    jobId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid job ID format',
+        'any.required': 'Job ID is required',
+    }),
+});
+
+const questionIdParamSchema = Joi.object({
+    questionId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid question ID format',
+        'any.required': 'Question ID is required',
+    }),
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
     addQuestionSchema,
     listQuestionsSchema,
     updateQuestionSchema,
+    jobIdParamSchema,
+    questionIdParamSchema,
 };

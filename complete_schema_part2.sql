@@ -62,7 +62,7 @@ CREATE TABLE public.job_postings (
   job_type TEXT NOT NULL,
   internship_duration TEXT,
   internship_stipend TEXT,
-  passout_year INTEGER NOT NULL,
+  passout_years INTEGER[] NOT NULL,
   application_deadline TIMESTAMP WITHOUT TIME ZONE NOT NULL,
   job_status TEXT NOT NULL DEFAULT 'draft',
   allow_applications BOOLEAN DEFAULT TRUE,
@@ -79,7 +79,7 @@ CREATE TABLE public.job_postings (
 
 CREATE INDEX idx_job_postings_college ON public.job_postings(college_id);
 CREATE INDEX idx_job_postings_company ON public.job_postings(company_id);
-CREATE INDEX idx_job_postings_year ON public.job_postings(passout_year);
+CREATE INDEX idx_job_postings_year ON public.job_postings USING GIN(passout_years);
 CREATE INDEX idx_job_postings_status ON public.job_postings(job_status);
 CREATE INDEX idx_job_postings_deadline ON public.job_postings(application_deadline);
 
@@ -111,7 +111,7 @@ CREATE TABLE public.job_eligibility_criteria (
   allowed_genders TEXT[],
   allowed_departments TEXT[],
   allowed_gap_statuses TEXT[],
-  passout_year INTEGER NOT NULL,
+  passout_years INTEGER[],
   min_existing_package NUMERIC(10,2),
   max_existing_package NUMERIC(10,2),
   exclude_already_placed BOOLEAN DEFAULT FALSE,
@@ -160,7 +160,35 @@ CREATE TABLE public.application_questions (
 
 CREATE INDEX idx_application_questions_job ON public.application_questions(job_id);
 
--- 24. STUDENT APPLICATIONS
+-- 24. JOB ELIGIBILITY OVERRIDE REQUESTS
+CREATE TABLE public.job_eligibility_override_requests (
+  override_id UUID NOT NULL DEFAULT gen_random_uuid(),
+  student_id UUID NOT NULL,
+  job_id UUID NOT NULL,
+  college_id UUID NOT NULL,
+  request_reason TEXT NOT NULL,
+  ineligibility_reasons TEXT,
+  override_status TEXT NOT NULL DEFAULT 'pending',
+  reviewed_by UUID,
+  review_notes TEXT,
+  rejection_reason TEXT,
+  requested_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+  reviewed_at TIMESTAMP WITHOUT TIME ZONE,
+  CONSTRAINT job_override_requests_pkey PRIMARY KEY (override_id),
+  CONSTRAINT job_override_student_fkey FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
+  CONSTRAINT job_override_job_fkey FOREIGN KEY (job_id) REFERENCES job_postings(job_id) ON DELETE CASCADE,
+  CONSTRAINT job_override_college_fkey FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
+  CONSTRAINT job_override_reviewer_fkey FOREIGN KEY (reviewed_by) REFERENCES users(user_id) ON DELETE SET NULL,
+  CONSTRAINT unique_override_per_student_job UNIQUE (student_id, job_id),
+  CONSTRAINT override_status_check CHECK (override_status IN ('pending', 'approved', 'rejected'))
+) TABLESPACE pg_default;
+
+CREATE INDEX idx_job_override_student ON public.job_eligibility_override_requests(student_id);
+CREATE INDEX idx_job_override_job ON public.job_eligibility_override_requests(job_id);
+CREATE INDEX idx_job_override_college ON public.job_eligibility_override_requests(college_id);
+CREATE INDEX idx_job_override_status ON public.job_eligibility_override_requests(override_status);
+
+-- 25. STUDENT APPLICATIONS
 CREATE TABLE public.student_applications (
   application_id UUID NOT NULL DEFAULT gen_random_uuid(),
   student_id UUID NOT NULL,
@@ -171,6 +199,7 @@ CREATE TABLE public.student_applications (
   current_round_id UUID,
   is_eligible BOOLEAN NOT NULL,
   eligibility_remarks TEXT,
+  override_id UUID,
   applied_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   last_updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   CONSTRAINT student_applications_pkey PRIMARY KEY (application_id),
@@ -179,6 +208,7 @@ CREATE TABLE public.student_applications (
   CONSTRAINT student_applications_position_fkey FOREIGN KEY (position_id) REFERENCES job_positions(position_id) ON DELETE SET NULL,
   CONSTRAINT student_applications_college_fkey FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT student_applications_round_fkey FOREIGN KEY (current_round_id) REFERENCES job_rounds(round_id) ON DELETE SET NULL,
+  CONSTRAINT student_app_override_fkey FOREIGN KEY (override_id) REFERENCES job_eligibility_override_requests(override_id) ON DELETE SET NULL,
   CONSTRAINT unique_student_job_application UNIQUE (student_id, job_id),
   CONSTRAINT application_status_check CHECK (application_status IN ('pending', 'under_review', 'shortlisted', 'rejected', 'selected', 'offered', 'withdrawn'))
 ) TABLESPACE pg_default;
@@ -456,7 +486,9 @@ CREATE TABLE public.notifications (
       'new_job_posted', 'application_received', 'application_status_changed',
       'round_scheduled', 'round_result', 'offer_received', 'deadline_reminder',
       'restriction_applied', 'restriction_removed', 'training_enrollment',
-      'training_completed', 'profile_incomplete', 'general'
+      'training_completed', 'profile_incomplete',
+      'eligibility_override_requested', 'eligibility_override_approved', 'eligibility_override_rejected',
+      'general'
     )
   )
 ) TABLESPACE pg_default;
@@ -553,14 +585,14 @@ GROUP BY c.college_id, d.dept_name, pr.passout_year;
 -- View: Company Application Stats
 CREATE OR REPLACE VIEW v_company_application_stats AS
 SELECT 
-  jp.job_id, co.company_name, jp.job_title, jp.passout_year,
+  jp.job_id, co.company_name, jp.job_title, jp.passout_years,
   COUNT(DISTINCT sa.student_id) as total_applications,
   COUNT(DISTINCT CASE WHEN sa.application_status = 'selected' THEN sa.student_id END) as selected,
   COUNT(DISTINCT CASE WHEN sa.application_status = 'rejected' THEN sa.student_id END) as rejected
 FROM job_postings jp
 JOIN companies co ON jp.company_id = co.company_id
 LEFT JOIN student_applications sa ON jp.job_id = sa.job_id
-GROUP BY jp.job_id, co.company_name, jp.job_title, jp.passout_year;
+GROUP BY jp.job_id, co.company_name, jp.job_title, jp.passout_years;
 
 -- View: Students with Active Restrictions
 CREATE OR REPLACE VIEW v_restricted_students AS
@@ -596,12 +628,12 @@ CREATE OR REPLACE VIEW v_company_interview_questions AS
 SELECT 
   co.company_name, jp.job_title,
   iq.question_description, iq.topic, iq.sample_answer,
-  jp.passout_year
+  jp.passout_years
 FROM interview_questions iq
 JOIN companies co ON iq.company_id = co.company_id
 JOIN job_postings jp ON iq.job_id = jp.job_id
 WHERE iq.is_approved = TRUE
-ORDER BY co.company_name, jp.passout_year DESC;
+ORDER BY co.company_name;
 
 -- =====================================================
 -- TRIGGERS

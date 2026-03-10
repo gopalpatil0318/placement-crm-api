@@ -118,13 +118,20 @@ async function addRound(jobId, collegeId, data) {
         );
     }
 
-    // 3. Check duplicate round name within this job (case-insensitive)
-    const duplicateCheck = await query(
-        `SELECT round_id FROM job_rounds
-         WHERE job_id = $1 AND LOWER(round_name) = LOWER($2)
-         LIMIT 1`,
-        [jobId, data.round_name]
-    );
+    // 3. Check duplicate + calculate next round_number in parallel
+    const [duplicateCheck, maxResult] = await Promise.all([
+        query(
+            `SELECT round_id FROM job_rounds
+             WHERE job_id = $1 AND LOWER(round_name) = LOWER($2)
+             LIMIT 1`,
+            [jobId, data.round_name]
+        ),
+        query(
+            `SELECT COALESCE(MAX(round_number), 0) AS max_number
+             FROM job_rounds WHERE job_id = $1`,
+            [jobId]
+        ),
+    ]);
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
@@ -133,12 +140,6 @@ async function addRound(jobId, collegeId, data) {
         );
     }
 
-    // 4. Auto-calculate next round_number
-    const maxResult = await query(
-        `SELECT COALESCE(MAX(round_number), 0) AS max_number
-         FROM job_rounds WHERE job_id = $1`,
-        [jobId]
-    );
     const nextRoundNumber = parseInt(maxResult.rows[0].max_number, 10) + 1;
 
     // 5. Insert the round

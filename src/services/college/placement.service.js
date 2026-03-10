@@ -84,24 +84,32 @@ async function verifyPlacement(placementId, collegeId) {
 async function createPlacement(collegeId, userId, data) {
     const { application_id, placement_type } = data;
 
-    // 1. Fetch application with full context
-    const appResult = await query(
-        `SELECT a.*,
-                s.first_name, s.last_name, s.student_email, s.student_passout_year,
-                d.dept_name,
-                j.job_title, j.company_id, j.job_status,
-                c.company_name,
-                p.position_name
-         FROM student_applications a
-         JOIN students s ON a.student_id = s.student_id
-         JOIN job_postings j ON a.job_id = j.job_id
-         JOIN companies c ON j.company_id = c.company_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         LEFT JOIN job_positions p ON a.position_id = p.position_id
-         WHERE a.application_id = $1 AND a.college_id = $2
-         LIMIT 1`,
-        [application_id, collegeId]
-    );
+    // 1. Fetch application + duplicate check (parallel — both only need application_id)
+    const [appResult, duplicateCheck] = await Promise.all([
+        query(
+            `SELECT a.*,
+                    s.first_name, s.last_name, s.student_email, s.student_passout_year,
+                    d.dept_name,
+                    j.job_title, j.company_id, j.job_status,
+                    c.company_name,
+                    p.position_name
+             FROM student_applications a
+             JOIN students s ON a.student_id = s.student_id
+             JOIN job_postings j ON a.job_id = j.job_id
+             JOIN companies c ON j.company_id = c.company_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             LEFT JOIN job_positions p ON a.position_id = p.position_id
+             WHERE a.application_id = $1 AND a.college_id = $2
+             LIMIT 1`,
+            [application_id, collegeId]
+        ),
+        query(
+            `SELECT placement_id FROM placement_results
+             WHERE application_id = $1
+             LIMIT 1`,
+            [application_id]
+        ),
+    ]);
 
     if (!appResult.rows.length) {
         throw Object.assign(new Error(ERROR_MESSAGES.APPLICATION_NOT_FOUND), { status: 404 });
@@ -118,13 +126,6 @@ async function createPlacement(collegeId, userId, data) {
     }
 
     // 3. Check if placement already exists for this application
-    const duplicateCheck = await query(
-        `SELECT placement_id FROM placement_results
-         WHERE application_id = $1
-         LIMIT 1`,
-        [application_id]
-    );
-
     if (duplicateCheck.rows.length) {
         throw Object.assign(
             new Error('Placement record already exists for this application'),
@@ -154,64 +155,77 @@ async function createPlacement(collegeId, userId, data) {
         }
     }
 
-    // 6. Insert placement
-    const result = await query(
-        `INSERT INTO placement_results
-           (student_id, college_id, company_id, job_id, position_id, application_id,
-            placement_type, fulltime_package, fulltime_designation, fulltime_joining_date,
-            internship_stipend, internship_duration, internship_start_date,
-            offer_letter_url, placement_status, acceptance_status, passout_year)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-         RETURNING *`,
-        [
-            app.student_id,
-            collegeId,
-            app.company_id,
-            app.job_id,
-            app.position_id ?? null,
-            application_id,
-            placement_type,
-            data.fulltime_package ?? null,
-            data.fulltime_designation ?? null,
-            data.fulltime_joining_date ?? null,
-            data.internship_stipend ?? null,
-            data.internship_duration ?? null,
-            data.internship_start_date ?? null,
-            data.offer_letter_url ?? null,
-            STATUS.PLACEMENT.OFFERED,
-            'pending',
-            app.student_passout_year,
-        ]
-    );
+    // 6. Insert placement + update application status atomically
+    const client = await getClient();
 
-    // 7. Update application status to 'offered' if it was 'selected'
-    if (app.application_status === 'selected') {
-        await query(
-            `UPDATE student_applications
-             SET application_status = 'offered', last_updated_at = NOW()
-             WHERE application_id = $1`,
-            [application_id]
+    try {
+        await client.query('BEGIN');
+
+        const result = await client.query(
+            `INSERT INTO placement_results
+               (student_id, college_id, company_id, job_id, position_id, application_id,
+                placement_type, fulltime_package, fulltime_designation, fulltime_joining_date,
+                internship_stipend, internship_duration, internship_start_date,
+                offer_letter_url, placement_status, acceptance_status, passout_year)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+             RETURNING *`,
+            [
+                app.student_id,
+                collegeId,
+                app.company_id,
+                app.job_id,
+                app.position_id ?? null,
+                application_id,
+                placement_type,
+                data.fulltime_package ?? null,
+                data.fulltime_designation ?? null,
+                data.fulltime_joining_date ?? null,
+                data.internship_stipend ?? null,
+                data.internship_duration ?? null,
+                data.internship_start_date ?? null,
+                data.offer_letter_url ?? null,
+                STATUS.PLACEMENT.OFFERED,
+                'pending',
+                app.student_passout_year,
+            ]
         );
+
+        // 7. Update application status to 'offered' if it was 'selected'
+        if (app.application_status === 'selected') {
+            await client.query(
+                `UPDATE student_applications
+                 SET application_status = 'offered', last_updated_at = NOW()
+                 WHERE application_id = $1`,
+                [application_id]
+            );
+        }
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Placement record created`, {
+            placementId: result.rows[0].placement_id,
+            studentId: app.student_id,
+            jobId: app.job_id,
+            companyId: app.company_id,
+            placementType: placement_type,
+            collegeId,
+        });
+
+        return {
+            ...result.rows[0],
+            student_name: `${app.first_name} ${app.last_name}`,
+            student_email: app.student_email,
+            dept_name: app.dept_name ?? null,
+            company_name: app.company_name,
+            job_title: app.job_title,
+            position_name: app.position_name ?? null,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
     }
-
-    logger.info(`${LOG.AUTH} Placement record created`, {
-        placementId: result.rows[0].placement_id,
-        studentId: app.student_id,
-        jobId: app.job_id,
-        companyId: app.company_id,
-        placementType: placement_type,
-        collegeId,
-    });
-
-    return {
-        ...result.rows[0],
-        student_name: `${app.first_name} ${app.last_name}`,
-        student_email: app.student_email,
-        dept_name: app.dept_name ?? null,
-        company_name: app.company_name,
-        job_title: app.job_title,
-        position_name: app.position_name ?? null,
-    };
 }
 
 // ============================================================================
@@ -296,41 +310,7 @@ async function getAllPlacements(collegeId, filters = {}) {
     const sortCol = SORTABLE[filters.sort_by] || 'pr.created_at';
     const sortOrd = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM placement_results pr
-         JOIN students s ON pr.student_id = s.student_id
-         JOIN companies co ON pr.company_id = co.company_id
-         JOIN job_postings j ON pr.job_id = j.job_id
-         WHERE ${whereClause}`,
-        params
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch
-    const placementResult = await query(
-        `SELECT pr.*,
-                s.first_name, s.last_name, s.student_email,
-                d.dept_name,
-                co.company_name,
-                j.job_title,
-                p.position_name,
-                u.user_name AS verified_by_name
-         FROM placement_results pr
-         JOIN students s ON pr.student_id = s.student_id
-         JOIN companies co ON pr.company_id = co.company_id
-         JOIN job_postings j ON pr.job_id = j.job_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         LEFT JOIN job_positions p ON pr.position_id = p.position_id
-         LEFT JOIN users u ON pr.verified_by = u.user_id
-         WHERE ${whereClause}
-         ORDER BY ${sortCol} ${sortOrd}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
-
-    // Stats (unfiltered for college, optionally filtered by passout_year)
+    // Build stats params (independent of filter params)
     const statsParams = [collegeId];
     let statsWhere = 'pr.college_id = $1';
     if (filters.passout_year) {
@@ -338,24 +318,58 @@ async function getAllPlacements(collegeId, filters = {}) {
         statsParams.push(filters.passout_year);
     }
 
-    const statsResult = await query(
-        `SELECT
-            COUNT(*) AS total_placements,
-            COUNT(DISTINCT pr.student_id) AS unique_students,
-            COUNT(DISTINCT pr.company_id) AS unique_companies,
-            AVG(pr.fulltime_package) FILTER (WHERE pr.fulltime_package IS NOT NULL) AS avg_package,
-            MAX(pr.fulltime_package) AS highest_package,
-            MIN(pr.fulltime_package) FILTER (WHERE pr.fulltime_package IS NOT NULL AND pr.fulltime_package > 0) AS lowest_package,
-            SUM(CASE WHEN pr.placement_status = 'offered' THEN 1 ELSE 0 END) AS offered_count,
-            SUM(CASE WHEN pr.placement_status = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
-            SUM(CASE WHEN pr.placement_status = 'joined' THEN 1 ELSE 0 END) AS joined_count,
-            SUM(CASE WHEN pr.placement_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
-            SUM(CASE WHEN pr.placement_status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
-            SUM(CASE WHEN pr.offer_letter_verified = true THEN 1 ELSE 0 END) AS verified_offers
-         FROM placement_results pr
-         WHERE ${statsWhere}`,
-        statsParams
-    );
+    // Run count, fetch, and stats in parallel (all independent)
+    const [countResult, placementResult, statsResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM placement_results pr
+             JOIN students s ON pr.student_id = s.student_id
+             JOIN companies co ON pr.company_id = co.company_id
+             JOIN job_postings j ON pr.job_id = j.job_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT pr.*,
+                    s.first_name, s.last_name, s.student_email,
+                    d.dept_name,
+                    co.company_name,
+                    j.job_title,
+                    p.position_name,
+                    u.user_name AS verified_by_name
+             FROM placement_results pr
+             JOIN students s ON pr.student_id = s.student_id
+             JOIN companies co ON pr.company_id = co.company_id
+             JOIN job_postings j ON pr.job_id = j.job_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             LEFT JOIN job_positions p ON pr.position_id = p.position_id
+             LEFT JOIN users u ON pr.verified_by = u.user_id
+             WHERE ${whereClause}
+             ORDER BY ${sortCol} ${sortOrd}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+        query(
+            `SELECT
+                COUNT(*) AS total_placements,
+                COUNT(DISTINCT pr.student_id) AS unique_students,
+                COUNT(DISTINCT pr.company_id) AS unique_companies,
+                AVG(pr.fulltime_package) FILTER (WHERE pr.fulltime_package IS NOT NULL) AS avg_package,
+                MAX(pr.fulltime_package) AS highest_package,
+                MIN(pr.fulltime_package) FILTER (WHERE pr.fulltime_package IS NOT NULL AND pr.fulltime_package > 0) AS lowest_package,
+                SUM(CASE WHEN pr.placement_status = 'offered' THEN 1 ELSE 0 END) AS offered_count,
+                SUM(CASE WHEN pr.placement_status = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
+                SUM(CASE WHEN pr.placement_status = 'joined' THEN 1 ELSE 0 END) AS joined_count,
+                SUM(CASE WHEN pr.placement_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+                SUM(CASE WHEN pr.placement_status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
+                SUM(CASE WHEN pr.offer_letter_verified = true THEN 1 ELSE 0 END) AS verified_offers
+             FROM placement_results pr
+             WHERE ${statsWhere}`,
+            statsParams
+        ),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
 
     const stats = statsResult.rows[0];
 
@@ -425,28 +439,28 @@ async function getAllPlacements(collegeId, filters = {}) {
 async function getPlacement(placementId, collegeId) {
     const placement = await verifyPlacement(placementId, collegeId);
 
-    // Fetch round results for this student + job
-    const roundResults = await query(
-        `SELECT rr.result_id, rr.round_id, rr.result_status, rr.score, rr.remarks,
-                rr.attended, rr.scheduled_at, rr.completed_at,
-                jr.round_name, jr.round_number, jr.round_type, jr.round_status
-         FROM student_round_results rr
-         JOIN job_rounds jr ON rr.round_id = jr.round_id
-         WHERE rr.student_id = $1 AND jr.job_id = $2
-         ORDER BY jr.round_number ASC`,
-        [placement.student_id, placement.job_id]
-    );
-
-    // Fetch student academic info
-    const academicResult = await query(
-        `SELECT overall_cgpa, total_live_kts, total_dead_kts,
-                tenth_percentage, twelfth_percentage, diploma_percentage,
-                roll_number, enrollment_number
-         FROM student_academic_information
-         WHERE student_id = $1
-         LIMIT 1`,
-        [placement.student_id]
-    );
+    // Fetch round results + academic info in parallel
+    const [roundResults, academicResult] = await Promise.all([
+        query(
+            `SELECT rr.result_id, rr.round_id, rr.result_status, rr.score, rr.remarks,
+                    rr.attended, rr.scheduled_at, rr.completed_at,
+                    jr.round_name, jr.round_number, jr.round_type, jr.round_status
+             FROM student_round_results rr
+             JOIN job_rounds jr ON rr.round_id = jr.round_id
+             WHERE rr.student_id = $1 AND jr.job_id = $2
+             ORDER BY jr.round_number ASC`,
+            [placement.student_id, placement.job_id]
+        ),
+        query(
+            `SELECT overall_cgpa, total_live_kts, total_dead_kts,
+                    tenth_percentage, twelfth_percentage, diploma_percentage,
+                    roll_number, enrollment_number
+             FROM student_academic_information
+             WHERE student_id = $1
+             LIMIT 1`,
+            [placement.student_id]
+        ),
+    ]);
 
     return {
         placement_id: placement.placement_id,

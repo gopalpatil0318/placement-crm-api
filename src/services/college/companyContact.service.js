@@ -9,7 +9,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const {
     LOG,
@@ -102,22 +102,45 @@ async function addContact(companyId, collegeId, data) {
         }
     }
 
-    // 3. If setting as primary, demote existing primary contact(s)
-    if (data.is_primary === true) {
-        await query(
-            `UPDATE company_contacts
-             SET is_primary = false, updated_at = NOW()
-             WHERE company_id = $1 AND college_id = $2 AND is_primary = true`,
-            [companyId, collegeId]
-        );
-    }
-
     // 3. Build dynamic INSERT
     const fieldsToInsert = FIELDS.filter(f => data[f] !== undefined);
     const columns = ['company_id', 'college_id', ...fieldsToInsert];
     const placeholders = columns.map((_, i) => `$${i + 1}`);
     const values = [companyId, collegeId, ...fieldsToInsert.map(f => data[f])];
 
+    // 4. Use transaction if setting as primary (demote + insert must be atomic)
+    if (data.is_primary === true) {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+            await client.query(
+                `UPDATE company_contacts
+                 SET is_primary = false, updated_at = NOW()
+                 WHERE company_id = $1 AND college_id = $2 AND is_primary = true`,
+                [companyId, collegeId]
+            );
+            const result = await client.query(
+                `INSERT INTO company_contacts (${columns.join(', ')})
+                 VALUES (${placeholders.join(', ')})
+                 RETURNING *`,
+                values
+            );
+            await client.query('COMMIT');
+
+            logger.info(`${LOG.AUTH} Contact added to company`, {
+                contactId: result.rows[0].contact_id, companyId,
+                companyName: company.company_name, contactName: data.contact_name, collegeId,
+            });
+            return formatContact({ ...result.rows[0], company_name: company.company_name });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+
+    // Non-primary: no transaction needed
     const result = await query(
         `INSERT INTO company_contacts (${columns.join(', ')})
          VALUES (${placeholders.join(', ')})
@@ -229,14 +252,23 @@ async function updateContact(contactId, collegeId, data) {
 
     const existingContact = existing.rows[0];
 
-    // 2. If promoting to primary, demote others first
-    if (data.is_primary === true && !existingContact.is_primary) {
-        await query(
-            `UPDATE company_contacts
-             SET is_primary = false, updated_at = NOW()
-             WHERE company_id = $1 AND college_id = $2 AND is_primary = true AND contact_id != $3`,
-            [existingContact.company_id, collegeId, contactId]
+    // 2. If email is changing, check for duplicate within same company
+    if (data.contact_email &&
+        data.contact_email.toLowerCase() !== (existingContact.contact_email || '').toLowerCase()) {
+        const emailCheck = await query(
+            `SELECT contact_id FROM company_contacts
+             WHERE company_id = $1 AND LOWER(contact_email) = LOWER($2)
+               AND is_active = true AND contact_id != $3
+             LIMIT 1`,
+            [existingContact.company_id, data.contact_email, contactId]
         );
+
+        if (emailCheck.rows.length) {
+            throw Object.assign(
+                new Error(`A contact with email "${data.contact_email}" already exists for this company`),
+                { status: 409 }
+            );
+        }
     }
 
     // 3. Build dynamic UPDATE
@@ -251,6 +283,40 @@ async function updateContact(contactId, collegeId, data) {
         .concat(['updated_at = NOW()']);
     const values = [contactId, collegeId, ...fieldsToUpdate.map(f => data[f])];
 
+    // 4. Use transaction if promoting to primary (demote + update must be atomic)
+    if (data.is_primary === true && !existingContact.is_primary) {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+            await client.query(
+                `UPDATE company_contacts
+                 SET is_primary = false, updated_at = NOW()
+                 WHERE company_id = $1 AND college_id = $2 AND is_primary = true AND contact_id != $3`,
+                [existingContact.company_id, collegeId, contactId]
+            );
+            const result = await client.query(
+                `UPDATE company_contacts
+                 SET ${setClauses.join(', ')}
+                 WHERE contact_id = $1 AND college_id = $2
+                 RETURNING *`,
+                values
+            );
+            await client.query('COMMIT');
+
+            logger.info(`${LOG.AUTH} Contact updated`, {
+                contactId, updatedFields: fieldsToUpdate,
+                companyId: existingContact.company_id, collegeId,
+            });
+            return formatContact({ ...result.rows[0], company_name: existingContact.company_name });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+
+    // Non-primary change: no transaction needed
     const result = await query(
         `UPDATE company_contacts
          SET ${setClauses.join(', ')}

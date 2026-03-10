@@ -30,6 +30,7 @@ const {
     updatePlacementSchema,
     verifyOfferLetterSchema,
     updatePlacementStatusSchema,
+    placementIdParamSchema,
 } = require('../../validators/college/placement.validator');
 
 // All routes require COLLEGEADMIN or TPO
@@ -54,12 +55,14 @@ router.get(
 
 router.get(
     '/get_placement/:placementId',
+    validate(placementIdParamSchema, 'params'),
     asyncHandler(controller.getPlacement)
 );
 
 router.put(
     '/update_placement/:placementId',
     apiLimiter,
+    validate(placementIdParamSchema, 'params'),
     validate(updatePlacementSchema),
     asyncHandler(controller.updatePlacement)
 );
@@ -67,6 +70,7 @@ router.put(
 router.patch(
     '/verify_offer_letter/:placementId',
     apiLimiter,
+    validate(placementIdParamSchema, 'params'),
     validate(verifyOfferLetterSchema),
     asyncHandler(controller.verifyOfferLetter)
 );
@@ -74,6 +78,7 @@ router.patch(
 router.patch(
     '/update_placement_status/:placementId',
     apiLimiter,
+    validate(placementIdParamSchema, 'params'),
     validate(updatePlacementStatusSchema),
     asyncHandler(controller.updatePlacementStatus)
 );

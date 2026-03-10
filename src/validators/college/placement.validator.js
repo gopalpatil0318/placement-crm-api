@@ -262,10 +262,22 @@ const updatePlacementStatusSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS
+// ============================================================================
+
+const placementIdParamSchema = Joi.object({
+    placementId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid placement ID format',
+        'any.required': 'Placement ID is required',
+    }),
+});
+
 module.exports = {
     createPlacementSchema,
     listPlacementsSchema,
     updatePlacementSchema,
     verifyOfferLetterSchema,
     updatePlacementStatusSchema,
+    placementIdParamSchema,
 };

@@ -26,6 +26,8 @@ const {
     addQuestionSchema,
     listQuestionsSchema,
     updateQuestionSchema,
+    jobIdParamSchema,
+    questionIdParamSchema,
 } = require('../../validators/college/jobQuestion.validator');
 
 // All question routes require COLLEGEADMIN or TPO
@@ -38,12 +40,14 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 router.post(
     '/add_job_question/:jobId',
     apiLimiter,
+    validate(jobIdParamSchema, 'params'),
     validate(addQuestionSchema),
     asyncHandler(controller.addQuestion)
 );
 
 router.get(
     '/get_job_questions/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(listQuestionsSchema, 'query'),
     asyncHandler(controller.getJobQuestions)
 );
@@ -51,6 +55,7 @@ router.get(
 router.put(
     '/update_question/:questionId',
     apiLimiter,
+    validate(questionIdParamSchema, 'params'),
     validate(updateQuestionSchema),
     asyncHandler(controller.updateQuestion)
 );
@@ -58,6 +63,7 @@ router.put(
 router.delete(
     '/delete_question/:questionId',
     apiLimiter,
+    validate(questionIdParamSchema, 'params'),
     asyncHandler(controller.deleteQuestion)
 );
 

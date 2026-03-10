@@ -26,6 +26,8 @@ const {
     listApplicationsSchema,
     updateAppStatusSchema,
     bulkUpdateAppStatusSchema,
+    jobIdParamSchema,
+    applicationIdParamSchema,
 } = require('../../validators/college/application.validator');
 
 // All application routes require COLLEGEADMIN or TPO
@@ -37,18 +39,21 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 
 router.get(
     '/get_job_applications/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(listApplicationsSchema, 'query'),
     asyncHandler(controller.getJobApplications)
 );
 
 router.get(
     '/get_application/:applicationId',
+    validate(applicationIdParamSchema, 'params'),
     asyncHandler(controller.getApplication)
 );
 
 router.patch(
     '/update_application_status/:applicationId',
     apiLimiter,
+    validate(applicationIdParamSchema, 'params'),
     validate(updateAppStatusSchema),
     asyncHandler(controller.updateApplicationStatus)
 );

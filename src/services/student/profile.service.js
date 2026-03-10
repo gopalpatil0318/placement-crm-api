@@ -64,6 +64,7 @@ async function getFullProfile(studentId, collegeId) {
         certificatesResult,
         activitiesResult,
         profileLinksResult,
+        verificationCountsResult,
     ] = await Promise.all([
         // 1. Basic student info + department
         query(
@@ -151,7 +152,7 @@ async function getFullProfile(studentId, collegeId) {
             [studentId, collegeId]
         ),
 
-        // 7. Experience
+        // 7. Experience (approved only for profile view)
         query(
             `SELECT
                experience_id, company_name, company_website, position_title,
@@ -162,11 +163,12 @@ async function getFullProfile(studentId, collegeId) {
                is_verified
              FROM student_experience
              WHERE student_id = $1 AND college_id = $2
+               AND verification_status = 'approved'
              ORDER BY start_date DESC`,
             [studentId, collegeId]
         ),
 
-        // 8. Achievements
+        // 8. Achievements (approved only for profile view)
         query(
             `SELECT
                achievement_id, achievement_title, achievement_description,
@@ -176,11 +178,12 @@ async function getFullProfile(studentId, collegeId) {
                is_verified, is_featured, display_order
              FROM student_achievements
              WHERE student_id = $1 AND college_id = $2
+               AND verification_status = 'approved'
              ORDER BY display_order ASC NULLS LAST, achievement_date DESC`,
             [studentId, collegeId]
         ),
 
-        // 9. Certificates
+        // 9. Certificates (approved only for profile view)
         query(
             `SELECT
                certificate_id, certificate_name, certificate_description,
@@ -189,6 +192,7 @@ async function getFullProfile(studentId, collegeId) {
                does_not_expire, skills_covered, certificate_url, is_verified
              FROM student_certificates
              WHERE student_id = $1 AND college_id = $2
+               AND verification_status = 'approved'
              ORDER BY issue_date DESC`,
             [studentId, collegeId]
         ),
@@ -218,6 +222,24 @@ async function getFullProfile(studentId, collegeId) {
              LIMIT 1`,
             [studentId, collegeId]
         ),
+
+        // 12. Verification counts (pending/rejected) for summary badges
+        query(
+            `SELECT
+               (SELECT COUNT(*) FROM student_experience
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS exp_pending,
+               (SELECT COUNT(*) FROM student_experience
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS exp_rejected,
+               (SELECT COUNT(*) FROM student_achievements
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS ach_pending,
+               (SELECT COUNT(*) FROM student_achievements
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS ach_rejected,
+               (SELECT COUNT(*) FROM student_certificates
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS cert_pending,
+               (SELECT COUNT(*) FROM student_certificates
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS cert_rejected`,
+            [studentId, collegeId]
+        ),
     ]);
 
     // Check student exists
@@ -225,7 +247,14 @@ async function getFullProfile(studentId, collegeId) {
         throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
     }
 
-    // Calculate profile completion
+    // Build verification summary
+    const vc = verificationCountsResult.rows[0];
+
+    // Calculate profile completion using total counts (all statuses, not just approved)
+    // This prevents completion from dropping when items are pending/rejected
+    const totalExperiences = experienceResult.rows.length + vc.exp_pending + vc.exp_rejected;
+    const totalCertificates = certificatesResult.rows.length + vc.cert_pending + vc.cert_rejected;
+
     const completion = calculateProfileCompletion({
         personal: personalResult.rows[0] || null,
         academic: academicResult.rows[0] || null,
@@ -233,9 +262,14 @@ async function getFullProfile(studentId, collegeId) {
         skills: skillsResult.rows,
         profileLinks: profileLinksResult.rows[0] || null,
         projects: projectsResult.rows,
-        experience: experienceResult.rows,
-        certificates: certificatesResult.rows,
+        experience: totalExperiences > 0 ? [{ _total: true }] : [],
+        certificates: totalCertificates > 0 ? [{ _total: true }] : [],
     });
+    const verification_summary = {
+        experience: { pending: vc.exp_pending, rejected: vc.exp_rejected },
+        achievements: { pending: vc.ach_pending, rejected: vc.ach_rejected },
+        certificates: { pending: vc.cert_pending, rejected: vc.cert_rejected },
+    };
 
     return {
         student: studentResult.rows[0],
@@ -250,6 +284,7 @@ async function getFullProfile(studentId, collegeId) {
         activities: activitiesResult.rows,
         profile_links: profileLinksResult.rows[0] || null,
         profile_completion: completion,
+        verification_summary,
     };
 }
 

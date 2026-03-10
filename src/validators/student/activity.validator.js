@@ -221,10 +221,22 @@ const updateActivitySchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMA — activityId
+// ============================================================================
+
+const activityIdParamSchema = Joi.object({
+    activityId: Joi.string().uuid().required().messages({
+        'string.guid': 'Activity ID must be a valid UUID',
+        'any.required': 'Activity ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addActivitySchema,
     updateActivitySchema,
+    activityIdParamSchema,
 };

@@ -24,6 +24,7 @@ const { apiLimiter } = require('../../config/rateLimiter');
 const {
     addCertificateSchema,
     updateCertificateSchema,
+    certificateIdParamSchema,
 } = require('../../validators/student/certificate.validator');
 
 // ============================================================================
@@ -51,6 +52,7 @@ router.put(
     '/update_certificate/:certificateId',
     authenticate,
     apiLimiter,
+    validate(certificateIdParamSchema, 'params'),
     validate(updateCertificateSchema),
     asyncHandler(controller.updateCertificate)
 );
@@ -60,6 +62,7 @@ router.delete(
     '/delete_certificate/:certificateId',
     authenticate,
     apiLimiter,
+    validate(certificateIdParamSchema, 'params'),
     asyncHandler(controller.deleteCertificate)
 );
 

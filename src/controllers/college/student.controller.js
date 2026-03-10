@@ -76,9 +76,12 @@ async function getStudent(req, res) {
 // ============================================================================
 
 async function getStudentFullProfile(req, res) {
+    const { review } = req.validated;
+
     const result = await studentService.getStudentFullProfile(
         req.params.studentId,
-        req.user.college_id
+        req.user.college_id,
+        review
     );
 
     return sendSuccess(res, result, 'Student full profile retrieved successfully');
@@ -119,15 +122,17 @@ async function toggleStudentStatus(req, res) {
 // ============================================================================
 
 async function approveStudentProfile(req, res) {
-    const { profile_is_approved } = req.validated;
+    const { action, rejection_reason } = req.validated;
 
     const result = await studentService.approveStudentProfile(
         req.params.studentId,
         req.user.college_id,
-        profile_is_approved
+        req.user.id,
+        action,
+        rejection_reason
     );
 
-    const message = profile_is_approved
+    const message = action === 'approved'
         ? SUCCESS_MESSAGES.STUDENT_PROFILE_APPROVED
         : SUCCESS_MESSAGES.STUDENT_PROFILE_REJECTED;
 

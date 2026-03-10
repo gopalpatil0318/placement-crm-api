@@ -13,7 +13,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { hashPassword } = require('../../utils/passwordHelper');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
@@ -326,16 +326,14 @@ async function getAllStudents(collegeId, filters = {}) {
 
     const whereClause = conditions.join(' AND ');
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total FROM students s WHERE ${whereClause}`,
-        params
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch
-    const studentResult = await query(
-        `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
+    // Count and fetch in parallel
+    const [countResult, studentResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total FROM students s WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
                 s.student_email, s.dept_id, s.student_passout_year, s.current_year,
                 s.student_status, s.profile_complete, s.profile_is_approved,
                 s.created_at, s.updated_at,
@@ -345,8 +343,11 @@ async function getAllStudents(collegeId, filters = {}) {
          WHERE ${whereClause}
          ORDER BY s.created_at DESC
          LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
+            [...params, limit, offset]
+        ),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
 
     return {
         students: studentResult.rows,
@@ -397,14 +398,17 @@ async function getStudentById(studentId, collegeId) {
  *
  * @param {string} studentId
  * @param {string} collegeId
+ * @param {boolean} review - If true, show all items with verification status. If false, only approved items.
  * @returns {Object} Full student profile
  */
-async function getStudentFullProfile(studentId, collegeId) {
+async function getStudentFullProfile(studentId, collegeId, review = false) {
     // 1. Basic student info
     const studentResult = await query(
         `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
                 s.student_email, s.dept_id, s.student_passout_year, s.current_year,
                 s.student_status, s.profile_complete, s.profile_is_approved,
+                s.profile_approval_status, s.approved_by, s.approved_at,
+                s.profile_rejection_reason, s.rejected_at,
                 s.created_at, s.updated_at,
                 d.dept_name, d.dept_code
          FROM students s
@@ -419,6 +423,9 @@ async function getStudentFullProfile(studentId, collegeId) {
 
     const student = studentResult.rows[0];
 
+    // Build verification filter — only filter when not in review mode
+    const verificationFilter = review ? '' : "AND verification_status = 'approved'";
+
     // 2. Parallel queries for all related tables
     const [
         personalInfo,
@@ -431,6 +438,7 @@ async function getStudentFullProfile(studentId, collegeId) {
         certificates,
         activities,
         profileLinks,
+        verificationCounts,
     ] = await Promise.all([
         query(
             `SELECT * FROM student_personal_information
@@ -464,19 +472,19 @@ async function getStudentFullProfile(studentId, collegeId) {
         ),
         query(
             `SELECT * FROM student_experience
-             WHERE student_id = $1 AND college_id = $2
+             WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
              ORDER BY start_date DESC`,
             [studentId, collegeId]
         ),
         query(
             `SELECT * FROM student_achievements
-             WHERE student_id = $1 AND college_id = $2
+             WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
              ORDER BY display_order, achievement_date DESC`,
             [studentId, collegeId]
         ),
         query(
             `SELECT * FROM student_certificates
-             WHERE student_id = $1 AND college_id = $2
+             WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
              ORDER BY issue_date DESC`,
             [studentId, collegeId]
         ),
@@ -491,18 +499,38 @@ async function getStudentFullProfile(studentId, collegeId) {
              WHERE student_id = $1 AND college_id = $2`,
             [studentId, collegeId]
         ),
+        // Verification counts for summary badges
+        query(
+            `SELECT
+               (SELECT COUNT(*) FROM student_experience
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS exp_pending,
+               (SELECT COUNT(*) FROM student_experience
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS exp_rejected,
+               (SELECT COUNT(*) FROM student_achievements
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS ach_pending,
+               (SELECT COUNT(*) FROM student_achievements
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS ach_rejected,
+               (SELECT COUNT(*) FROM student_certificates
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS cert_pending,
+               (SELECT COUNT(*) FROM student_certificates
+                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS cert_rejected`,
+            [studentId, collegeId]
+        ),
     ]);
 
-    logger.debug(`${LOG.AUTH} Full profile fetched for student`, { studentId, collegeId });
+    logger.debug(`${LOG.AUTH} Full profile fetched for student`, { studentId, collegeId, review });
 
     // 3. Calculate profile completion percentage
+    // Use total counts (all statuses) for experience — prevents completion from dropping when items are pending
+    const totalExperiences = experience.rows.length + vc.exp_pending + vc.exp_rejected;
+
     const sections = {
         personal_info: { filled: !!personalInfo.rows[0], weight: 20, label: 'Personal Information' },
         academic_info: { filled: !!academicInfo.rows[0], weight: 20, label: 'Academic Information' },
         semester_grades: { filled: semesterGrades.rows.length > 0, weight: 15, label: 'Semester Grades' },
         skills: { filled: skills.rows.length > 0, weight: 10, label: 'Skills' },
         projects: { filled: projects.rows.length > 0, weight: 10, label: 'Projects' },
-        experience: { filled: experience.rows.length > 0, weight: 10, label: 'Experience' },
+        experience: { filled: totalExperiences > 0, weight: 10, label: 'Experience' },
         profile_links: { filled: !!profileLinks.rows[0], weight: 15, label: 'Profile Links' },
     };
 
@@ -522,12 +550,25 @@ async function getStudentFullProfile(studentId, collegeId) {
 
     const profile_completion_percentage = Math.round((earnedWeight / totalWeight) * 100);
 
+    // Build verification summary
+    const vc = verificationCounts.rows[0];
+    const verification_summary = {
+        experience: { pending: vc.exp_pending, rejected: vc.exp_rejected },
+        achievements: { pending: vc.ach_pending, rejected: vc.ach_rejected },
+        certificates: { pending: vc.cert_pending, rejected: vc.cert_rejected },
+    };
+
     return {
         ...student,
         profile_summary: {
             profile_completion_percentage,
             profile_complete: student.profile_complete,
             profile_is_approved: student.profile_is_approved,
+            profile_approval_status: student.profile_approval_status,
+            approved_by: student.approved_by,
+            approved_at: student.approved_at,
+            profile_rejection_reason: student.profile_rejection_reason,
+            rejected_at: student.rejected_at,
             section_status,
         },
         personal_info: personalInfo.rows[0] || null,
@@ -540,6 +581,7 @@ async function getStudentFullProfile(studentId, collegeId) {
         certificates: certificates.rows,
         activities: activities.rows,
         profile_links: profileLinks.rows[0] || null,
+        verification_summary,
     };
 }
 
@@ -682,10 +724,12 @@ async function toggleStudentStatus(studentId, collegeId, newStatus) {
  *
  * @param {string} studentId
  * @param {string} collegeId
- * @param {boolean} isApproved
+ * @param {string} userId - The college user performing the action
+ * @param {string} action - 'approved' or 'rejected'
+ * @param {string|null} rejectionReason
  * @returns {Object} Updated student
  */
-async function approveStudentProfile(studentId, collegeId, isApproved) {
+async function approveStudentProfile(studentId, collegeId, userId, action, rejectionReason) {
     // 1. Verify exists
     const existing = await query(
         `SELECT student_id, profile_is_approved, profile_complete FROM students
@@ -699,25 +743,108 @@ async function approveStudentProfile(studentId, collegeId, isApproved) {
     }
 
     // 2. If approving, check profile is complete first
-    if (isApproved && !existing.rows[0].profile_complete) {
+    if (action === 'approved' && !existing.rows[0].profile_complete) {
         throw Object.assign(
             new Error('Cannot approve an incomplete profile. Student must complete their profile first'),
             { status: 400 }
         );
     }
 
-    // 3. Update
+    const isApproved = action === 'approved';
+
+    // 3. Use transaction when approving (need to auto-approve pending items)
+    if (isApproved) {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+
+            // 3a. Update student profile
+            const result = await client.query(
+                `UPDATE students
+                 SET profile_is_approved = $1,
+                     profile_approval_status = $2,
+                     approved_by = $3,
+                     approved_at = NOW(),
+                     profile_rejection_reason = NULL,
+                     rejected_at = NULL,
+                     updated_at = NOW()
+                 WHERE student_id = $4 AND college_id = $5
+                 RETURNING student_id, first_name, last_name, student_email,
+                           profile_complete, profile_is_approved, profile_approval_status,
+                           approved_by, approved_at, profile_rejection_reason, rejected_at, updated_at`,
+                [true, 'approved', userId, studentId, collegeId]
+            );
+
+            // 3b. Auto-approve all pending items in a single CTE query (3→1 round-trip)
+            const autoApproveResult = await client.query(
+                `WITH exp AS (
+                    UPDATE student_experience
+                    SET verification_status = 'approved', is_verified = true,
+                        verified_by = $1, verified_at = NOW(),
+                        rejection_reason = NULL, rejected_at = NULL
+                    WHERE student_id = $2 AND college_id = $3 AND verification_status = 'pending'
+                    RETURNING 1
+                ), ach AS (
+                    UPDATE student_achievements
+                    SET verification_status = 'approved', is_verified = true,
+                        verified_by = $1, verified_at = NOW(),
+                        rejection_reason = NULL, rejected_at = NULL
+                    WHERE student_id = $2 AND college_id = $3 AND verification_status = 'pending'
+                    RETURNING 1
+                ), cert AS (
+                    UPDATE student_certificates
+                    SET verification_status = 'approved', is_verified = true,
+                        verified_by = $1, verified_at = NOW(),
+                        rejection_reason = NULL, rejected_at = NULL
+                    WHERE student_id = $2 AND college_id = $3 AND verification_status = 'pending'
+                    RETURNING 1
+                )
+                SELECT
+                    (SELECT COUNT(*)::int FROM exp) AS experiences,
+                    (SELECT COUNT(*)::int FROM ach) AS achievements,
+                    (SELECT COUNT(*)::int FROM cert) AS certificates`,
+                [userId, studentId, collegeId]
+            );
+
+            await client.query('COMMIT');
+
+            const autoApproved = autoApproveResult.rows[0];
+
+            logger.info(`${LOG.AUTH} Student profile approved with auto-approve`, {
+                studentId, collegeId, userId,
+                autoApproved,
+            });
+
+            return {
+                ...result.rows[0],
+                auto_approved: autoApproved,
+            };
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+
+    // 4. Rejection — no transaction needed, only update student table
     const result = await query(
         `UPDATE students
-         SET profile_is_approved = $1, updated_at = NOW()
-         WHERE student_id = $2 AND college_id = $3
+         SET profile_is_approved = $1,
+             profile_approval_status = $2,
+             approved_by = $3,
+             approved_at = approved_at,
+             profile_rejection_reason = $4,
+             rejected_at = NOW(),
+             updated_at = NOW()
+         WHERE student_id = $5 AND college_id = $6
          RETURNING student_id, first_name, last_name, student_email,
-                   profile_complete, profile_is_approved, updated_at`,
-        [isApproved, studentId, collegeId]
+                   profile_complete, profile_is_approved, profile_approval_status,
+                   approved_by, approved_at, profile_rejection_reason, rejected_at, updated_at`,
+        [false, 'rejected', userId, rejectionReason || null, studentId, collegeId]
     );
 
-    const action = isApproved ? 'approved' : 'rejected';
-    logger.info(`${LOG.AUTH} Student profile ${action}`, { studentId, collegeId });
+    logger.info(`${LOG.AUTH} Student profile rejected`, { studentId, collegeId, userId });
 
     return result.rows[0];
 }

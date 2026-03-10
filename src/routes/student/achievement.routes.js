@@ -24,6 +24,7 @@ const { apiLimiter } = require('../../config/rateLimiter');
 const {
     addAchievementSchema,
     updateAchievementSchema,
+    achievementIdParamSchema,
 } = require('../../validators/student/achievement.validator');
 
 // ============================================================================
@@ -51,6 +52,7 @@ router.put(
     '/update_achievement/:achievementId',
     authenticate,
     apiLimiter,
+    validate(achievementIdParamSchema, 'params'),
     validate(updateAchievementSchema),
     asyncHandler(controller.updateAchievement)
 );
@@ -60,6 +62,7 @@ router.delete(
     '/delete_achievement/:achievementId',
     authenticate,
     apiLimiter,
+    validate(achievementIdParamSchema, 'params'),
     asyncHandler(controller.deleteAchievement)
 );
 

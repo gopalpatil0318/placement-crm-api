@@ -323,33 +323,44 @@ async function bulkAddRoundResults(roundId, collegeId, results) {
         existingSet.add(item.application_id);
     }
 
-    // 6. Bulk insert using a transaction
+    // 6. Bulk insert using multi-row INSERT
     const created = [];
     if (toInsert.length > 0) {
         const client = await getClient();
         try {
             await client.query('BEGIN');
 
+            const applicationIds = toInsert.map(i => i.application_id);
+            const studentIds = toInsert.map(i => i.student_id);
+            const resultStatuses = toInsert.map(i => i.result_status ?? 'pending');
+            const scores = toInsert.map(i => i.score ?? null);
+            const remarksList = toInsert.map(i => i.remarks ?? null);
+            const attendedList = toInsert.map(i => i.attended ?? false);
+            const scheduledAtList = toInsert.map(i => i.scheduled_at ?? null);
+            const completedAtList = toInsert.map(i => i.completed_at ?? null);
+
+            const insertResult = await client.query(
+                `INSERT INTO student_round_results
+                   (application_id, round_id, student_id, result_status, score, remarks, attended, scheduled_at, completed_at)
+                 SELECT
+                     unnest($1::uuid[]),
+                     $2,
+                     unnest($3::uuid[]),
+                     unnest($4::text[]),
+                     unnest($5::numeric[]),
+                     unnest($6::text[]),
+                     unnest($7::boolean[]),
+                     unnest($8::timestamptz[]),
+                     unnest($9::timestamptz[])
+                 RETURNING result_id, application_id`,
+                [applicationIds, roundId, studentIds, resultStatuses, scores, remarksList, attendedList, scheduledAtList, completedAtList]
+            );
+
+            // Build created response using insert results
+            const insertMap = new Map(insertResult.rows.map(r => [r.application_id, r.result_id]));
             for (const item of toInsert) {
-                const res = await client.query(
-                    `INSERT INTO student_round_results
-                       (application_id, round_id, student_id, result_status, score, remarks, attended, scheduled_at, completed_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                     RETURNING result_id`,
-                    [
-                        item.application_id,
-                        roundId,
-                        item.student_id,
-                        item.result_status ?? 'pending',
-                        item.score ?? null,
-                        item.remarks ?? null,
-                        item.attended ?? false,
-                        item.scheduled_at ?? null,
-                        item.completed_at ?? null,
-                    ]
-                );
                 created.push({
-                    result_id: res.rows[0].result_id,
+                    result_id: insertMap.get(item.application_id),
                     application_id: item.application_id,
                     student_name: item.student_name,
                     result_status: item.result_status ?? 'pending',
@@ -447,41 +458,39 @@ async function getRoundResults(roundId, collegeId, filters = {}) {
     const sortCol = SORTABLE[filters.sort_by] || 'rr.created_at';
     const sortOrd = filters.sort_order === 'desc' ? 'DESC' : 'ASC';
 
-    // 4. Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM student_round_results rr
-         JOIN students s ON rr.student_id = s.student_id
-         WHERE ${whereClause}`,
-        params
-    );
+    // 4. Count + Fetch + Summary (parallel — all independent)
+    const [countResult, resultRows, summaryResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM student_round_results rr
+             JOIN students s ON rr.student_id = s.student_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT rr.*,
+                    s.first_name, s.last_name, s.student_email,
+                    d.dept_name,
+                    a.application_status
+             FROM student_round_results rr
+             JOIN students s ON rr.student_id = s.student_id
+             JOIN student_applications a ON rr.application_id = a.application_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             WHERE ${whereClause}
+             ORDER BY ${sortCol} ${sortOrd}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+        query(
+            `SELECT result_status, COUNT(*) AS cnt,
+                    AVG(score) AS avg_score
+             FROM student_round_results
+             WHERE round_id = $1
+             GROUP BY result_status`,
+            [roundId]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // 5. Fetch results with student info
-    const resultRows = await query(
-        `SELECT rr.*,
-                s.first_name, s.last_name, s.student_email,
-                d.dept_name,
-                a.application_status
-         FROM student_round_results rr
-         JOIN students s ON rr.student_id = s.student_id
-         JOIN student_applications a ON rr.application_id = a.application_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         WHERE ${whereClause}
-         ORDER BY ${sortCol} ${sortOrd}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
-
-    // 6. Status summary (unfiltered)
-    const summaryResult = await query(
-        `SELECT result_status, COUNT(*) AS cnt,
-                AVG(score) AS avg_score
-         FROM student_round_results
-         WHERE round_id = $1
-         GROUP BY result_status`,
-        [roundId]
-    );
 
     const statusSummary = {
         total: 0, pending: 0, passed: 0, failed: 0, on_hold: 0, absent: 0,

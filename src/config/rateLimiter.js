@@ -16,6 +16,7 @@
  */
 
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const logger = require('./logger');
 const { RATE_LIMIT, HTTP_STATUS, LOG, ROLES } = require('./constants');
 
@@ -52,6 +53,10 @@ function skipForSysAdmin(req) {
 const authLimiter = rateLimit({
   windowMs: RATE_LIMIT.WINDOW_MS_AUTH,
   max: RATE_LIMIT.MAX_REQUESTS_AUTH,
+  keyGenerator: (req) => {
+    const email = req.body?.email || req.body?.student_email || 'unknown';
+    return `${ipKeyGenerator(req.ip)}-${email}`;
+  },
   skip: () => false, // Never skip for auth — even sysadmin
   handler: (req, res) => {
     const resetMs = req.rateLimit?.resetTime

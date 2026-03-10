@@ -275,10 +275,22 @@ const updateProjectSchema = Joi.object({
 });
 
 // ============================================================================
+// PARAM SCHEMAS (URL params — UUID validation)
+// ============================================================================
+
+const projectIdParamSchema = Joi.object({
+    projectId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid project ID format',
+        'any.required': 'Project ID is required',
+    }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
     addProjectSchema,
     updateProjectSchema,
+    projectIdParamSchema,
 };

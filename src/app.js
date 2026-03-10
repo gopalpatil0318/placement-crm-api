@@ -26,7 +26,6 @@ const crypto = require('crypto');
 
 const config = require('./config/env');
 const logger = require('./config/logger');
-const { apiLimiter } = require('./config/rateLimiter');
 const { getPoolStats } = require('./config/db');
 const { APP } = require('./config/constants');
 const requestLogger = require('./middleware/requestLogger');
@@ -123,13 +122,7 @@ app.get('/', (req, res) => {
 });
 
 // ============================================================================
-// 8. RATE LIMITING (API routes only)
-// ============================================================================
-
-app.use('/api', apiLimiter);
-
-// ============================================================================
-// 9. API ROUTES
+// 8. API ROUTES
 // ============================================================================
 
 app.use('/api', routes);

@@ -151,6 +151,39 @@ const STATUS = Object.freeze({
     ACTIVE: 'active',
     INACTIVE: 'inactive',
   }),
+
+  // notifications.notification_type (matches schema CHECK constraint)
+  NOTIFICATION_TYPE: Object.freeze({
+    NEW_JOB_POSTED: 'new_job_posted',
+    APPLICATION_RECEIVED: 'application_received',
+    APPLICATION_STATUS_CHANGED: 'application_status_changed',
+    ROUND_SCHEDULED: 'round_scheduled',
+    ROUND_RESULT: 'round_result',
+    OFFER_RECEIVED: 'offer_received',
+    DEADLINE_REMINDER: 'deadline_reminder',
+    RESTRICTION_APPLIED: 'restriction_applied',
+    RESTRICTION_REMOVED: 'restriction_removed',
+    TRAINING_ENROLLMENT: 'training_enrollment',
+    TRAINING_COMPLETED: 'training_completed',
+    PROFILE_INCOMPLETE: 'profile_incomplete',
+    ELIGIBILITY_OVERRIDE_REQUESTED: 'eligibility_override_requested',
+    ELIGIBILITY_OVERRIDE_APPROVED: 'eligibility_override_approved',
+    ELIGIBILITY_OVERRIDE_REJECTED: 'eligibility_override_rejected',
+    GENERAL: 'general',
+  }),
+
+  // notifications.recipient_type
+  RECIPIENT_TYPE: Object.freeze({
+    STUDENT: 'student',
+    USER: 'user',
+  }),
+
+  // verification_status on experience/achievements/certificates + profile_approval_status on students
+  VERIFICATION: Object.freeze({
+    PENDING: 'pending',
+    APPROVED: 'approved',
+    REJECTED: 'rejected',
+  }),
 });
 
 // ============================================================================
@@ -222,6 +255,8 @@ const ERROR_MESSAGES = Object.freeze({
   RESTRICTION_NOT_FOUND: 'Restriction not found',
   TRAINING_NOT_FOUND: 'Training program not found',
   NOTIFICATION_NOT_FOUND: 'Notification not found',
+  FEEDBACK_NOT_FOUND: 'Feedback not found',
+  INTERVIEW_QUESTION_NOT_FOUND: 'Interview question not found',
   POLICY_NOT_FOUND: 'Placement policy not found',
   SKILL_NOT_FOUND: 'Skill not found',
   RESOURCE_NOT_FOUND: 'The requested resource was not found',
@@ -238,6 +273,18 @@ const ERROR_MESSAGES = Object.freeze({
   ROUND_SEQUENCE_INVALID: 'Student must pass previous round before proceeding',
   ALREADY_ENROLLED: 'You are already enrolled in this program',
   ENROLLMENT_CLOSED: 'Enrollment for this program is closed',
+  NO_RECIPIENTS_FOUND: 'No matching recipients found for the given criteria',
+  INVALID_NOTIFICATION_TYPE: 'Invalid notification type',
+  FEEDBACK_ALREADY_SUBMITTED: 'You have already submitted feedback for this job',
+  FEEDBACK_FEATURE_DISABLED: 'Feedback feature is not enabled for your college',
+  INTERVIEW_QUESTIONS_FEATURE_DISABLED: 'Interview questions feature is not enabled for your college',
+
+  // Verification
+  EXPERIENCE_NOT_FOUND: 'Experience not found',
+  ACHIEVEMENT_NOT_FOUND: 'Achievement not found',
+  CERTIFICATE_NOT_FOUND: 'Certificate not found',
+  REJECTION_REASON_REQUIRED: 'Rejection reason is required when rejecting',
+  BULK_LIMIT_EXCEEDED: 'Maximum 100 items allowed per bulk operation',
 
   // Permissions
   ONLY_SYSADMIN: 'Only system administrators can perform this action',
@@ -271,6 +318,7 @@ const SUCCESS_MESSAGES = Object.freeze({
   COLLEGE_ACTIVATED: 'College activated successfully',
   COLLEGE_DEACTIVATED: 'College deactivated successfully',
   COLLEGE_FEATURES_UPDATED: 'College features updated successfully',
+  ACADEMIC_YEAR_UPDATED: 'Academic year updated successfully',
 
   // User
   USER_CREATED: 'User created successfully',
@@ -288,6 +336,11 @@ const SUCCESS_MESSAGES = Object.freeze({
   STUDENT_UPDATED: 'Student information updated',
   STUDENT_PROFILE_APPROVED: 'Student profile approved',
   STUDENT_PROFILE_REJECTED: 'Student profile sent back for corrections',
+
+  // Verification
+  VERIFICATION_APPROVED: 'Verification approved successfully',
+  VERIFICATION_REJECTED: 'Item rejected with reason',
+  BULK_VERIFICATION_COMPLETED: 'Bulk verification completed',
 
   // Company
   COMPANY_CREATED: 'Company added successfully',
@@ -333,9 +386,15 @@ const SUCCESS_MESSAGES = Object.freeze({
   TRAINING_UPDATED: 'Training program updated',
   ENROLLMENT_SUCCESS: 'Successfully enrolled in the training program',
   FEEDBACK_SUBMITTED: 'Thank you for your feedback!',
+  FEEDBACK_APPROVED: 'Feedback approved successfully',
+  FEEDBACK_REJECTED: 'Feedback rejected',
+  INTERVIEW_QUESTION_SUBMITTED: 'Interview question submitted for review',
+  INTERVIEW_QUESTION_APPROVED: 'Interview question approved successfully',
+  INTERVIEW_QUESTION_REJECTED: 'Interview question rejected',
 
   // Notification
   NOTIFICATION_SENT: 'Notification sent successfully',
+  BULK_NOTIFICATION_SENT: 'Bulk notifications sent successfully',
   NOTIFICATIONS_MARKED_READ: 'Notifications marked as read',
 
   // Skills

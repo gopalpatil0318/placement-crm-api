@@ -2,7 +2,7 @@
 
 > **Stack**: Node.js + Express.js + PostgreSQL (Supabase)
 > **Auth**: JWT (college users + students) | .env credentials (sysadmin)
-
+Git hub chein test
 ---
 
 ## 📂 Project Structure

@@ -219,43 +219,41 @@ async function getJobApplications(jobId, collegeId, filters = {}) {
     const sortCol = SORTABLE[filters.sort_by] || 'a.applied_at';
     const sortOrd = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // 4. Count query
-    const countResult = await query(
-        `SELECT COUNT(*) AS total
-         FROM student_applications a
-         JOIN students s ON a.student_id = s.student_id
-         LEFT JOIN student_academic_information sai ON s.student_id = sai.student_id
-         WHERE ${whereClause}`,
-        params
-    );
+    // 4. Count + Fetch + Summary in parallel
+    const [countResult, appResult, summaryResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total
+             FROM student_applications a
+             JOIN students s ON a.student_id = s.student_id
+             LEFT JOIN student_academic_information sai ON s.student_id = sai.student_id
+             WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT a.*,
+                    s.first_name, s.last_name, s.student_email,
+                    d.dept_name,
+                    p.position_name,
+                    sai.roll_number, sai.enrollment_number
+             FROM student_applications a
+             JOIN students s ON a.student_id = s.student_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             LEFT JOIN job_positions p ON a.position_id = p.position_id
+             LEFT JOIN student_academic_information sai ON s.student_id = sai.student_id
+             WHERE ${whereClause}
+             ORDER BY ${sortCol} ${sortOrd}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+        query(
+            `SELECT application_status, COUNT(*) AS cnt
+             FROM student_applications
+             WHERE job_id = $1 AND college_id = $2
+             GROUP BY application_status`,
+            [jobId, collegeId]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // 5. Fetch applications with student + position info
-    const appResult = await query(
-        `SELECT a.*,
-                s.first_name, s.last_name, s.student_email,
-                d.dept_name,
-                p.position_name,
-                sai.roll_number, sai.enrollment_number
-         FROM student_applications a
-         JOIN students s ON a.student_id = s.student_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         LEFT JOIN job_positions p ON a.position_id = p.position_id
-         LEFT JOIN student_academic_information sai ON s.student_id = sai.student_id
-         WHERE ${whereClause}
-         ORDER BY ${sortCol} ${sortOrd}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
-
-    // 6. Status summary (all statuses for this job, independent of filters)
-    const summaryResult = await query(
-        `SELECT application_status, COUNT(*) AS cnt
-         FROM student_applications
-         WHERE job_id = $1 AND college_id = $2
-         GROUP BY application_status`,
-        [jobId, collegeId]
-    );
 
     const statusSummary = {
         total: 0,
@@ -300,40 +298,43 @@ async function getApplication(applicationId, collegeId) {
     // 1. Verify and fetch application with full joins
     const app = await verifyApplication(applicationId, collegeId);
 
-    // 2. Fetch application answers (joined with questions)
-    const answersResult = await query(
-        `SELECT aa.answer_id, aa.question_id,
-                aq.question_text, aq.question_type, aq.question_options, aq.is_required, aq.question_order,
-                aa.answer_text, aa.answer_options, aa.answer_boolean
-         FROM application_answers aa
-         JOIN application_questions aq ON aa.question_id = aq.question_id
-         WHERE aa.application_id = $1
-         ORDER BY aq.question_order ASC`,
-        [applicationId]
-    );
+    // 2-4. Fetch answers, round results, and academic info in parallel
+    const [answersResult, roundResultsRes, academicResult] = await Promise.all([
+        // Application answers (joined with questions)
+        query(
+            `SELECT aa.answer_id, aa.question_id,
+                    aq.question_text, aq.question_type, aq.question_options, aq.is_required, aq.question_order,
+                    aa.answer_text, aa.answer_options, aa.answer_boolean
+             FROM application_answers aa
+             JOIN application_questions aq ON aa.question_id = aq.question_id
+             WHERE aa.application_id = $1
+             ORDER BY aq.question_order ASC`,
+            [applicationId]
+        ),
 
-    // 3. Fetch round results for this application's student and job
-    const roundResultsRes = await query(
-        `SELECT rr.result_id, rr.round_id, rr.result_status, rr.score, rr.remarks,
-                rr.attended, rr.scheduled_at, rr.completed_at,
-                jr.round_name, jr.round_number, jr.round_type, jr.round_status
-         FROM student_round_results rr
-         JOIN job_rounds jr ON rr.round_id = jr.round_id
-         WHERE rr.student_id = $1 AND jr.job_id = $2
-         ORDER BY jr.round_number ASC`,
-        [app.student_id, app.job_id]
-    );
+        // Round results for this application's student and job
+        query(
+            `SELECT rr.result_id, rr.round_id, rr.result_status, rr.score, rr.remarks,
+                    rr.attended, rr.scheduled_at, rr.completed_at,
+                    jr.round_name, jr.round_number, jr.round_type, jr.round_status
+             FROM student_round_results rr
+             JOIN job_rounds jr ON rr.round_id = jr.round_id
+             WHERE rr.student_id = $1 AND jr.job_id = $2
+             ORDER BY jr.round_number ASC`,
+            [app.student_id, app.job_id]
+        ),
 
-    // 4. Fetch student academic info for eligibility review
-    const academicResult = await query(
-        `SELECT overall_cgpa, total_live_kts, total_dead_kts,
-                tenth_percentage, twelfth_percentage, diploma_percentage,
-                gap_years, roll_number, enrollment_number
-         FROM student_academic_information
-         WHERE student_id = $1
-         LIMIT 1`,
-        [app.student_id]
-    );
+        // Student academic info for eligibility review
+        query(
+            `SELECT overall_cgpa, total_live_kts, total_dead_kts,
+                    tenth_percentage, twelfth_percentage, diploma_percentage,
+                    gap_years, roll_number, enrollment_number
+             FROM student_academic_information
+             WHERE student_id = $1
+             LIMIT 1`,
+            [app.student_id]
+        ),
+    ]);
 
     return {
         ...formatApplicationDetail(app),

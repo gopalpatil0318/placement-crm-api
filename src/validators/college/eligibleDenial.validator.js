@@ -129,8 +129,20 @@ const listDenialsSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS
+// ============================================================================
+
+const jobIdParamSchema = Joi.object({
+    jobId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid job ID format',
+        'any.required': 'Job ID is required',
+    }),
+});
+
 module.exports = {
     listEligibleNotAppliedSchema,
     notifyEligibleSchema,
     listDenialsSchema,
+    jobIdParamSchema,
 };

@@ -27,6 +27,8 @@ const {
     listContactsSchema,
     updateContactSchema,
     toggleContactStatusSchema,
+    companyIdParamSchema,
+    contactIdParamSchema,
 } = require('../../validators/college/companyContact.validator');
 
 // All contact routes require COLLEGEADMIN or TPO
@@ -38,24 +40,28 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_company_contact/:companyId',
+    validate(companyIdParamSchema, 'params'),
     validate(addContactSchema),
     asyncHandler(controller.addContact)
 );
 
 router.get(
     '/get_company_contacts/:companyId',
+    validate(companyIdParamSchema, 'params'),
     validate(listContactsSchema, 'query'),
     asyncHandler(controller.getCompanyContacts)
 );
 
 router.put(
     '/update_contact/:contactId',
+    validate(contactIdParamSchema, 'params'),
     validate(updateContactSchema),
     asyncHandler(controller.updateContact)
 );
 
 router.patch(
     '/toggle_contact_status/:contactId',
+    validate(contactIdParamSchema, 'params'),
     validate(toggleContactStatusSchema),
     asyncHandler(controller.toggleContactStatus)
 );

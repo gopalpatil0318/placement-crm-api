@@ -33,6 +33,8 @@ const {
     updateStudentSchema,
     toggleStudentStatusSchema,
     approveStudentProfileSchema,
+    getStudentFullProfileQuerySchema,
+    studentIdParamSchema,
 } = require('../../validators/college/student.validator');
 
 // All student management routes require COLLEGEADMIN
@@ -62,28 +64,34 @@ router.get(
 
 router.get(
     '/get_student/:studentId',
+    validate(studentIdParamSchema, 'params'),
     asyncHandler(controller.getStudent)
 );
 
 router.get(
     '/get_student_full_profile/:studentId',
+    validate(studentIdParamSchema, 'params'),
+    validate(getStudentFullProfileQuerySchema, 'query'),
     asyncHandler(controller.getStudentFullProfile)
 );
 
 router.put(
     '/update_student/:studentId',
+    validate(studentIdParamSchema, 'params'),
     validate(updateStudentSchema),
     asyncHandler(controller.updateStudent)
 );
 
 router.patch(
     '/toggle_student_status/:studentId',
+    validate(studentIdParamSchema, 'params'),
     validate(toggleStudentStatusSchema),
     asyncHandler(controller.toggleStudentStatus)
 );
 
 router.patch(
     '/approve_student_profile/:studentId',
+    validate(studentIdParamSchema, 'params'),
     validate(approveStudentProfileSchema),
     asyncHandler(controller.approveStudentProfile)
 );

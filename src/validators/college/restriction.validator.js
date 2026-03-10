@@ -154,9 +154,33 @@ const updateRestrictionSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS — UUID validation for route parameters
+// ============================================================================
+
+const studentIdParamSchema = Joi.object({
+    studentId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid student ID format',
+        'any.required': 'Student ID is required',
+    }),
+});
+
+const restrictionIdParamSchema = Joi.object({
+    restrictionId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid restriction ID format',
+        'any.required': 'Restriction ID is required',
+    }),
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
     addRestrictionSchema,
     listRestrictionsSchema,
     listStudentRestrictionsSchema,
     updateRestrictionSchema,
+    studentIdParamSchema,
+    restrictionIdParamSchema,
 };

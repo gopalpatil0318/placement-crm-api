@@ -27,6 +27,8 @@ const {
     bulkAddRoundResultsSchema,
     listRoundResultsSchema,
     updateRoundResultSchema,
+    roundIdParamSchema,
+    resultIdParamSchema,
 } = require('../../validators/college/roundResult.validator');
 
 // All routes require COLLEGEADMIN or TPO
@@ -39,6 +41,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 router.post(
     '/add_round_result/:roundId',
     apiLimiter,
+    validate(roundIdParamSchema, 'params'),
     validate(addRoundResultSchema),
     asyncHandler(controller.addRoundResult)
 );
@@ -46,12 +49,14 @@ router.post(
 router.post(
     '/bulk_add_round_results/:roundId',
     apiLimiter,
+    validate(roundIdParamSchema, 'params'),
     validate(bulkAddRoundResultsSchema),
     asyncHandler(controller.bulkAddRoundResults)
 );
 
 router.get(
     '/get_round_results/:roundId',
+    validate(roundIdParamSchema, 'params'),
     validate(listRoundResultsSchema, 'query'),
     asyncHandler(controller.getRoundResults)
 );
@@ -59,6 +64,7 @@ router.get(
 router.put(
     '/update_round_result/:resultId',
     apiLimiter,
+    validate(resultIdParamSchema, 'params'),
     validate(updateRoundResultSchema),
     asyncHandler(controller.updateRoundResult)
 );

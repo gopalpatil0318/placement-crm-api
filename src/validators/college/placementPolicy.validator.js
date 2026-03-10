@@ -155,9 +155,21 @@ const togglePolicyStatusSchema = Joi.object({
 // EXPORTS
 // ============================================================================
 
+// ============================================================================
+// PARAM SCHEMAS
+// ============================================================================
+
+const policyIdParamSchema = Joi.object({
+    policyId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid policy ID format',
+        'any.required': 'Policy ID is required',
+    }),
+});
+
 module.exports = {
     createPolicySchema,
     listPoliciesSchema,
     updatePolicySchema,
     togglePolicyStatusSchema,
+    policyIdParamSchema,
 };

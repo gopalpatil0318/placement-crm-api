@@ -28,6 +28,7 @@ const {
     updateDepartmentSchema,
     listDepartmentsSchema,
     toggleDepartmentSchema,
+    deptIdParamSchema,
 } = require('../../validators/college/department.validator');
 
 // All department routes require COLLEGEADMIN
@@ -51,17 +52,20 @@ router.get(
 
 router.get(
     '/get_department/:deptId',
+    validate(deptIdParamSchema, 'params'),
     asyncHandler(controller.getDepartment)
 );
 
 router.put(
     '/update_department/:deptId',
+    validate(deptIdParamSchema, 'params'),
     validate(updateDepartmentSchema),
     asyncHandler(controller.updateDepartment)
 );
 
 router.patch(
     '/toggle_department_status/:deptId',
+    validate(deptIdParamSchema, 'params'),
     validate(toggleDepartmentSchema),
     asyncHandler(controller.toggleDepartmentStatus)
 );

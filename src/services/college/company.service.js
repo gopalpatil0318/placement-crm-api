@@ -10,7 +10,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -167,35 +167,35 @@ async function getAllCompanies(collegeId, filters = {}) {
     const sortColumn = SORTABLE_COLUMNS[filters.sort_by] || 'c.created_at';
     const sortOrder = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total FROM companies c WHERE ${whereClause}`,
-        params
-    );
+    // Count + Fetch in parallel
+    const [countResult, companyResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total FROM companies c WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT c.*,
+                    COALESCE(cc.cnt, 0) AS contacts_count,
+                    COALESCE(jp.cnt, 0) AS jobs_count
+             FROM companies c
+             LEFT JOIN (
+                 SELECT company_id, COUNT(*) AS cnt
+                 FROM company_contacts
+                 WHERE is_active = true
+                 GROUP BY company_id
+             ) cc ON c.company_id = cc.company_id
+             LEFT JOIN (
+                 SELECT company_id, COUNT(*) AS cnt
+                 FROM job_postings
+                 GROUP BY company_id
+             ) jp ON c.company_id = jp.company_id
+             WHERE ${whereClause}
+             ORDER BY ${sortColumn} ${sortOrder}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch with contacts count and jobs count
-    const companyResult = await query(
-        `SELECT c.*,
-                COALESCE(cc.cnt, 0) AS contacts_count,
-                COALESCE(jp.cnt, 0) AS jobs_count
-         FROM companies c
-         LEFT JOIN (
-             SELECT company_id, COUNT(*) AS cnt
-             FROM company_contacts
-             WHERE is_active = true
-             GROUP BY company_id
-         ) cc ON c.company_id = cc.company_id
-         LEFT JOIN (
-             SELECT company_id, COUNT(*) AS cnt
-             FROM job_postings
-             GROUP BY company_id
-         ) jp ON c.company_id = jp.company_id
-         WHERE ${whereClause}
-         ORDER BY ${sortColumn} ${sortOrder}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...params, limit, offset]
-    );
 
     return {
         companies: companyResult.rows.map(formatCompany),
@@ -217,31 +217,26 @@ async function getAllCompanies(collegeId, filters = {}) {
  * @returns {Object} Company with contacts array
  */
 async function getCompanyById(companyId, collegeId) {
-    // 1. Fetch company
-    const companyResult = await query(
-        `SELECT c.*,
-                COALESCE(jp.cnt, 0) AS jobs_count
-         FROM companies c
-         LEFT JOIN (
-             SELECT company_id, COUNT(*) AS cnt
-             FROM job_postings
-             GROUP BY company_id
-         ) jp ON c.company_id = jp.company_id
-         WHERE c.company_id = $1 AND c.college_id = $2`,
-        [companyId, collegeId]
-    );
+    // Parallel fetch: company (with jobs count) + contacts
+    const [companyResult, contactsResult] = await Promise.all([
+        query(
+            `SELECT c.*,
+                    (SELECT COUNT(*) FROM job_postings WHERE company_id = c.company_id) AS jobs_count
+             FROM companies c
+             WHERE c.company_id = $1 AND c.college_id = $2`,
+            [companyId, collegeId]
+        ),
+        query(
+            `SELECT * FROM company_contacts
+             WHERE company_id = $1 AND college_id = $2
+             ORDER BY is_primary DESC, is_active DESC, created_at ASC`,
+            [companyId, collegeId]
+        ),
+    ]);
 
     if (!companyResult.rows.length) {
         throw Object.assign(new Error(ERROR_MESSAGES.COMPANY_NOT_FOUND), { status: 404 });
     }
-
-    // 2. Fetch contacts for this company
-    const contactsResult = await query(
-        `SELECT * FROM company_contacts
-         WHERE company_id = $1 AND college_id = $2
-         ORDER BY is_primary DESC, is_active DESC, created_at ASC`,
-        [companyId, collegeId]
-    );
 
     const company = formatCompany(companyResult.rows[0]);
 
@@ -357,7 +352,52 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
         );
     }
 
-    // 3. Update status
+    // 3. If deactivating, use transaction (status change + auto-close jobs must be atomic)
+    if (newStatus === 'inactive') {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+
+            const result = await client.query(
+                `UPDATE companies
+                 SET company_status = $1, updated_at = NOW()
+                 WHERE company_id = $2 AND college_id = $3
+                 RETURNING *`,
+                [newStatus, companyId, collegeId]
+            );
+
+            const closeResult = await client.query(
+                `UPDATE job_postings
+                 SET job_status = 'closed', allow_applications = false, updated_at = NOW()
+                 WHERE company_id = $1 AND college_id = $2
+                   AND job_status IN ('draft', 'published')
+                 RETURNING job_id`,
+                [companyId, collegeId]
+            );
+
+            await client.query('COMMIT');
+
+            const closedJobsCount = closeResult.rowCount;
+
+            logger.info(`${LOG.AUTH} Company deactivated`, {
+                companyId, companyName: existing.rows[0].company_name,
+                previousStatus: existing.rows[0].company_status, newStatus,
+                closedJobsCount, collegeId,
+            });
+
+            return {
+                ...formatCompany(result.rows[0]),
+                ...(closedJobsCount > 0 && { closed_jobs_count: closedJobsCount }),
+            };
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+
+    // Activating: simple update, no transaction needed
     const result = await query(
         `UPDATE companies
          SET company_status = $1, updated_at = NOW()
@@ -366,33 +406,15 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
         [newStatus, companyId, collegeId]
     );
 
-    // 4. If deactivating, auto-close all published/draft jobs for this company
-    let closedJobsCount = 0;
-    if (newStatus === 'inactive') {
-        const closeResult = await query(
-            `UPDATE job_postings
-             SET job_status = 'closed', allow_applications = false, updated_at = NOW()
-             WHERE company_id = $1 AND college_id = $2
-               AND job_status IN ('draft', 'published')
-             RETURNING job_id`,
-            [companyId, collegeId]
-        );
-        closedJobsCount = closeResult.rowCount;
-    }
-
-    logger.info(`${LOG.AUTH} Company status changed`, {
+    logger.info(`${LOG.AUTH} Company activated`, {
         companyId,
         companyName: existing.rows[0].company_name,
         previousStatus: existing.rows[0].company_status,
         newStatus,
-        closedJobsCount,
         collegeId,
     });
 
-    return {
-        ...formatCompany(result.rows[0]),
-        ...(closedJobsCount > 0 && { closed_jobs_count: closedJobsCount }),
-    };
+    return formatCompany(result.rows[0]);
 }
 
 // ============================================================================

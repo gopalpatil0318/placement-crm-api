@@ -182,6 +182,19 @@ const toggleDepartmentSchema = Joi.object({
         }),
 });
 
+/**
+ * Dept ID param validation (for routes with :deptId)
+ */
+const deptIdParamSchema = Joi.object({
+    deptId: Joi.string()
+        .uuid()
+        .required()
+        .messages({
+            'string.guid': 'Invalid department ID format',
+            'any.required': 'Department ID is required',
+        }),
+});
+
 // ============================================================================
 // EXPORTS
 // ============================================================================
@@ -191,4 +204,5 @@ module.exports = {
     updateDepartmentSchema,
     listDepartmentsSchema,
     toggleDepartmentSchema,
+    deptIdParamSchema,
 };

@@ -25,6 +25,8 @@ const {
     addRoundSchema,
     updateRoundSchema,
     updateRoundStatusSchema,
+    jobIdParamSchema,
+    roundIdParamSchema,
 } = require('../../validators/college/jobRound.validator');
 
 // All round routes require COLLEGEADMIN or TPO
@@ -36,18 +38,21 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_job_round/:jobId',
+    validate(jobIdParamSchema, 'params'),
     validate(addRoundSchema),
     asyncHandler(controller.addRound)
 );
 
 router.put(
     '/update_round/:roundId',
+    validate(roundIdParamSchema, 'params'),
     validate(updateRoundSchema),
     asyncHandler(controller.updateRound)
 );
 
 router.patch(
     '/update_round_status/:roundId',
+    validate(roundIdParamSchema, 'params'),
     validate(updateRoundStatusSchema),
     asyncHandler(controller.updateRoundStatus)
 );

@@ -12,9 +12,9 @@
  */
 
 const skillService = require('../../services/student/skill.service');
-const { sendSuccess, sendError } = require('../../utils/responseHelper');
+const { sendSuccess } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
-const { SUCCESS_MESSAGES, ERROR_MESSAGES, LOG, HTTP_STATUS } = require('../../config/constants');
+const { SUCCESS_MESSAGES, LOG, HTTP_STATUS } = require('../../config/constants');
 
 // ============================================================================
 // 1. ADD SKILL (to master catalog — student or college user)
@@ -29,34 +29,19 @@ async function addSkill(req, res) {
         college_id: req.user.college_id,
     });
 
-    try {
-        const result = await skillService.addSkill(
-            req.user.college_id,
-            req.validated
-        );
+    const result = await skillService.addSkill(
+        req.user.college_id,
+        req.validated
+    );
 
-        const duration = Date.now() - startTime;
+    const duration = Date.now() - startTime;
 
-        logger.info(`${LOG.API_END} POST /api/student/add_skill`, {
-            skill_id: result.skill_id,
-            duration_ms: duration,
-        });
+    logger.info(`${LOG.API_END} POST /api/student/add_skill`, {
+        skill_id: result.skill_id,
+        duration_ms: duration,
+    });
 
-        return sendSuccess(res, result, SUCCESS_MESSAGES.SKILL_CREATED, HTTP_STATUS.CREATED);
-    } catch (err) {
-        const duration = Date.now() - startTime;
-
-        logger.error(`${LOG.API_ERROR} POST /api/student/add_skill`, {
-            error: err.message,
-            stack: err.stack,
-            duration_ms: duration,
-        });
-
-        if (err.status === 409) {
-            return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        }
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.SKILL_CREATED, HTTP_STATUS.CREATED);
 }
 
 // ============================================================================
@@ -73,31 +58,16 @@ async function deleteSkill(req, res) {
         college_id: req.user.college_id,
     });
 
-    try {
-        const result = await skillService.deleteSkill(skillId, req.user.college_id);
+    const result = await skillService.deleteSkill(skillId, req.user.college_id);
 
-        const duration = Date.now() - startTime;
+    const duration = Date.now() - startTime;
 
-        logger.info(`${LOG.API_END} DELETE /api/student/delete_skill/${skillId}`, {
-            skill_name: result.skill_name,
-            duration_ms: duration,
-        });
+    logger.info(`${LOG.API_END} DELETE /api/student/delete_skill/${skillId}`, {
+        skill_name: result.skill_name,
+        duration_ms: duration,
+    });
 
-        return sendSuccess(res, result, SUCCESS_MESSAGES.SKILL_REMOVED);
-    } catch (err) {
-        const duration = Date.now() - startTime;
-
-        logger.error(`${LOG.API_ERROR} DELETE /api/student/delete_skill/${skillId}`, {
-            error: err.message,
-            stack: err.stack,
-            duration_ms: duration,
-        });
-
-        if (err.status === 404) {
-            return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        }
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.SKILL_REMOVED);
 }
 
 // ============================================================================
@@ -123,37 +93,21 @@ async function syncMySkills(req, res) {
         incoming_count: req.validated.skills.length,
     });
 
-    try {
-        const result = await skillService.syncMySkills(
-            req.user.id,
-            req.user.college_id,
-            req.validated.skills
-        );
+    const result = await skillService.syncMySkills(
+        req.user.id,
+        req.user.college_id,
+        req.validated.skills
+    );
 
-        const duration = Date.now() - startTime;
+    const duration = Date.now() - startTime;
 
-        logger.info(`${LOG.API_END} PUT /api/student/sync_my_skills`, {
-            student_id: req.user.id,
-            sync_summary: result.sync_summary,
-            duration_ms: duration,
-        });
+    logger.info(`${LOG.API_END} PUT /api/student/sync_my_skills`, {
+        student_id: req.user.id,
+        sync_summary: result.sync_summary,
+        duration_ms: duration,
+    });
 
-        return sendSuccess(res, result, 'Skills synced successfully');
-    } catch (err) {
-        const duration = Date.now() - startTime;
-
-        logger.error(`${LOG.API_ERROR} PUT /api/student/sync_my_skills`, {
-            error: err.message,
-            stack: err.stack,
-            student_id: req.user.id,
-            duration_ms: duration,
-        });
-
-        if (err.status === 400) {
-            return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        }
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, 'Skills synced successfully');
 }
 
 // ============================================================================

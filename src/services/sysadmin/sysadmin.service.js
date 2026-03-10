@@ -200,16 +200,14 @@ async function getAllColleges({ page, limit, offset, status, type, search }) {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Count
-    const countResult = await query(
-        `SELECT COUNT(*) AS total FROM colleges ${whereClause}`,
-        values
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    // Fetch
-    const listResult = await query(
-        `SELECT
+    // Count and fetch in parallel
+    const [countResult, listResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total FROM colleges ${whereClause}`,
+            values
+        ),
+        query(
+            `SELECT
        college_id, college_name, college_subdomain, college_type,
        college_status, enabled_features, default_academic_year,
        college_city, college_state,
@@ -218,8 +216,11 @@ async function getAllColleges({ page, limit, offset, status, type, search }) {
      ${whereClause}
      ORDER BY created_at DESC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        [...values, limit, offset]
-    );
+            [...values, limit, offset]
+        ),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
 
     return { colleges: listResult.rows, total };
 }
@@ -236,12 +237,17 @@ async function getCollegeById(collegeId) {
        c.college_state, c.college_pincode, c.college_status,
        c.enabled_features, c.default_academic_year,
        c.created_at, c.updated_at,
-       u.user_name AS admin_name,
-       u.user_email AS admin_email
+       a.user_name AS admin_name,
+       a.user_email AS admin_email
      FROM colleges c
-     LEFT JOIN users u ON u.college_id = c.college_id AND u.user_role = 'collegeadmin'
-     WHERE c.college_id = $1
-     LIMIT 1`,
+     LEFT JOIN LATERAL (
+       SELECT u.user_name, u.user_email
+       FROM users u
+       WHERE u.college_id = c.college_id AND u.user_role = 'collegeadmin'
+       ORDER BY u.created_at ASC
+       LIMIT 1
+     ) a ON true
+     WHERE c.college_id = $1`,
         [collegeId]
     );
 
@@ -282,8 +288,9 @@ async function updateCollege(collegeId, data) {
     setClauses.push('updated_at = NOW()');
     values.push(collegeId);
 
-    const result = await query(
-        `UPDATE colleges
+    try {
+        const result = await query(
+            `UPDATE colleges
      SET ${setClauses.join(', ')}
      WHERE college_id = $${paramIndex}
      RETURNING
@@ -292,15 +299,27 @@ async function updateCollege(collegeId, data) {
        college_state, college_pincode, college_status,
        enabled_features, default_academic_year,
        created_at, updated_at`,
-        values
-    );
+            values
+        );
 
-    if (!result.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.COLLEGE_NOT_FOUND), { status: 404 });
+        if (!result.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.COLLEGE_NOT_FOUND), { status: 404 });
+        }
+
+        logger.info(`${LOG.DB_QUERY} College updated`, { collegeId });
+        return result.rows[0];
+    } catch (err) {
+        if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
+            if (err.constraint?.includes('subdomain')) {
+                throw Object.assign(new Error(ERROR_MESSAGES.SUBDOMAIN_ALREADY_EXISTS), { status: 409 });
+            }
+            if (err.constraint?.includes('email')) {
+                throw Object.assign(new Error(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS), { status: 409 });
+            }
+            throw Object.assign(new Error(ERROR_MESSAGES.DUPLICATE_ENTRY), { status: 409 });
+        }
+        throw err;
     }
-
-    logger.info(`${LOG.DB_QUERY} College updated`, { collegeId });
-    return result.rows[0];
 }
 
 // ============================================================================

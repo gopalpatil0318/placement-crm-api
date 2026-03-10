@@ -13,7 +13,7 @@
  */
 
 const { query } = require('../../config/db');
-const { generateToken } = require('../../utils/jwtHelper');
+const { generateToken, verifyToken } = require('../../utils/jwtHelper');
 const { hashPassword, comparePassword } = require('../../utils/passwordHelper');
 const { sendEmail } = require('../../utils/emailHelper');
 const config = require('../../config/env');
@@ -250,6 +250,48 @@ async function changePassword(studentId, collegeId, currentPassword, newPassword
 }
 
 // ============================================================================
+// 4. RESET PASSWORD (from email link)
+// ============================================================================
+
+async function resetPassword(token, newPassword) {
+    const payload = verifyToken(token);
+    if (!payload || payload.purpose !== 'password_reset' || payload.type !== STUDENT_ROLE) {
+        throw Object.assign(
+            new Error('Password reset link is invalid or has expired'),
+            { status: 400 }
+        );
+    }
+
+    const result = await query(
+        `SELECT student_id, first_name, last_name, student_email
+         FROM students
+         WHERE student_id = $1
+         LIMIT 1`,
+        [payload.id]
+    );
+
+    if (!result.rows.length) {
+        throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
+    }
+
+    const student = result.rows[0];
+    const hashedNew = await hashPassword(newPassword);
+
+    await query(
+        `UPDATE students
+         SET student_password = $1, updated_at = NOW()
+         WHERE student_id = $2`,
+        [hashedNew, student.student_id]
+    );
+
+    logger.info(`${LOG.AUTH} Student password reset successful`, {
+        studentId: student.student_id,
+    });
+
+    return { student_email: student.student_email };
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -257,4 +299,5 @@ module.exports = {
     loginStudent,
     forgotPassword,
     changePassword,
+    resetPassword,
 };

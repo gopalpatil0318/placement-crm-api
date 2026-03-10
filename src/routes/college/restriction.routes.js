@@ -27,6 +27,8 @@ const {
     listRestrictionsSchema,
     listStudentRestrictionsSchema,
     updateRestrictionSchema,
+    studentIdParamSchema,
+    restrictionIdParamSchema,
 } = require('../../validators/college/restriction.validator');
 
 // All restriction routes require COLLEGEADMIN or TPO
@@ -38,6 +40,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_student_restriction/:studentId',
+    validate(studentIdParamSchema, 'params'),
     validate(addRestrictionSchema),
     asyncHandler(controller.addRestriction)
 );
@@ -50,12 +53,14 @@ router.get(
 
 router.get(
     '/get_student_restrictions/:studentId',
+    validate(studentIdParamSchema, 'params'),
     validate(listStudentRestrictionsSchema, 'query'),
     asyncHandler(controller.getStudentRestrictions)
 );
 
 router.patch(
     '/update_restriction/:restrictionId',
+    validate(restrictionIdParamSchema, 'params'),
     validate(updateRestrictionSchema),
     asyncHandler(controller.updateRestriction)
 );

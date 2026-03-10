@@ -2,10 +2,11 @@
  * ============================================================================
  * COLLEGE USER CONTROLLER — Route Handlers for Auth & User Management
  * ============================================================================
- * Auth (4 endpoints):
+ * Auth (5 endpoints):
  *   POST  /api/college/login
  *   POST  /api/college/logout
  *   POST  /api/college/forgot_password
+ *   POST  /api/college/reset_password
  *   POST  /api/college/change_password
  *
  * Management — COLLEGEADMIN only (5 endpoints):
@@ -25,7 +26,7 @@ const { SUCCESS_MESSAGES, LOG } = require('../../config/constants');
 // Cookie options for JWT
 const COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: false,          // set true in production behind HTTPS
+    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
@@ -57,9 +58,9 @@ async function login(req, res) {
 
 async function logout(req, res) {
     res.clearCookie('token', {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
+        httpOnly: COOKIE_OPTIONS.httpOnly,
+        secure: COOKIE_OPTIONS.secure,
+        sameSite: COOKIE_OPTIONS.sameSite,
     });
 
     logger.info(`${LOG.AUTH} College user logged out`, {
@@ -79,6 +80,18 @@ async function forgotPassword(req, res) {
     const result = await userService.forgotPassword(email);
 
     return sendSuccess(res, null, result.message);
+}
+
+// ============================================================================
+// AUTH — 3b. RESET PASSWORD (from email link token)
+// ============================================================================
+
+async function resetPassword(req, res) {
+    const { token, new_password } = req.validated;
+
+    await userService.resetPassword(token, new_password);
+
+    return sendSuccess(res, null, 'Password has been reset successfully. Please log in with your new password.');
 }
 
 // ============================================================================
@@ -174,6 +187,7 @@ module.exports = {
     login,
     logout,
     forgotPassword,
+    resetPassword,
     changePassword,
     // Management
     createUser,

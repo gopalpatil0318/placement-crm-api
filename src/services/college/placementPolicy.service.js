@@ -164,39 +164,36 @@ async function getAllPolicies(collegeId, filters = {}) {
     const sortColumn = SORTABLE[sort_by] || SORTABLE.created_at;
     const order = sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // --- Count query ---
-    const countResult = await query(
-        `SELECT COUNT(*) AS total FROM placement_policies pp WHERE ${whereClause}`,
-        params
-    );
+    // --- Count + Data + Summary (parallel — all independent) ---
+    const [countResult, dataResult, summaryResult] = await Promise.all([
+        query(
+            `SELECT COUNT(*) AS total FROM placement_policies pp WHERE ${whereClause}`,
+            params
+        ),
+        query(
+            `SELECT pp.policy_id, pp.passout_year, pp.policy_title,
+                    pp.policy_description, pp.is_active,
+                    pp.created_by, pp.created_at, pp.updated_at,
+                    u.user_name AS created_by_name
+             FROM placement_policies pp
+             LEFT JOIN users u ON pp.created_by = u.user_id
+             WHERE ${whereClause}
+             ORDER BY ${sortColumn} ${order}
+             LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...params, limit, offset]
+        ),
+        query(
+            `SELECT
+                COUNT(*) AS total_policies,
+                COUNT(*) FILTER (WHERE is_active = true)  AS active_count,
+                COUNT(*) FILTER (WHERE is_active = false) AS inactive_count,
+                COUNT(DISTINCT passout_year) AS year_count
+             FROM placement_policies
+             WHERE college_id = $1`,
+            [collegeId]
+        ),
+    ]);
     const total = parseInt(countResult.rows[0].total, 10);
-
-    // --- Data query ---
-    const dataParams = [...params, limit, offset];
-    const dataResult = await query(
-        `SELECT pp.policy_id, pp.passout_year, pp.policy_title,
-                pp.policy_description, pp.is_active,
-                pp.created_by, pp.created_at, pp.updated_at,
-                u.user_name AS created_by_name
-         FROM placement_policies pp
-         LEFT JOIN users u ON pp.created_by = u.user_id
-         WHERE ${whereClause}
-         ORDER BY ${sortColumn} ${order}
-         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-        dataParams
-    );
-
-    // --- Status summary (unfiltered — always for entire college) ---
-    const summaryResult = await query(
-        `SELECT
-            COUNT(*) AS total_policies,
-            COUNT(*) FILTER (WHERE is_active = true)  AS active_count,
-            COUNT(*) FILTER (WHERE is_active = false) AS inactive_count,
-            COUNT(DISTINCT passout_year) AS year_count
-         FROM placement_policies
-         WHERE college_id = $1`,
-        [collegeId]
-    );
 
     return {
         policies: dataResult.rows,
