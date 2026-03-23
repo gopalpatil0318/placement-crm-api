@@ -14,6 +14,7 @@
  */
 
 const { query, getClient } = require('../../config/db');
+const chunkedQuery = require('../../utils/chunkedQuery');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -447,61 +448,61 @@ async function getJobDetails(jobId, studentId, collegeId) {
         throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_PUBLISHED), { status: 400 });
     }
 
-    // 2. Fetch all supplementary data in parallel
-    const [positionsResult, criteriaResult, roundsResult, questionsResult, appResult, denialResult, appCountResult] = await Promise.all([
+    // 2. Fetch all supplementary data — chunked to max 3 connections at a time
+    const [positionsResult, criteriaResult, roundsResult, questionsResult, appResult, denialResult, appCountResult] = await chunkedQuery([
         // Positions
-        query(
-            `SELECT position_id, position_name, position_description, vacancies, position_status
+        {
+            text: `SELECT position_id, position_name, position_description, vacancies, position_status
              FROM job_positions
              WHERE job_id = $1 AND position_status = 'active'
              ORDER BY position_name ASC`,
-            [jobId]
-        ),
+            params: [jobId],
+        },
         // Eligibility criteria
-        query(
-            `SELECT * FROM job_eligibility_criteria
+        {
+            text: `SELECT * FROM job_eligibility_criteria
              WHERE job_id = $1 LIMIT 1`,
-            [jobId]
-        ),
+            params: [jobId],
+        },
         // Rounds
-        query(
-            `SELECT round_id, round_number, round_name, round_description,
+        {
+            text: `SELECT round_id, round_number, round_name, round_description,
                     round_type, round_date, round_venue, round_status
              FROM job_rounds
              WHERE job_id = $1
              ORDER BY round_number ASC`,
-            [jobId]
-        ),
+            params: [jobId],
+        },
         // Application questions
-        query(
-            `SELECT question_id, question_text, question_type, question_options,
+        {
+            text: `SELECT question_id, question_text, question_type, question_options,
                     is_required, question_order
              FROM application_questions
              WHERE job_id = $1
              ORDER BY question_order ASC`,
-            [jobId]
-        ),
+            params: [jobId],
+        },
         // Student's application status
-        query(
-            `SELECT application_id, application_status, applied_at
+        {
+            text: `SELECT application_id, application_status, applied_at
              FROM student_applications
              WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
-            [studentId, jobId]
-        ),
+            params: [studentId, jobId],
+        },
         // Denial status
-        query(
-            `SELECT denial_id, denial_reason, denied_at
+        {
+            text: `SELECT denial_id, denial_reason, denied_at
              FROM application_denials
              WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
-            [studentId, jobId]
-        ),
+            params: [studentId, jobId],
+        },
         // Total applications count
-        query(
-            `SELECT COUNT(*) AS total FROM student_applications
+        {
+            text: `SELECT COUNT(*) AS total FROM student_applications
              WHERE job_id = $1`,
-            [jobId]
-        ),
-    ]);
+            params: [jobId],
+        },
+    ], 3);
 
     const criteria = criteriaResult.rows[0] || null;
 

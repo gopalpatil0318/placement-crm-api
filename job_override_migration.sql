@@ -19,7 +19,11 @@ UPDATE job_postings SET passout_years = ARRAY[passout_year];
 -- 1c. Make it NOT NULL after backfill
 ALTER TABLE job_postings ALTER COLUMN passout_years SET NOT NULL;
 
--- 1d. Drop old column
+-- 1d. Drop dependent views first (Step 6 recreates them with passout_years)
+DROP VIEW IF EXISTS v_company_application_stats;
+DROP VIEW IF EXISTS v_company_interview_questions;
+
+-- 1e. Drop old column
 ALTER TABLE job_postings DROP COLUMN passout_year;
 
 -- 1e. Drop the old B-Tree index and create a GIN index for array containment queries

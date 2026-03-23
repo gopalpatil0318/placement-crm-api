@@ -11,6 +11,7 @@
  */
 
 const { query, getClient } = require('../../config/db');
+const chunkedQuery = require('../../utils/chunkedQuery');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -381,43 +382,43 @@ async function getJobById(jobId, collegeId) {
         throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_FOUND), { status: 404 });
     }
 
-    // 2. Parallel fetch all related data
-    const [positionsRes, criteriaRes, roundsRes, questionsRes, applicationsCountRes] = await Promise.all([
-        query(
-            `SELECT * FROM job_positions
+    // 2. Fetch all related data — chunked to max 3 connections at a time
+    const [positionsRes, criteriaRes, roundsRes, questionsRes, applicationsCountRes] = await chunkedQuery([
+        {
+            text: `SELECT * FROM job_positions
              WHERE job_id = $1
              ORDER BY created_at ASC`,
-            [jobId]
-        ),
-        query(
-            `SELECT * FROM job_eligibility_criteria
+            params: [jobId],
+        },
+        {
+            text: `SELECT * FROM job_eligibility_criteria
              WHERE job_id = $1
              LIMIT 1`,
-            [jobId]
-        ),
-        query(
-            `SELECT * FROM job_rounds
+            params: [jobId],
+        },
+        {
+            text: `SELECT * FROM job_rounds
              WHERE job_id = $1
              ORDER BY round_number ASC`,
-            [jobId]
-        ),
-        query(
-            `SELECT * FROM application_questions
+            params: [jobId],
+        },
+        {
+            text: `SELECT * FROM application_questions
              WHERE job_id = $1
              ORDER BY question_order ASC`,
-            [jobId]
-        ),
-        query(
-            `SELECT COUNT(*) AS total,
+            params: [jobId],
+        },
+        {
+            text: `SELECT COUNT(*) AS total,
                     SUM(CASE WHEN application_status = 'pending' THEN 1 ELSE 0 END) AS pending,
                     SUM(CASE WHEN application_status = 'shortlisted' THEN 1 ELSE 0 END) AS shortlisted,
                     SUM(CASE WHEN application_status = 'selected' THEN 1 ELSE 0 END) AS selected,
                     SUM(CASE WHEN application_status = 'rejected' THEN 1 ELSE 0 END) AS rejected
              FROM student_applications
              WHERE job_id = $1 AND college_id = $2`,
-            [jobId, collegeId]
-        ),
-    ]);
+            params: [jobId, collegeId],
+        },
+    ], 3);
 
     const job = jobResult.rows[0];
     const appStats = applicationsCountRes.rows[0];

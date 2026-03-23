@@ -60,10 +60,10 @@ const config = Object.freeze({
   // Database
   databaseUrl: process.env.DATABASE_URL,
 
-  // DB Pool
-  dbPoolMin: parseIntSafe(process.env.DB_POOL_MIN, 2),
-  dbPoolMax: parseIntSafe(process.env.DB_POOL_MAX, 20),
-  dbIdleTimeout: parseIntSafe(process.env.DB_IDLE_TIMEOUT, 30000),
+  // DB Pool (defaults tuned for transaction-mode pooler + PaaS multi-instance)
+  dbPoolMin: parseIntSafe(process.env.DB_POOL_MIN, 1),
+  dbPoolMax: parseIntSafe(process.env.DB_POOL_MAX, 5),
+  dbIdleTimeout: parseIntSafe(process.env.DB_IDLE_TIMEOUT, 10000),
   dbConnectionTimeout: parseIntSafe(process.env.DB_CONNECTION_TIMEOUT, 10000),
   dbQueryTimeout: parseIntSafe(process.env.DB_QUERY_TIMEOUT, 30000),
 

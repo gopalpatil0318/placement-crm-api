@@ -172,7 +172,7 @@ async function browseInterviewQuestions(collegeId, filters) {
          iq.created_at,
          co.company_name,
          jp.job_title,
-         jp.passout_year
+         jp.passout_years[1] AS passout_year
        FROM interview_questions iq
        JOIN companies co ON iq.company_id = co.company_id
        JOIN job_postings jp ON iq.job_id = jp.job_id

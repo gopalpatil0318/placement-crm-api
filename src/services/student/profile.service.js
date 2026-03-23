@@ -12,6 +12,7 @@
  */
 
 const { query } = require('../../config/db');
+const chunkedQuery = require('../../utils/chunkedQuery');
 const logger = require('../../config/logger');
 const {
     LOG,
@@ -51,7 +52,8 @@ async function getBasicInfo(studentId, collegeId) {
 // ============================================================================
 
 async function getFullProfile(studentId, collegeId) {
-    // Fire ALL queries in parallel — reduces ~500ms → ~80-100ms
+    // Chunked parallelism — max 3 connections at a time instead of 12
+    // Prevents pool exhaustion under high concurrency (10L+ students)
     const [
         studentResult,
         personalResult,
@@ -65,10 +67,10 @@ async function getFullProfile(studentId, collegeId) {
         activitiesResult,
         profileLinksResult,
         verificationCountsResult,
-    ] = await Promise.all([
+    ] = await chunkedQuery([
         // 1. Basic student info + department
-        query(
-            `SELECT
+        {
+            text: `SELECT
                s.student_id, s.first_name, s.middle_name, s.last_name,
                s.student_email, s.dept_id, s.college_id,
                s.student_passout_year, s.current_year,
@@ -80,12 +82,12 @@ async function getFullProfile(studentId, collegeId) {
              JOIN colleges c ON s.college_id = c.college_id
              WHERE s.student_id = $1 AND s.college_id = $2
              LIMIT 1`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 2. Personal information
-        query(
-            `SELECT
+        {
+            text: `SELECT
                mobile_number, alternate_mobile, birth_date, gender, blood_group,
                aadhaar_number, caste, category, nationality,
                father_name, father_mobile, father_occupation, father_annual_income,
@@ -98,12 +100,12 @@ async function getFullProfile(studentId, collegeId) {
              FROM student_personal_information
              WHERE student_id = $1 AND college_id = $2
              LIMIT 1`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 3. Academic information
-        query(
-            `SELECT
+        {
+            text: `SELECT
                roll_number, enrollment_number, admission_year, admission_based_on,
                tenth_percentage, tenth_board, tenth_passing_year,
                twelfth_or_diploma, twelfth_percentage, twelfth_board,
@@ -113,35 +115,35 @@ async function getFullProfile(studentId, collegeId) {
              FROM student_academic_information
              WHERE student_id = $1 AND college_id = $2
              LIMIT 1`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 4. Semester grades
-        query(
-            `SELECT
+        {
+            text: `SELECT
                semester_number, academic_year, sgpa, cgpa,
                backlogs_in_semester, backlog_subjects, semester_status
              FROM student_semester_grades
              WHERE student_id = $1 AND college_id = $2
              ORDER BY semester_number ASC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 5. Skills (join with skills table for name)
-        query(
-            `SELECT
+        {
+            text: `SELECT
                ss.student_skill_id, ss.skill_id, ss.proficiency_level,
                sk.skill_name, sk.skill_category
              FROM student_skills ss
              JOIN skills sk ON ss.skill_id = sk.skill_id
              WHERE ss.student_id = $1 AND ss.college_id = $2
              ORDER BY sk.skill_name ASC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 6. Projects
-        query(
-            `SELECT
+        {
+            text: `SELECT
                project_id, project_title, project_description, project_type,
                project_url, github_link, demo_link, technologies_used,
                start_date, end_date, is_ongoing, team_size,
@@ -149,12 +151,12 @@ async function getFullProfile(studentId, collegeId) {
              FROM student_projects
              WHERE student_id = $1 AND college_id = $2
              ORDER BY display_order ASC NULLS LAST, created_at DESC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 7. Experience (approved only for profile view)
-        query(
-            `SELECT
+        {
+            text: `SELECT
                experience_id, company_name, company_website, position_title,
                employment_type, job_description, responsibilities,
                technologies_used, work_location, work_mode,
@@ -165,12 +167,12 @@ async function getFullProfile(studentId, collegeId) {
              WHERE student_id = $1 AND college_id = $2
                AND verification_status = 'approved'
              ORDER BY start_date DESC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 8. Achievements (approved only for profile view)
-        query(
-            `SELECT
+        {
+            text: `SELECT
                achievement_id, achievement_title, achievement_description,
                achievement_type, issuing_organization, event_name,
                achievement_level, position_rank, participants_count,
@@ -180,12 +182,12 @@ async function getFullProfile(studentId, collegeId) {
              WHERE student_id = $1 AND college_id = $2
                AND verification_status = 'approved'
              ORDER BY display_order ASC NULLS LAST, achievement_date DESC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 9. Certificates (approved only for profile view)
-        query(
-            `SELECT
+        {
+            text: `SELECT
                certificate_id, certificate_name, certificate_description,
                certificate_type, issuing_organization, issuing_platform,
                credential_id, credential_url, issue_date, expiry_date,
@@ -194,12 +196,12 @@ async function getFullProfile(studentId, collegeId) {
              WHERE student_id = $1 AND college_id = $2
                AND verification_status = 'approved'
              ORDER BY issue_date DESC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 10. Extra-curricular activities
-        query(
-            `SELECT
+        {
+            text: `SELECT
                activity_id, activity_name, activity_description,
                activity_type, organizing_body, role_position,
                start_date, end_date, is_ongoing, hours_contributed,
@@ -207,12 +209,12 @@ async function getFullProfile(studentId, collegeId) {
              FROM student_activities
              WHERE student_id = $1 AND college_id = $2
              ORDER BY start_date DESC`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 11. Profile links
-        query(
-            `SELECT
+        {
+            text: `SELECT
                personal_portfolio_url, resume_url, profile_image_url,
                github_url, linkedin_url, leetcode_url, codechef_url,
                codeforces_url, hackerrank_url, geeksforgeeks_url,
@@ -220,12 +222,12 @@ async function getFullProfile(studentId, collegeId) {
              FROM student_profile_links
              WHERE student_id = $1 AND college_id = $2
              LIMIT 1`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
 
         // 12. Verification counts (pending/rejected) for summary badges
-        query(
-            `SELECT
+        {
+            text: `SELECT
                (SELECT COUNT(*) FROM student_experience
                 WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS exp_pending,
                (SELECT COUNT(*) FROM student_experience
@@ -238,9 +240,9 @@ async function getFullProfile(studentId, collegeId) {
                 WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS cert_pending,
                (SELECT COUNT(*) FROM student_certificates
                 WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS cert_rejected`,
-            [studentId, collegeId]
-        ),
-    ]);
+            params: [studentId, collegeId],
+        },
+    ], 3);
 
     // Check student exists
     if (!studentResult.rows.length) {
@@ -293,7 +295,7 @@ async function getFullProfile(studentId, collegeId) {
 // ============================================================================
 
 async function getProfileCompletion(studentId, collegeId) {
-    // Parallel COUNT queries — very fast
+    // Chunked COUNT queries — max 3 connections at a time
     const [
         personalResult,
         academicResult,
@@ -303,57 +305,57 @@ async function getProfileCompletion(studentId, collegeId) {
         projectsResult,
         experienceResult,
         certificatesResult,
-    ] = await Promise.all([
-        query(
-            `SELECT COUNT(*) AS cnt,
+    ] = await chunkedQuery([
+        {
+            text: `SELECT COUNT(*) AS cnt,
                     COUNT(mobile_number) + COUNT(birth_date) + COUNT(gender) +
                     COUNT(father_name) + COUNT(permanent_address) AS filled_fields
              FROM student_personal_information
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt,
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt,
                     COUNT(roll_number) + COUNT(tenth_percentage) +
                     COUNT(overall_cgpa) AS filled_fields
              FROM student_academic_information
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt FROM student_semester_grades
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt FROM student_semester_grades
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt FROM student_skills
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt FROM student_skills
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt,
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt,
                     COUNT(resume_url) + COUNT(linkedin_url) +
                     COUNT(github_url) AS filled_fields
              FROM student_profile_links
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt FROM student_projects
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt FROM student_projects
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt FROM student_experience
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt FROM student_experience
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT COUNT(*) AS cnt FROM student_certificates
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT COUNT(*) AS cnt FROM student_certificates
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-    ]);
+            params: [studentId, collegeId],
+        },
+    ], 3);
 
     const completion = calculateProfileCompletion({
         personal: parseInt(personalResult.rows[0].cnt) > 0 && parseInt(personalResult.rows[0].filled_fields) >= 5

@@ -30,6 +30,9 @@ const mainPool = new Pool({
   idleTimeoutMillis: config.dbIdleTimeout,
   connectionTimeoutMillis: config.dbConnectionTimeout,
   statement_timeout: config.dbQueryTimeout,
+  // Disable prepared statements — required for Supabase transaction-mode pooler (PgBouncer)
+  // Transaction mode rotates server connections per query, so named statements would fail
+  allowExitOnIdle: true,
 });
 
 // Pool lifecycle logging
@@ -49,10 +52,43 @@ mainPool.on('remove', () => {
 });
 
 // ============================================================================
+// POOL STATS MONITORING — Log every 60s as early warning for exhaustion
+// ============================================================================
+
+const POOL_STATS_INTERVAL_MS = 60_000;
+
+const poolStatsInterval = setInterval(() => {
+  const stats = {
+    total: mainPool.totalCount || 0,
+    idle: mainPool.idleCount || 0,
+    waiting: mainPool.waitingCount || 0,
+  };
+  const level = stats.waiting > 0 ? 'warn' : 'debug';
+  logger[level](`${LOG.DB_QUERY} Pool stats`, stats);
+}, POOL_STATS_INTERVAL_MS);
+
+// Don't let the interval prevent Node.js from exiting
+poolStatsInterval.unref();
+
+// ============================================================================
 // SLOW QUERY THRESHOLD (ms)
 // ============================================================================
 
 const SLOW_QUERY_THRESHOLD = 500;
+
+/**
+ * Detect pool/connection exhaustion errors from pg or PgBouncer.
+ */
+function isPoolExhaustedError(err) {
+  const msg = (err.message || '').toLowerCase();
+  return (
+    msg.includes('max client') ||
+    msg.includes('connection timeout') ||
+    msg.includes('too many connections') ||
+    msg.includes('remaining connection slots are reserved') ||
+    err.code === '53300' // PostgreSQL: too_many_connections
+  );
+}
 
 // ============================================================================
 // query() — Convenience wrapper with slow-query logging
@@ -91,6 +127,14 @@ async function query(text, params) {
       error: err.message,
       code: err.code,
     });
+
+    // Pool exhaustion → 503 Service Unavailable instead of generic 500
+    if (isPoolExhaustedError(err)) {
+      const poolErr = new Error('Server is busy. Please try again shortly.');
+      poolErr.status = 503;
+      throw poolErr;
+    }
+
     throw err;
   }
 }
@@ -119,8 +163,17 @@ function getMainPool() {
  * @returns {Promise<import('pg').PoolClient>}
  */
 async function getClient() {
-  const client = await mainPool.connect();
-  return client;
+  try {
+    const client = await mainPool.connect();
+    return client;
+  } catch (err) {
+    if (isPoolExhaustedError(err)) {
+      const poolErr = new Error('Server is busy. Please try again shortly.');
+      poolErr.status = 503;
+      throw poolErr;
+    }
+    throw err;
+  }
 }
 
 // ============================================================================
@@ -129,6 +182,7 @@ async function getClient() {
 
 async function closeAllPools() {
   logger.info(`${LOG.SHUTDOWN} Closing database connection pool...`);
+  clearInterval(poolStatsInterval);
   try {
     await mainPool.end();
     logger.info(`${LOG.SHUTDOWN} Database pool closed successfully`);

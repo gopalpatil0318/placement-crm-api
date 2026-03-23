@@ -14,6 +14,7 @@
  */
 
 const { query, getClient } = require('../../config/db');
+const chunkedQuery = require('../../utils/chunkedQuery');
 const { hashPassword } = require('../../utils/passwordHelper');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
@@ -426,7 +427,7 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
     // Build verification filter — only filter when not in review mode
     const verificationFilter = review ? '' : "AND verification_status = 'approved'";
 
-    // 2. Parallel queries for all related tables
+    // 2. Chunked queries for all related tables — max 3 connections at a time
     const [
         personalInfo,
         academicInfo,
@@ -439,69 +440,69 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
         activities,
         profileLinks,
         verificationCounts,
-    ] = await Promise.all([
-        query(
-            `SELECT * FROM student_personal_information
+    ] = await chunkedQuery([
+        {
+            text: `SELECT * FROM student_personal_information
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_academic_information
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_academic_information
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_semester_grades
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_semester_grades
              WHERE student_id = $1 AND college_id = $2
              ORDER BY semester_number ASC`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT ss.*, sk.skill_name, sk.skill_category
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT ss.*, sk.skill_name, sk.skill_category
              FROM student_skills ss
              JOIN skills sk ON ss.skill_id = sk.skill_id
              WHERE ss.student_id = $1 AND ss.college_id = $2
              ORDER BY sk.skill_name`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_projects
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_projects
              WHERE student_id = $1 AND college_id = $2
              ORDER BY display_order, created_at DESC`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_experience
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_experience
              WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
              ORDER BY start_date DESC`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_achievements
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_achievements
              WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
              ORDER BY display_order, achievement_date DESC`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_certificates
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_certificates
              WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
              ORDER BY issue_date DESC`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_activities
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_activities
              WHERE student_id = $1 AND college_id = $2
              ORDER BY start_date DESC`,
-            [studentId, collegeId]
-        ),
-        query(
-            `SELECT * FROM student_profile_links
+            params: [studentId, collegeId],
+        },
+        {
+            text: `SELECT * FROM student_profile_links
              WHERE student_id = $1 AND college_id = $2`,
-            [studentId, collegeId]
-        ),
+            params: [studentId, collegeId],
+        },
         // Verification counts for summary badges
-        query(
-            `SELECT
+        {
+            text: `SELECT
                (SELECT COUNT(*) FROM student_experience
                 WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS exp_pending,
                (SELECT COUNT(*) FROM student_experience
@@ -514,11 +515,14 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
                 WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS cert_pending,
                (SELECT COUNT(*) FROM student_certificates
                 WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS cert_rejected`,
-            [studentId, collegeId]
-        ),
-    ]);
+            params: [studentId, collegeId],
+        },
+    ], 3);
 
     logger.debug(`${LOG.AUTH} Full profile fetched for student`, { studentId, collegeId, review });
+
+    // Build verification summary
+    const vc = verificationCounts.rows[0];
 
     // 3. Calculate profile completion percentage
     // Use total counts (all statuses) for experience — prevents completion from dropping when items are pending
@@ -550,8 +554,7 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
 
     const profile_completion_percentage = Math.round((earnedWeight / totalWeight) * 100);
 
-    // Build verification summary
-    const vc = verificationCounts.rows[0];
+    // Verification summary for badges
     const verification_summary = {
         experience: { pending: vc.exp_pending, rejected: vc.exp_rejected },
         achievements: { pending: vc.ach_pending, rejected: vc.ach_rejected },
