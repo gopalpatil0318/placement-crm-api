@@ -36,8 +36,9 @@ const {
     enrollmentIdParamSchema,
 } = require('../../validators/college/training.validator');
 
-// All training routes require COLLEGEADMIN or TPO
+// All training routes require COLLEGEADMIN or TPO + rate limiting
 router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+router.use(apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -46,7 +47,6 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 // #89 — Create training program
 router.post(
     '/create_training_program',
-    apiLimiter,
     validate(createTrainingSchema),
     asyncHandler(controller.createTrainingProgram)
 );
@@ -68,7 +68,6 @@ router.get(
 // #92 — Update training program
 router.put(
     '/update_training_program/:programId',
-    apiLimiter,
     validate(programIdParamSchema, 'params'),
     validate(updateTrainingSchema),
     asyncHandler(controller.updateTrainingProgram)
@@ -77,7 +76,6 @@ router.put(
 // #93 — Toggle training status
 router.patch(
     '/toggle_training_status/:programId',
-    apiLimiter,
     validate(programIdParamSchema, 'params'),
     validate(toggleTrainingStatusSchema),
     asyncHandler(controller.toggleTrainingStatus)
@@ -94,7 +92,6 @@ router.get(
 // #95 — Update enrollment
 router.patch(
     '/update_enrollment/:enrollmentId',
-    apiLimiter,
     validate(enrollmentIdParamSchema, 'params'),
     validate(updateEnrollmentSchema),
     asyncHandler(controller.updateEnrollment)

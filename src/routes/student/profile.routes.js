@@ -19,8 +19,6 @@ const router = express.Router();
 const controller = require('../../controllers/student/profile.controller');
 const { authenticate } = require('../../middleware/authMiddleware');
 const asyncHandler = require('../../utils/asyncHandler');
-const { apiLimiter } = require('../../config/rateLimiter');
-
 // ============================================================================
 // PROFILE ROUTES
 // ============================================================================
@@ -29,7 +27,6 @@ const { apiLimiter } = require('../../config/rateLimiter');
 router.get(
     '/get_basic_info',
     authenticate,
-    apiLimiter,
     asyncHandler(controller.getBasicInfo)
 );
 
@@ -37,7 +34,6 @@ router.get(
 router.get(
     '/get_full_profile',
     authenticate,
-    apiLimiter,
     asyncHandler(controller.getFullProfile)
 );
 
@@ -45,7 +41,6 @@ router.get(
 router.get(
     '/get_profile_completion',
     authenticate,
-    apiLimiter,
     asyncHandler(controller.getProfileCompletion)
 );
 

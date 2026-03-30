@@ -11,12 +11,7 @@
  */
 
 const Joi = require('joi');
-
-// Valid program types (matching DB CHECK constraint)
-const PROGRAM_TYPES = [
-    'aptitude', 'coding', 'soft_skills', 'interview_prep',
-    'resume_building', 'technical', 'group_discussion', 'other',
-];
+const { TRAINING_PROGRAM_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // GET /get_available_training — Query params
@@ -24,13 +19,14 @@ const PROGRAM_TYPES = [
 
 const listAvailableTrainingsSchema = Joi.object({
     program_type: Joi.string()
-        .valid(...PROGRAM_TYPES)
+        .valid(...TRAINING_PROGRAM_TYPES)
         .optional()
         .messages({
-            'any.only': `Program type must be one of: ${PROGRAM_TYPES.join(', ')}`,
+            'any.only': `Program type must be one of: ${TRAINING_PROGRAM_TYPES.join(', ')}`,
         }),
 
     search: Joi.string()
+        .trim()
         .max(100)
         .optional()
         .messages({

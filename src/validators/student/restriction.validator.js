@@ -9,6 +9,7 @@
  */
 
 const Joi = require('joi');
+const { RESTRICTION_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // GET /get_my_restrictions — Query params
@@ -16,9 +17,9 @@ const Joi = require('joi');
 
 const listMyRestrictionsSchema = Joi.object({
     // Filters
-    is_active: Joi.string().valid('true', 'false').optional(),
+    is_active: Joi.boolean().optional(),
     restriction_type: Joi.string()
-        .valid('bar_from_placements', 'bar_from_company', 'probation', 'warning', 'temporary_suspension')
+        .valid(...RESTRICTION_TYPES)
         .optional(),
 
     // Sorting
@@ -38,7 +39,7 @@ const listMyRestrictionsSchema = Joi.object({
 // ============================================================================
 
 const appealRestrictionSchema = Joi.object({
-    appeal_notes: Joi.string().min(10).max(2000).required().messages({
+    appeal_notes: Joi.string().trim().min(10).max(2000).required().messages({
         'string.empty': 'Appeal notes are required',
         'string.min': 'Appeal notes must be at least 10 characters — please explain your appeal clearly',
         'any.required': 'Appeal notes are required',

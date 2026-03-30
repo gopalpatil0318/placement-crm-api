@@ -35,7 +35,7 @@ async function getMyPlacements(req, res) {
         { placements, status_summary },
         total,
         { page, limit },
-        'Placement records retrieved successfully'
+        SUCCESS_MESSAGES.PLACEMENTS_RETRIEVED
     );
 }
 

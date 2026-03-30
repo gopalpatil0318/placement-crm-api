@@ -10,7 +10,7 @@
  */
 
 const Joi = require('joi');
-const { STATUS } = require('../../config/constants');
+const { STATUS, ROLES } = require('../../config/constants');
 
 // All 13 notification types from schema CHECK constraint
 const NOTIFICATION_TYPES = Object.values(STATUS.NOTIFICATION_TYPE);
@@ -46,6 +46,7 @@ const sendNotificationSchema = Joi.object({
         }),
 
     title: Joi.string()
+        .trim()
         .min(2)
         .max(200)
         .required()
@@ -56,6 +57,7 @@ const sendNotificationSchema = Joi.object({
         }),
 
     body: Joi.string()
+        .trim()
         .max(3000)
         .allow(null, '')
         .optional()
@@ -94,6 +96,7 @@ const sendNotificationSchema = Joi.object({
 
 const sendBulkNotificationSchema = Joi.object({
     title: Joi.string()
+        .trim()
         .min(2)
         .max(200)
         .required()
@@ -104,6 +107,7 @@ const sendBulkNotificationSchema = Joi.object({
         }),
 
     body: Joi.string()
+        .trim()
         .max(3000)
         .allow(null, '')
         .optional()
@@ -173,7 +177,7 @@ const sendBulkNotificationSchema = Joi.object({
 
         // User-specific filters
         user_roles: Joi.array()
-            .items(Joi.string().valid('collegeadmin', 'tpo', 'hod', 'teacher', 'tpc'))
+            .items(Joi.string().valid(...Object.values(ROLES).filter(r => r !== ROLES.SYSADMIN)))
             .optional()
             .messages({
                 'any.only': 'Invalid user role specified',
@@ -210,6 +214,7 @@ const listSentNotificationsSchema = Joi.object({
         .optional(),
 
     search: Joi.string()
+        .trim()
         .max(100)
         .optional()
         .messages({

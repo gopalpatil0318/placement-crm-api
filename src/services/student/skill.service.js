@@ -188,6 +188,20 @@ async function syncMySkills(studentId, collegeId, incomingSkills) {
             );
         }
 
+        // Auto-reset profile approval when student changes skills
+        if (toAdd.length > 0 || toUpdate.length > 0 || toRemove.length > 0) {
+            await client.query(
+                `UPDATE students
+                 SET profile_approval_status = 'pending', profile_is_approved = false,
+                     approved_by = NULL, approved_at = NULL,
+                     profile_rejection_reason = NULL, rejected_at = NULL,
+                     updated_at = NOW()
+                 WHERE student_id = $1 AND college_id = $2
+                   AND profile_approval_status != 'pending'`,
+                [studentId, collegeId]
+            );
+        }
+
         await client.query('COMMIT');
 
         logger.info(`${LOG.TRANSACTION} Student skills synced`, {

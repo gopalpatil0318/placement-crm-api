@@ -12,6 +12,7 @@ const positionService = require('../../services/college/jobPosition.service');
 const { sendSuccess, sendCreated, sendError } = require('../../utils/responseHelper');
 const {
     ERROR_MESSAGES,
+    SUCCESS_MESSAGES,
     HTTP_STATUS,
 } = require('../../config/constants');
 
@@ -27,7 +28,7 @@ async function addPosition(req, res) {
             req.validated
         );
 
-        return sendCreated(res, result, 'Position added successfully');
+        return sendCreated(res, result, SUCCESS_MESSAGES.POSITION_ADDED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -48,7 +49,7 @@ async function updatePosition(req, res) {
             req.validated
         );
 
-        return sendSuccess(res, result, 'Position updated successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.POSITION_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -72,12 +73,12 @@ async function updatePositionStatus(req, res) {
         );
 
         const statusMessages = {
-            active: 'Position activated successfully',
-            inactive: 'Position deactivated successfully',
-            filled: 'Position marked as filled',
+            active: SUCCESS_MESSAGES.POSITION_ACTIVATED,
+            inactive: SUCCESS_MESSAGES.POSITION_DEACTIVATED,
+            filled: SUCCESS_MESSAGES.POSITION_FILLED,
         };
 
-        return sendSuccess(res, result, statusMessages[position_status] || 'Position status updated');
+        return sendSuccess(res, result, statusMessages[position_status] || SUCCESS_MESSAGES.STATUS_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);

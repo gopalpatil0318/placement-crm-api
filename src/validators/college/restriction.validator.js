@@ -10,10 +10,7 @@
  */
 
 const Joi = require('joi');
-const { STATUS } = require('../../config/constants');
-
-// Valid restriction types from schema CHECK constraint
-const VALID_RESTRICTION_TYPES = Object.values(STATUS.RESTRICTION);
+const { RESTRICTION_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // ADD RESTRICTION
@@ -21,10 +18,10 @@ const VALID_RESTRICTION_TYPES = Object.values(STATUS.RESTRICTION);
 
 const addRestrictionSchema = Joi.object({
     restriction_type: Joi.string()
-        .valid(...VALID_RESTRICTION_TYPES)
+        .valid(...RESTRICTION_TYPES)
         .required()
         .messages({
-            'any.only': `Restriction type must be one of: ${VALID_RESTRICTION_TYPES.join(', ')}`,
+            'any.only': `Restriction type must be one of: ${RESTRICTION_TYPES.join(', ')}`,
             'any.required': 'Restriction type is required',
         }),
 
@@ -74,10 +71,10 @@ const listRestrictionsSchema = Joi.object({
         }),
 
     restriction_type: Joi.string()
-        .valid(...VALID_RESTRICTION_TYPES)
+        .valid(...RESTRICTION_TYPES)
         .optional()
         .messages({
-            'any.only': `Restriction type must be one of: ${VALID_RESTRICTION_TYPES.join(', ')}`,
+            'any.only': `Restriction type must be one of: ${RESTRICTION_TYPES.join(', ')}`,
         }),
 
     is_active: Joi.boolean()
@@ -85,6 +82,7 @@ const listRestrictionsSchema = Joi.object({
 
     search: Joi.string()
         .max(100)
+        .trim()
         .optional()
         .messages({
             'string.max': 'Search query cannot exceed 100 characters',

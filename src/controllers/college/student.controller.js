@@ -55,7 +55,7 @@ async function getAllStudents(req, res) {
         req.validated
     );
 
-    return sendPaginated(res, students, total, { page, limit }, 'Students retrieved successfully');
+    return sendPaginated(res, students, total, { page, limit }, SUCCESS_MESSAGES.STUDENTS_RETRIEVED);
 }
 
 // ============================================================================
@@ -68,7 +68,7 @@ async function getStudent(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Student retrieved successfully');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_RETRIEVED);
 }
 
 // ============================================================================
@@ -84,7 +84,7 @@ async function getStudentFullProfile(req, res) {
         review
     );
 
-    return sendSuccess(res, result, 'Student full profile retrieved successfully');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_PROFILE_RETRIEVED);
 }
 
 // ============================================================================
@@ -114,7 +114,7 @@ async function toggleStudentStatus(req, res) {
         student_status
     );
 
-    return sendSuccess(res, result, `Student status updated to ${student_status}`);
+    return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_STATUS_TOGGLED);
 }
 
 // ============================================================================

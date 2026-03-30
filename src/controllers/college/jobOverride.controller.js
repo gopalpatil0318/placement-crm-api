@@ -9,12 +9,17 @@
  * ============================================================================
  */
 
+/**
+ * @type {{
+ *   getJobOverrideRequests: (...args: any[]) => Promise<any>,
+ *   getAllOverrideRequests: (...args: any[]) => Promise<any>,
+ *   reviewOverrideRequest: (...args: any[]) => Promise<any>,
+ *   bulkReviewOverrideRequests: (...args: any[]) => Promise<any>
+ * }}
+ */
 const service = require('../../services/college/jobOverride.service');
-const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
-const {
-    ERROR_MESSAGES,
-    HTTP_STATUS,
-} = require('../../config/constants');
+const { sendSuccess, sendPaginated } = require('../../utils/responseHelper');
+const { SUCCESS_MESSAGES } = require('../../config/constants');
 
 // ============================================================================
 // 1. GET JOB OVERRIDE REQUESTS (for a specific job)
@@ -36,7 +41,7 @@ async function getJobOverrideRequests(req, res) {
         },
         result.total,
         { page: result.page, limit: result.limit },
-        'Job override requests retrieved successfully'
+        SUCCESS_MESSAGES.OVERRIDE_REQUESTS_RETRIEVED
     );
 }
 
@@ -58,7 +63,7 @@ async function getAllOverrideRequests(req, res) {
         },
         result.total,
         { page: result.page, limit: result.limit },
-        'Override requests retrieved successfully'
+        SUCCESS_MESSAGES.ALL_OVERRIDE_REQUESTS_RETRIEVED
     );
 }
 
@@ -67,21 +72,14 @@ async function getAllOverrideRequests(req, res) {
 // ============================================================================
 
 async function reviewOverrideRequest(req, res) {
-    try {
-        const result = await service.reviewOverrideRequest(
-            req.params.overrideId,
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
+    const result = await service.reviewOverrideRequest(
+        req.params.overrideId,
+        req.user.college_id,
+        req.user.id,
+        req.validated
+    );
 
-        return sendSuccess(res, result, `Override request ${result.override_status} successfully`);
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.OVERRIDE_REVIEWED);
 }
 
 // ============================================================================
@@ -89,20 +87,13 @@ async function reviewOverrideRequest(req, res) {
 // ============================================================================
 
 async function bulkReviewOverrides(req, res) {
-    try {
-        const result = await service.bulkReviewOverrideRequests(
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
+    const result = await service.bulkReviewOverrideRequests(
+        req.user.college_id,
+        req.user.id,
+        req.validated
+    );
 
-        const message = `Bulk ${result.action}: ${result.processed} processed, ${result.skipped} skipped (already reviewed)`;
-        return sendSuccess(res, result, message);
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.BULK_OVERRIDE_REVIEWED);
 }
 
 // ============================================================================

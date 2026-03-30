@@ -20,6 +20,34 @@ const {
     STATUS,
 } = require('../../config/constants');
 
+// ============================================================================
+// COLUMN CONSTANTS
+// ============================================================================
+
+const PLACEMENT_VERIFY_COLUMNS = `
+    pr.placement_id, pr.student_id, pr.college_id, pr.company_id, pr.job_id,
+    pr.position_id, pr.application_id,
+    pr.placement_type,
+    pr.fulltime_package, pr.fulltime_designation, pr.fulltime_joining_date,
+    pr.internship_stipend, pr.internship_duration, pr.internship_start_date,
+    pr.offer_letter_url, pr.offer_letter_verified,
+    pr.verified_by, pr.verified_at,
+    pr.placement_status, pr.acceptance_status,
+    pr.passout_year, pr.created_at, pr.updated_at`;
+
+const PLACEMENT_RETURNING_COLUMNS = `
+    placement_id, student_id, college_id, company_id, job_id, position_id, application_id,
+    placement_type,
+    fulltime_package, fulltime_designation, fulltime_joining_date,
+    internship_stipend, internship_duration, internship_start_date,
+    offer_letter_url, offer_letter_verified, verified_by, verified_at,
+    placement_status, acceptance_status,
+    passout_year, created_at, updated_at`;
+
+const APPLICATION_FETCH_COLUMNS = `
+    a.application_id, a.student_id, a.job_id, a.college_id,
+    a.position_id, a.application_status, a.applied_at, a.last_updated_at`;
+
 // Fields that can be updated on a placement record
 const UPDATABLE_FIELDS = [
     'fulltime_package', 'fulltime_designation', 'fulltime_joining_date',
@@ -42,7 +70,7 @@ const STATUS_TRANSITIONS = {
 
 async function verifyPlacement(placementId, collegeId) {
     const result = await query(
-        `SELECT pr.*,
+        `SELECT ${PLACEMENT_VERIFY_COLUMNS},
                 s.first_name, s.last_name, s.student_email,
                 d.dept_name,
                 c.company_name,
@@ -87,7 +115,7 @@ async function createPlacement(collegeId, userId, data) {
     // 1. Fetch application + duplicate check (parallel — both only need application_id)
     const [appResult, duplicateCheck] = await Promise.all([
         query(
-            `SELECT a.*,
+            `SELECT ${APPLICATION_FETCH_COLUMNS},
                     s.first_name, s.last_name, s.student_email, s.student_passout_year,
                     d.dept_name,
                     j.job_title, j.company_id, j.job_status,
@@ -119,28 +147,19 @@ async function createPlacement(collegeId, userId, data) {
 
     // 2. Application must be selected or offered
     if (!['selected', 'offered'].includes(app.application_status)) {
-        throw Object.assign(
-            new Error(`Cannot create placement for an application with status "${app.application_status}". Application must be "selected" or "offered"`),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.APPLICATION_NOT_ELIGIBLE_FOR_PLACEMENT), { status: 400 });
     }
 
     // 3. Check if placement already exists for this application
     if (duplicateCheck.rows.length) {
-        throw Object.assign(
-            new Error('Placement record already exists for this application'),
-            { status: 409 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_DUPLICATE_APPLICATION), { status: 409 });
     }
 
     // 4. Validate fulltime_joining_date is in the future (if provided)
     if (data.fulltime_joining_date) {
         const joinDate = new Date(data.fulltime_joining_date);
         if (joinDate <= new Date()) {
-            throw Object.assign(
-                new Error('Full-time joining date must be in the future'),
-                { status: 400 }
-            );
+            throw Object.assign(new Error(ERROR_MESSAGES.JOINING_DATE_MUST_BE_FUTURE), { status: 400 });
         }
     }
 
@@ -148,10 +167,7 @@ async function createPlacement(collegeId, userId, data) {
     if (data.internship_start_date) {
         const startDate = new Date(data.internship_start_date);
         if (startDate <= new Date()) {
-            throw Object.assign(
-                new Error('Internship start date must be in the future'),
-                { status: 400 }
-            );
+            throw Object.assign(new Error(ERROR_MESSAGES.INTERNSHIP_START_DATE_MUST_BE_FUTURE), { status: 400 });
         }
     }
 
@@ -168,7 +184,7 @@ async function createPlacement(collegeId, userId, data) {
                 internship_stipend, internship_duration, internship_start_date,
                 offer_letter_url, placement_status, acceptance_status, passout_year)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-             RETURNING *`,
+             RETURNING ${PLACEMENT_RETURNING_COLUMNS}`,
             [
                 app.student_id,
                 collegeId,
@@ -330,7 +346,7 @@ async function getAllPlacements(collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT pr.*,
+            `SELECT ${PLACEMENT_VERIFY_COLUMNS},
                     s.first_name, s.last_name, s.student_email,
                     d.dept_name,
                     co.company_name,
@@ -369,7 +385,7 @@ async function getAllPlacements(collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const stats = statsResult.rows[0];
 
@@ -382,10 +398,10 @@ async function getAllPlacements(collegeId, filters = {}) {
             position_id: row.position_id,
             application_id: row.application_id,
             placement_type: row.placement_type,
-            fulltime_package: row.fulltime_package !== null ? parseFloat(row.fulltime_package) : null,
+            fulltime_package: row.fulltime_package !== null ? Number.parseFloat(row.fulltime_package) : null,
             fulltime_designation: row.fulltime_designation,
             fulltime_joining_date: row.fulltime_joining_date,
-            internship_stipend: row.internship_stipend !== null ? parseFloat(row.internship_stipend) : null,
+            internship_stipend: row.internship_stipend !== null ? Number.parseFloat(row.internship_stipend) : null,
             internship_duration: row.internship_duration,
             internship_start_date: row.internship_start_date,
             offer_letter_url: row.offer_letter_url,
@@ -409,18 +425,18 @@ async function getAllPlacements(collegeId, filters = {}) {
         page,
         limit,
         stats: {
-            total_placements: parseInt(stats.total_placements, 10),
-            unique_students: parseInt(stats.unique_students, 10),
-            unique_companies: parseInt(stats.unique_companies, 10),
-            avg_package: stats.avg_package !== null ? Math.round(parseFloat(stats.avg_package) * 100) / 100 : null,
-            highest_package: stats.highest_package !== null ? parseFloat(stats.highest_package) : null,
-            lowest_package: stats.lowest_package !== null ? parseFloat(stats.lowest_package) : null,
-            offered_count: parseInt(stats.offered_count || 0, 10),
-            accepted_count: parseInt(stats.accepted_count || 0, 10),
-            joined_count: parseInt(stats.joined_count || 0, 10),
-            rejected_count: parseInt(stats.rejected_count || 0, 10),
-            cancelled_count: parseInt(stats.cancelled_count || 0, 10),
-            verified_offers: parseInt(stats.verified_offers || 0, 10),
+            total_placements: Number.parseInt(stats.total_placements, 10),
+            unique_students: Number.parseInt(stats.unique_students, 10),
+            unique_companies: Number.parseInt(stats.unique_companies, 10),
+            avg_package: stats.avg_package !== null ? Math.round(Number.parseFloat(stats.avg_package) * 100) / 100 : null,
+            highest_package: stats.highest_package !== null ? Number.parseFloat(stats.highest_package) : null,
+            lowest_package: stats.lowest_package !== null ? Number.parseFloat(stats.lowest_package) : null,
+            offered_count: Number.parseInt(stats.offered_count || 0, 10),
+            accepted_count: Number.parseInt(stats.accepted_count || 0, 10),
+            joined_count: Number.parseInt(stats.joined_count || 0, 10),
+            rejected_count: Number.parseInt(stats.rejected_count || 0, 10),
+            cancelled_count: Number.parseInt(stats.cancelled_count || 0, 10),
+            verified_offers: Number.parseInt(stats.verified_offers || 0, 10),
         },
     };
 }
@@ -470,10 +486,10 @@ async function getPlacement(placementId, collegeId) {
         position_id: placement.position_id,
         application_id: placement.application_id,
         placement_type: placement.placement_type,
-        fulltime_package: placement.fulltime_package !== null ? parseFloat(placement.fulltime_package) : null,
+        fulltime_package: placement.fulltime_package !== null ? Number.parseFloat(placement.fulltime_package) : null,
         fulltime_designation: placement.fulltime_designation,
         fulltime_joining_date: placement.fulltime_joining_date,
-        internship_stipend: placement.internship_stipend !== null ? parseFloat(placement.internship_stipend) : null,
+        internship_stipend: placement.internship_stipend !== null ? Number.parseFloat(placement.internship_stipend) : null,
         internship_duration: placement.internship_duration,
         internship_start_date: placement.internship_start_date,
         offer_letter_url: placement.offer_letter_url,
@@ -504,7 +520,7 @@ async function getPlacement(placementId, collegeId) {
             round_type: row.round_type,
             round_status: row.round_status,
             result_status: row.result_status,
-            score: row.score !== null ? parseFloat(row.score) : null,
+            score: row.score !== null ? Number.parseFloat(row.score) : null,
             remarks: row.remarks ?? null,
             attended: row.attended,
             scheduled_at: row.scheduled_at,
@@ -531,20 +547,14 @@ async function updatePlacement(placementId, collegeId, data) {
 
     // Cannot update terminal statuses
     if ([STATUS.PLACEMENT.CANCELLED, STATUS.PLACEMENT.REJECTED].includes(existing.placement_status)) {
-        throw Object.assign(
-            new Error(`Cannot update a ${existing.placement_status} placement record`),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_NOT_UPDATEABLE), { status: 400 });
     }
 
     // Validate joining date is in the future (if being updated)
     if (data.fulltime_joining_date) {
         const joinDate = new Date(data.fulltime_joining_date);
         if (joinDate <= new Date()) {
-            throw Object.assign(
-                new Error('Full-time joining date must be in the future'),
-                { status: 400 }
-            );
+            throw Object.assign(new Error(ERROR_MESSAGES.JOINING_DATE_MUST_BE_FUTURE), { status: 400 });
         }
     }
 
@@ -552,10 +562,7 @@ async function updatePlacement(placementId, collegeId, data) {
     if (data.internship_start_date) {
         const startDate = new Date(data.internship_start_date);
         if (startDate <= new Date()) {
-            throw Object.assign(
-                new Error('Internship start date must be in the future'),
-                { status: 400 }
-            );
+            throw Object.assign(new Error(ERROR_MESSAGES.INTERNSHIP_START_DATE_MUST_BE_FUTURE), { status: 400 });
         }
     }
 
@@ -563,7 +570,7 @@ async function updatePlacement(placementId, collegeId, data) {
     const fieldsToUpdate = UPDATABLE_FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields provided for update'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
     const setClauses = fieldsToUpdate
@@ -575,7 +582,7 @@ async function updatePlacement(placementId, collegeId, data) {
         `UPDATE placement_results
          SET ${setClauses.join(', ')}
          WHERE placement_id = $1
-         RETURNING *`,
+         RETURNING ${PLACEMENT_RETURNING_COLUMNS}`,
         values
     );
 
@@ -587,8 +594,8 @@ async function updatePlacement(placementId, collegeId, data) {
 
     return {
         ...result.rows[0],
-        fulltime_package: result.rows[0].fulltime_package !== null ? parseFloat(result.rows[0].fulltime_package) : null,
-        internship_stipend: result.rows[0].internship_stipend !== null ? parseFloat(result.rows[0].internship_stipend) : null,
+        fulltime_package: result.rows[0].fulltime_package !== null ? Number.parseFloat(result.rows[0].fulltime_package) : null,
+        internship_stipend: result.rows[0].internship_stipend !== null ? Number.parseFloat(result.rows[0].internship_stipend) : null,
         student_name: `${existing.first_name} ${existing.last_name}`,
         company_name: existing.company_name,
         job_title: existing.job_title,
@@ -614,18 +621,12 @@ async function verifyOfferLetter(placementId, collegeId, userId, verified, remar
 
     // Must have an offer letter URL to verify
     if (verified && !existing.offer_letter_url) {
-        throw Object.assign(
-            new Error('Cannot verify offer letter — no offer letter URL uploaded yet'),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.OFFER_LETTER_NO_URL), { status: 400 });
     }
 
     // Cannot verify for terminal statuses
     if ([STATUS.PLACEMENT.CANCELLED, STATUS.PLACEMENT.REJECTED].includes(existing.placement_status)) {
-        throw Object.assign(
-            new Error(`Cannot verify offer for a ${existing.placement_status} placement`),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.OFFER_LETTER_TERMINAL_STATUS), { status: 400 });
     }
 
     const result = await query(
@@ -635,7 +636,7 @@ async function verifyOfferLetter(placementId, collegeId, userId, verified, remar
              verified_at = $3,
              updated_at = NOW()
          WHERE placement_id = $4
-         RETURNING *`,
+         RETURNING ${PLACEMENT_RETURNING_COLUMNS}`,
         [
             verified,
             verified ? userId : null,
@@ -688,22 +689,13 @@ async function updatePlacementStatus(placementId, collegeId, newStatus, acceptan
 
     // Same status check
     if (currentStatus === newStatus) {
-        throw Object.assign(
-            new Error(`Placement is already "${newStatus}"`),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_ALREADY_STATUS), { status: 400 });
     }
 
     // Validate transition
     const allowedTransitions = STATUS_TRANSITIONS[currentStatus] || [];
     if (!allowedTransitions.includes(newStatus)) {
-        throw Object.assign(
-            new Error(
-                `Cannot change placement status from "${currentStatus}" to "${newStatus}". ` +
-                `Allowed: ${allowedTransitions.length ? allowedTransitions.join(', ') : 'none (terminal state)'}`
-            ),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.INVALID_PLACEMENT_TRANSITION), { status: 400 });
     }
 
     // Auto-set acceptance_status based on placement_status if not explicitly provided
@@ -722,7 +714,7 @@ async function updatePlacementStatus(placementId, collegeId, newStatus, acceptan
              acceptance_status = COALESCE($2, acceptance_status),
              updated_at = NOW()
          WHERE placement_id = $3
-         RETURNING *`,
+         RETURNING ${PLACEMENT_RETURNING_COLUMNS}`,
         [newStatus, effectiveAcceptance, placementId]
     );
 

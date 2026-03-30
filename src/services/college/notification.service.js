@@ -17,6 +17,8 @@ const {
     STATUS,
 } = require('../../config/constants');
 
+const { NOTIFICATION_TYPE, RECIPIENT_TYPE } = STATUS;
+
 // ============================================================================
 // 1. SEND NOTIFICATION (targeted — to specific recipient IDs) — #96
 // ============================================================================
@@ -28,56 +30,68 @@ async function sendNotification(collegeId, userId, data) {
     } = data;
 
     // Validate that recipient IDs actually exist in the college
-    const table = recipient_type === 'student' ? 'students' : 'users';
-    const idCol = recipient_type === 'student' ? 'student_id' : 'user_id';
+    const table = recipient_type === RECIPIENT_TYPE.STUDENT ? 'students' : 'users';
+    const idCol = recipient_type === RECIPIENT_TYPE.STUDENT ? 'student_id' : 'user_id';
 
-    const validResult = await query(
-        `SELECT ${idCol} AS id FROM ${table}
-         WHERE ${idCol} = ANY($1) AND college_id = $2`,
-        [recipient_ids, collegeId]
-    );
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    const validIds = validResult.rows.map(r => r.id);
-    const invalidCount = recipient_ids.length - validIds.length;
-
-    if (validIds.length === 0) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.NO_RECIPIENTS_FOUND),
-            { status: 400 }
+        const validResult = await client.query(
+            `SELECT ${idCol} AS id FROM ${table}
+             WHERE ${idCol} = ANY($1) AND college_id = $2`,
+            [recipient_ids, collegeId]
         );
-    }
 
-    // Batch insert using UNNEST
-    const insertResult = await query(
-        `INSERT INTO notifications
-            (college_id, recipient_type, recipient_id, title, body,
-             notification_type, related_entity_type, related_entity_id)
-         SELECT $1, $2, rid, $3, $4, $5, $6, $7
-         FROM UNNEST($8::uuid[]) AS rid`,
-        [
-            collegeId, recipient_type, title.trim(),
-            body ? body.trim() : null,
+        const validIds = validResult.rows.map(r => r.id);
+        const invalidCount = recipient_ids.length - validIds.length;
+
+        if (validIds.length === 0) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.NO_RECIPIENTS_FOUND),
+                { status: 400 }
+            );
+        }
+
+        // Batch insert using UNNEST
+        const insertResult = await client.query(
+            `INSERT INTO notifications
+                (college_id, recipient_type, recipient_id, title, body,
+                 notification_type, related_entity_type, related_entity_id)
+             SELECT $1, $2, rid, $3, $4, $5, $6, $7
+             FROM UNNEST($8::uuid[]) AS rid`,
+            [
+                collegeId, recipient_type, title.trim(),
+                body ? body.trim() : null,
+                notification_type,
+                related_entity_type || null,
+                related_entity_id || null,
+                validIds,
+            ]
+        );
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.TRANSACTION} Notifications sent`, {
+            college_id: collegeId,
+            sent_by: userId,
+            type: notification_type,
+            sent_count: insertResult.rowCount,
+            invalid_count: invalidCount,
+        });
+
+        return {
+            sent_count: insertResult.rowCount,
+            invalid_count: invalidCount,
             notification_type,
-            related_entity_type || null,
-            related_entity_id || null,
-            validIds,
-        ]
-    );
-
-    logger.info(`${LOG.TRANSACTION} Notifications sent`, {
-        college_id: collegeId,
-        sent_by: userId,
-        type: notification_type,
-        sent_count: insertResult.rowCount,
-        invalid_count: invalidCount,
-    });
-
-    return {
-        sent_count: insertResult.rowCount,
-        invalid_count: invalidCount,
-        notification_type,
-        recipient_type,
-    };
+            recipient_type,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 // ============================================================================
@@ -95,7 +109,7 @@ async function sendBulkNotification(collegeId, userId, data) {
 
     // Build target recipient list based on filters
     let targetIds;
-    if (recipient_type === 'student') {
+    if (recipient_type === RECIPIENT_TYPE.STUDENT) {
         targetIds = await getFilteredStudentIds(collegeId, filters);
     } else {
         targetIds = await getFilteredUserIds(collegeId, filters);
@@ -115,20 +129,6 @@ async function sendBulkNotification(collegeId, userId, data) {
 
     try {
         await client.query('BEGIN');
-
-        // Count already-notified recipients (same type + entity combo)
-        if (related_entity_id) {
-            const existingResult = await client.query(
-                `SELECT COUNT(*) AS cnt FROM notifications
-                 WHERE college_id = $1
-                   AND recipient_type = $2
-                   AND recipient_id = ANY($3)
-                   AND notification_type = $4
-                   AND related_entity_id = $5`,
-                [collegeId, recipient_type, targetIds, notification_type, related_entity_id]
-            );
-            skippedCount = parseInt(existingResult.rows[0].cnt, 10);
-        }
 
         // Insert with dedup when related_entity_id is present
         let insertResult;
@@ -156,6 +156,8 @@ async function sendBulkNotification(collegeId, userId, data) {
                     targetIds,
                 ]
             );
+            // Derive skipped count from INSERT result — no separate pre-count needed
+            skippedCount = targetIds.length - insertResult.rowCount;
         } else {
             // No entity reference — always insert (e.g., general announcements)
             insertResult = await client.query(
@@ -286,7 +288,9 @@ async function getFilteredUserIds(collegeId, filters) {
     }
 
     // Only active users
-    conditions.push(`u.user_status = 'active'`);
+    conditions.push(`u.user_status = $${paramIndex}`);
+    params.push(STATUS.USER.ACTIVE);
+    paramIndex++;
 
     const whereClause = conditions.join(' AND ');
     const result = await query(
@@ -323,11 +327,11 @@ async function getSentNotifications(collegeId, filters = {}) {
     }
 
     // Filter: search (title or body)
-    if (filters.search) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(n.title ILIKE $${paramIndex} OR n.body ILIKE $${paramIndex})`
         );
-        params.push(`%${filters.search}%`);
+        params.push(`%${filters.search.trim()}%`);
         paramIndex++;
     }
 
@@ -394,20 +398,29 @@ async function getSentNotifications(collegeId, filters = {}) {
                  COUNT(DISTINCT recipient_id) AS unique_recipients,
                  COUNT(*) FILTER (WHERE is_read = true) AS total_read,
                  COUNT(*) FILTER (WHERE is_read = false) AS total_unread,
-                 COUNT(*) FILTER (WHERE notification_type = 'general') AS general_count,
-                 COUNT(*) FILTER (WHERE notification_type = 'new_job_posted') AS job_posted_count,
-                 COUNT(*) FILTER (WHERE notification_type = 'deadline_reminder') AS deadline_reminder_count,
-                 COUNT(*) FILTER (WHERE notification_type = 'round_result') AS round_result_count,
-                 COUNT(*) FILTER (WHERE notification_type = 'offer_received') AS offer_received_count,
-                 COUNT(*) FILTER (WHERE notification_type = 'restriction_applied') AS restriction_count,
-                 COUNT(*) FILTER (WHERE notification_type = 'training_enrollment') AS training_count
+                 COUNT(*) FILTER (WHERE notification_type = $2) AS general_count,
+                 COUNT(*) FILTER (WHERE notification_type = $3) AS job_posted_count,
+                 COUNT(*) FILTER (WHERE notification_type = $4) AS deadline_reminder_count,
+                 COUNT(*) FILTER (WHERE notification_type = $5) AS round_result_count,
+                 COUNT(*) FILTER (WHERE notification_type = $6) AS offer_received_count,
+                 COUNT(*) FILTER (WHERE notification_type = $7) AS restriction_count,
+                 COUNT(*) FILTER (WHERE notification_type = $8) AS training_count
              FROM notifications
              WHERE college_id = $1`,
-            [collegeId]
+            [
+                collegeId,
+                NOTIFICATION_TYPE.GENERAL,
+                NOTIFICATION_TYPE.NEW_JOB_POSTED,
+                NOTIFICATION_TYPE.DEADLINE_REMINDER,
+                NOTIFICATION_TYPE.ROUND_RESULT,
+                NOTIFICATION_TYPE.OFFER_RECEIVED,
+                NOTIFICATION_TYPE.RESTRICTION_APPLIED,
+                NOTIFICATION_TYPE.TRAINING_ENROLLMENT,
+            ]
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
 
     const stats = summaryResult.rows[0];
 
@@ -419,9 +432,9 @@ async function getSentNotifications(collegeId, filters = {}) {
         related_entity_type: row.related_entity_type || null,
         related_entity_id: row.related_entity_id || null,
         sent_at: row.sent_at,
-        total_recipients: parseInt(row.total_recipients, 10),
-        read_count: parseInt(row.read_count, 10),
-        unread_count: parseInt(row.unread_count, 10),
+        total_recipients: Number.parseInt(row.total_recipients, 10),
+        read_count: Number.parseInt(row.read_count, 10),
+        unread_count: Number.parseInt(row.unread_count, 10),
     }));
 
     return {
@@ -430,18 +443,18 @@ async function getSentNotifications(collegeId, filters = {}) {
         page,
         limit,
         summary: {
-            total_sent: parseInt(stats.total_sent, 10),
-            unique_recipients: parseInt(stats.unique_recipients, 10),
-            total_read: parseInt(stats.total_read, 10),
-            total_unread: parseInt(stats.total_unread, 10),
+            total_sent: Number.parseInt(stats?.total_sent ?? '0', 10),
+            unique_recipients: Number.parseInt(stats?.unique_recipients ?? '0', 10),
+            total_read: Number.parseInt(stats?.total_read ?? '0', 10),
+            total_unread: Number.parseInt(stats?.total_unread ?? '0', 10),
             by_type: {
-                general: parseInt(stats.general_count, 10),
-                new_job_posted: parseInt(stats.job_posted_count, 10),
-                deadline_reminder: parseInt(stats.deadline_reminder_count, 10),
-                round_result: parseInt(stats.round_result_count, 10),
-                offer_received: parseInt(stats.offer_received_count, 10),
-                restriction_applied: parseInt(stats.restriction_count, 10),
-                training_enrollment: parseInt(stats.training_count, 10),
+                general: Number.parseInt(stats?.general_count ?? '0', 10),
+                new_job_posted: Number.parseInt(stats?.job_posted_count ?? '0', 10),
+                deadline_reminder: Number.parseInt(stats?.deadline_reminder_count ?? '0', 10),
+                round_result: Number.parseInt(stats?.round_result_count ?? '0', 10),
+                offer_received: Number.parseInt(stats?.offer_received_count ?? '0', 10),
+                restriction_applied: Number.parseInt(stats?.restriction_count ?? '0', 10),
+                training_enrollment: Number.parseInt(stats?.training_count ?? '0', 10),
             },
         },
     };

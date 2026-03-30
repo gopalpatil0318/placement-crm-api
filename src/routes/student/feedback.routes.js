@@ -22,13 +22,12 @@ const {
   browseInterviewQuestionsSchema,
 } = require('../../validators/student/feedback.validator');
 
-// All routes require student authentication
-router.use(authenticate);
+// All routes require student authentication + rate limiting
+router.use(authenticate, apiLimiter);
 
 // #172 — Submit placement feedback
 router.post(
   '/submit_feedback',
-  apiLimiter,
   validate(submitFeedbackSchema),
   asyncHandler(controller.submitFeedback)
 );
@@ -43,7 +42,6 @@ router.get(
 // #174 — Submit interview question
 router.post(
   '/submit_interview_question',
-  apiLimiter,
   validate(submitInterviewQuestionSchema),
   asyncHandler(controller.submitInterviewQuestion)
 );

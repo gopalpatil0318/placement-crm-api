@@ -27,13 +27,18 @@ const {
 } = require('../../validators/student/notification.validator');
 
 // ============================================================================
+// MIDDLEWARE — auth + rate limiting on ALL endpoints
+// ============================================================================
+
+router.use(authenticate, apiLimiter);
+
+// ============================================================================
 // NOTIFICATION ROUTES
 // ============================================================================
 
 // List own notifications
 router.get(
     '/get_my_notifications',
-    authenticate,
     validate(listMyNotificationsSchema, 'query'),
     asyncHandler(controller.getMyNotifications)
 );
@@ -41,15 +46,12 @@ router.get(
 // Get unread notification count (for badge)
 router.get(
     '/get_unread_notification_count',
-    authenticate,
     asyncHandler(controller.getUnreadNotificationCount)
 );
 
 // Mark single notification as read
 router.patch(
     '/mark_notification_read/:notificationId',
-    authenticate,
-    apiLimiter,
     validate(notificationIdParamSchema, 'params'),
     asyncHandler(controller.markNotificationRead)
 );
@@ -57,7 +59,6 @@ router.patch(
 // Mark all notifications as read
 router.patch(
     '/mark_all_notifications_read',
-    authenticate,
     apiLimiter,
     asyncHandler(controller.markAllNotificationsRead)
 );

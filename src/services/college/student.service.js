@@ -33,7 +33,7 @@ const {
  *
  * @param {string} deptName
  * @param {string} collegeId
- * @returns {string} dept_id
+ * @returns {Promise<string>} dept_id
  * @throws {Error} If department not found
  */
 async function resolveDeptId(deptName, collegeId) {
@@ -111,9 +111,8 @@ async function registerStudent(data, collegeId) {
         );
     }
 
-    // 3. Hash password (provided or auto-generated)
-    const rawPassword = student_password || generateDefaultPassword(first_name, student_passout_year);
-    const hashedPassword = await hashPassword(rawPassword);
+    // 3. Hash password
+    const hashedPassword = await hashPassword(student_password);
 
     // 4. Insert student
     const result = await query(
@@ -187,75 +186,110 @@ async function bulkRegisterStudents(students, collegeId) {
         availableDepts: deptResult.rows.length,
     });
 
-    // Pre-fetch all existing student emails for this college to check duplicates efficiently
+    // Batch-check only incoming emails instead of loading ALL college emails
+    const incomingEmails = students.map((s) => s.student_email.toLowerCase());
     const existingEmailsResult = await query(
-        `SELECT LOWER(student_email) AS email FROM students WHERE college_id = $1`,
-        [collegeId]
+        `SELECT LOWER(student_email) AS email FROM students
+         WHERE college_id = $1 AND LOWER(student_email) = ANY($2::TEXT[])`,
+        [collegeId, incomingEmails]
     );
     const existingEmails = new Set(existingEmailsResult.rows.map((r) => r.email));
 
+    // Phase 1: Pre-validate all rows and collect valid students
+    const validStudents = [];
     for (let i = 0; i < students.length; i++) {
         const s = students[i];
         const rowIndex = i + 1;
 
-        try {
-            // Validate dept_name
-            const deptId = deptMap.get(s.dept_name.toLowerCase());
-            if (!deptId) {
-                throw new Error(`Department "${s.dept_name}" not found or inactive`);
-            }
-
-            // Check duplicate email
-            if (existingEmails.has(s.student_email.toLowerCase())) {
-                throw new Error(`Email "${s.student_email}" already exists`);
-            }
-
-            // Auto-generate password
-            const rawPassword = generateDefaultPassword(s.first_name, s.student_passout_year);
-            const hashedPassword = await hashPassword(rawPassword);
-
-            // Insert
-            const result = await query(
-                `INSERT INTO students
-                   (college_id, first_name, middle_name, last_name, student_email, student_password,
-                    dept_id, student_passout_year, current_year, student_status)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                 RETURNING student_id, first_name, last_name, student_email, dept_id,
-                           student_passout_year, current_year, student_status, created_at`,
-                [
-                    collegeId, s.first_name, s.middle_name || null, s.last_name,
-                    s.student_email, hashedPassword, deptId,
-                    s.student_passout_year, s.current_year, STATUS.STUDENT.ACTIVE,
-                ]
-            );
-
-            // Add to existing emails set to detect duplicates within the same batch
-            existingEmails.add(s.student_email.toLowerCase());
-
-            results.successful++;
-            results.registered.push({
-                row: rowIndex,
-                student_id: result.rows[0].student_id,
-                first_name: s.first_name,
-                last_name: s.last_name,
-                student_email: s.student_email,
-                dept_name: s.dept_name,
-                default_password: rawPassword,
-            });
-        } catch (err) {
+        const deptId = deptMap.get(s.dept_name.toLowerCase());
+        if (!deptId) {
             results.failed++;
             results.errors.push({
-                row: rowIndex,
-                first_name: s.first_name,
-                last_name: s.last_name,
-                student_email: s.student_email,
-                error: err.message,
+                row: rowIndex, first_name: s.first_name, last_name: s.last_name,
+                student_email: s.student_email, error: `Department "${s.dept_name}" not found or inactive`,
             });
+            continue;
+        }
 
-            logger.warn(`${LOG.AUTH} Bulk register row ${rowIndex} failed`, {
-                email: s.student_email,
-                error: err.message,
+        if (existingEmails.has(s.student_email.toLowerCase())) {
+            results.failed++;
+            results.errors.push({
+                row: rowIndex, first_name: s.first_name, last_name: s.last_name,
+                student_email: s.student_email, error: `Email "${s.student_email}" already exists`,
             });
+            continue;
+        }
+
+        // Track within-batch duplicates
+        existingEmails.add(s.student_email.toLowerCase());
+
+        const rawPassword = generateDefaultPassword(s.first_name, s.student_passout_year);
+        validStudents.push({ ...s, deptId, rawPassword, rowIndex });
+    }
+
+    // Phase 2: Batch hash passwords (5 concurrent to avoid event loop starvation)
+    const HASH_CONCURRENCY = 5;
+    const hashedPasswords = new Array(validStudents.length);
+    for (let i = 0; i < validStudents.length; i += HASH_CONCURRENCY) {
+        const chunk = validStudents.slice(i, i + HASH_CONCURRENCY);
+        const hashes = await Promise.all(chunk.map((v) => hashPassword(v.rawPassword)));
+        hashes.forEach((h, j) => { hashedPasswords[i + j] = h; });
+    }
+
+    // Phase 3: Insert using a single connection + transaction with savepoints
+    if (validStudents.length > 0) {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+
+            for (let i = 0; i < validStudents.length; i++) {
+                const v = validStudents[i];
+                const savepointName = `sp_${i}`;
+                try {
+                    await client.query(`SAVEPOINT ${savepointName}`);
+                    const result = await client.query(
+                        `INSERT INTO students
+                           (college_id, first_name, middle_name, last_name, student_email, student_password,
+                            dept_id, student_passout_year, current_year, student_status)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                         RETURNING student_id, first_name, last_name, student_email, dept_id,
+                                   student_passout_year, current_year, student_status, created_at`,
+                        [
+                            collegeId, v.first_name, v.middle_name || null, v.last_name,
+                            v.student_email, hashedPasswords[i], v.deptId,
+                            v.student_passout_year, v.current_year, STATUS.STUDENT.ACTIVE,
+                        ]
+                    );
+
+                    results.successful++;
+                    results.registered.push({
+                        row: v.rowIndex,
+                        student_id: result.rows[0].student_id,
+                        first_name: v.first_name,
+                        last_name: v.last_name,
+                        student_email: v.student_email,
+                        dept_name: v.dept_name,
+                        default_password: v.rawPassword,
+                    });
+                } catch (err) {
+                    await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                    results.failed++;
+                    results.errors.push({
+                        row: v.rowIndex, first_name: v.first_name, last_name: v.last_name,
+                        student_email: v.student_email, error: err.message,
+                    });
+                    logger.warn(`${LOG.AUTH} Bulk register row ${v.rowIndex} failed`, {
+                        email: v.student_email, error: err.message,
+                    });
+                }
+            }
+
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
         }
     }
 
@@ -348,7 +382,7 @@ async function getAllStudents(collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         students: studentResult.rows,
@@ -442,23 +476,40 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
         verificationCounts,
     ] = await chunkedQuery([
         {
-            text: `SELECT * FROM student_personal_information
+            text: `SELECT mobile_number, alternate_mobile, birth_date, gender, blood_group,
+                    aadhaar_number, caste, category, nationality,
+                    father_name, father_mobile, father_occupation, father_annual_income,
+                    mother_name, mother_mobile, mother_occupation, mother_annual_income,
+                    guardian_name, guardian_mobile,
+                    permanent_address, permanent_city, permanent_district, permanent_state, permanent_pincode,
+                    current_address, current_city, current_district, current_state, current_pincode,
+                    same_as_permanent, created_at, updated_at
+             FROM student_personal_information
              WHERE student_id = $1 AND college_id = $2`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_academic_information
+            text: `SELECT roll_number, enrollment_number, admission_year, admission_based_on,
+                    tenth_percentage, tenth_board, tenth_passing_year,
+                    twelfth_or_diploma, twelfth_percentage, twelfth_board,
+                    diploma_percentage, diploma_branch, higher_education_passing_year,
+                    overall_cgpa, total_live_kts, total_dead_kts,
+                    any_gap_during_education, gap_years, gap_reason,
+                    created_at, updated_at
+             FROM student_academic_information
              WHERE student_id = $1 AND college_id = $2`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_semester_grades
+            text: `SELECT grade_id, semester_number, academic_year, sgpa, cgpa,
+                    backlogs_in_semester, backlog_subjects, semester_status
+             FROM student_semester_grades
              WHERE student_id = $1 AND college_id = $2
              ORDER BY semester_number ASC`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT ss.*, sk.skill_name, sk.skill_category
+            text: `SELECT ss.student_skill_id, ss.proficiency_level, sk.skill_name, sk.skill_category
              FROM student_skills ss
              JOIN skills sk ON ss.skill_id = sk.skill_id
              WHERE ss.student_id = $1 AND ss.college_id = $2
@@ -466,63 +517,96 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_projects
+            text: `SELECT project_id, project_title, project_description, project_type,
+                    project_url, github_link, demo_link, technologies_used,
+                    start_date, end_date, is_ongoing, team_size, role_in_project,
+                    display_order, is_featured
+             FROM student_projects
              WHERE student_id = $1 AND college_id = $2
-             ORDER BY display_order, created_at DESC`,
+             ORDER BY display_order, created_at DESC
+             LIMIT 100`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_experience
+            text: `SELECT experience_id, company_name, company_website, position_title,
+                    employment_type, job_description, responsibilities, technologies_used,
+                    work_location, work_mode, start_date, end_date, is_current, duration_months,
+                    stipend_amount, offer_letter_url, completion_certificate_url,
+                    verification_status, verified_by, verified_at, rejection_reason, rejected_at
+             FROM student_experience
              WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
-             ORDER BY start_date DESC`,
+             ORDER BY start_date DESC
+             LIMIT 100`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_achievements
+            text: `SELECT achievement_id, achievement_title, achievement_description, achievement_type,
+                    issuing_organization, event_name, achievement_level, position_rank,
+                    participants_count, achievement_date, certificate_url, proof_url,
+                    verification_status, verified_by, verified_at, rejection_reason, rejected_at,
+                    is_featured, display_order
+             FROM student_achievements
              WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
-             ORDER BY display_order, achievement_date DESC`,
+             ORDER BY display_order, achievement_date DESC
+             LIMIT 100`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_certificates
+            text: `SELECT certificate_id, certificate_name, certificate_description, certificate_type,
+                    issuing_organization, issuing_platform, credential_id, credential_url,
+                    issue_date, expiry_date, does_not_expire, skills_covered, certificate_url,
+                    verification_status, verified_by, verified_at, rejection_reason, rejected_at
+             FROM student_certificates
              WHERE student_id = $1 AND college_id = $2 ${verificationFilter}
-             ORDER BY issue_date DESC`,
+             ORDER BY issue_date DESC
+             LIMIT 100`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_activities
+            text: `SELECT activity_id, activity_name, activity_description, activity_type,
+                    organizing_body, role_position, start_date, end_date, is_ongoing,
+                    hours_contributed, certificate_url, proof_urls
+             FROM student_activities
              WHERE student_id = $1 AND college_id = $2
-             ORDER BY start_date DESC`,
+             ORDER BY start_date DESC
+             LIMIT 100`,
             params: [studentId, collegeId],
         },
         {
-            text: `SELECT * FROM student_profile_links
+            text: `SELECT personal_portfolio_url, resume_url, profile_image_url,
+                    github_url, linkedin_url, leetcode_url, codechef_url, codeforces_url,
+                    hackerrank_url, geeksforgeeks_url, medium_url, bio, area_of_interest
+             FROM student_profile_links
              WHERE student_id = $1 AND college_id = $2`,
             params: [studentId, collegeId],
         },
-        // Verification counts for summary badges
+        // Verification counts — single query with UNION ALL instead of 6 correlated subqueries
         {
-            text: `SELECT
-               (SELECT COUNT(*) FROM student_experience
-                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS exp_pending,
-               (SELECT COUNT(*) FROM student_experience
-                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS exp_rejected,
-               (SELECT COUNT(*) FROM student_achievements
-                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS ach_pending,
-               (SELECT COUNT(*) FROM student_achievements
-                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS ach_rejected,
-               (SELECT COUNT(*) FROM student_certificates
-                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'pending')::int AS cert_pending,
-               (SELECT COUNT(*) FROM student_certificates
-                WHERE student_id = $1 AND college_id = $2 AND verification_status = 'rejected')::int AS cert_rejected`,
+            text: `SELECT section, verification_status AS status, COUNT(*)::int AS cnt
+             FROM (
+               SELECT 'exp' AS section, verification_status FROM student_experience
+               WHERE student_id = $1 AND college_id = $2 AND verification_status IN ('pending','rejected')
+               UNION ALL
+               SELECT 'ach', verification_status FROM student_achievements
+               WHERE student_id = $1 AND college_id = $2 AND verification_status IN ('pending','rejected')
+               UNION ALL
+               SELECT 'cert', verification_status FROM student_certificates
+               WHERE student_id = $1 AND college_id = $2 AND verification_status IN ('pending','rejected')
+             ) v
+             GROUP BY section, verification_status`,
             params: [studentId, collegeId],
         },
     ], 3);
 
     logger.debug(`${LOG.AUTH} Full profile fetched for student`, { studentId, collegeId, review });
 
-    // Build verification summary
-    const vc = verificationCounts.rows[0];
+    // Build verification summary from UNION ALL rows
+    const vcMap = { exp_pending: 0, exp_rejected: 0, ach_pending: 0, ach_rejected: 0, cert_pending: 0, cert_rejected: 0 };
+    for (const row of verificationCounts.rows) {
+        const key = `${row.section}_${row.status}`;
+        if (key in vcMap) vcMap[key] = row.cnt;
+    }
+    const vc = vcMap;
 
     // 3. Calculate profile completion percentage
     // Use total counts (all statuses) for experience — prevents completion from dropping when items are pending
@@ -693,7 +777,7 @@ async function toggleStudentStatus(studentId, collegeId, newStatus) {
     // 2. Already same status?
     if (existing.rows[0].student_status === newStatus) {
         throw Object.assign(
-            new Error(`Student is already ${newStatus}`),
+            new Error(ERROR_MESSAGES.STUDENT_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -746,14 +830,14 @@ async function approveStudentProfile(studentId, collegeId, userId, action, rejec
     }
 
     // 2. If approving, check profile is complete first
-    if (action === 'approved' && !existing.rows[0].profile_complete) {
+    if (action === STATUS.VERIFICATION.APPROVED && !existing.rows[0].profile_complete) {
         throw Object.assign(
-            new Error('Cannot approve an incomplete profile. Student must complete their profile first'),
+            new Error(ERROR_MESSAGES.PROFILE_INCOMPLETE_CANNOT_APPROVE),
             { status: 400 }
         );
     }
 
-    const isApproved = action === 'approved';
+    const isApproved = action === STATUS.VERIFICATION.APPROVED;
 
     // 3. Use transaction when approving (need to auto-approve pending items)
     if (isApproved) {
@@ -775,38 +859,38 @@ async function approveStudentProfile(studentId, collegeId, userId, action, rejec
                  RETURNING student_id, first_name, last_name, student_email,
                            profile_complete, profile_is_approved, profile_approval_status,
                            approved_by, approved_at, profile_rejection_reason, rejected_at, updated_at`,
-                [true, 'approved', userId, studentId, collegeId]
+                [true, STATUS.VERIFICATION.APPROVED, userId, studentId, collegeId]
             );
 
             // 3b. Auto-approve all pending items in a single CTE query (3→1 round-trip)
             const autoApproveResult = await client.query(
                 `WITH exp AS (
                     UPDATE student_experience
-                    SET verification_status = 'approved', is_verified = true,
+                    SET verification_status = $4, is_verified = true,
                         verified_by = $1, verified_at = NOW(),
                         rejection_reason = NULL, rejected_at = NULL
-                    WHERE student_id = $2 AND college_id = $3 AND verification_status = 'pending'
+                    WHERE student_id = $2 AND college_id = $3 AND verification_status = $5
                     RETURNING 1
                 ), ach AS (
                     UPDATE student_achievements
-                    SET verification_status = 'approved', is_verified = true,
+                    SET verification_status = $4, is_verified = true,
                         verified_by = $1, verified_at = NOW(),
                         rejection_reason = NULL, rejected_at = NULL
-                    WHERE student_id = $2 AND college_id = $3 AND verification_status = 'pending'
+                    WHERE student_id = $2 AND college_id = $3 AND verification_status = $5
                     RETURNING 1
                 ), cert AS (
                     UPDATE student_certificates
-                    SET verification_status = 'approved', is_verified = true,
+                    SET verification_status = $4, is_verified = true,
                         verified_by = $1, verified_at = NOW(),
                         rejection_reason = NULL, rejected_at = NULL
-                    WHERE student_id = $2 AND college_id = $3 AND verification_status = 'pending'
+                    WHERE student_id = $2 AND college_id = $3 AND verification_status = $5
                     RETURNING 1
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM exp) AS experiences,
                     (SELECT COUNT(*)::int FROM ach) AS achievements,
                     (SELECT COUNT(*)::int FROM cert) AS certificates`,
-                [userId, studentId, collegeId]
+                [userId, studentId, collegeId, STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.PENDING]
             );
 
             await client.query('COMMIT');
@@ -844,7 +928,7 @@ async function approveStudentProfile(studentId, collegeId, userId, action, rejec
          RETURNING student_id, first_name, last_name, student_email,
                    profile_complete, profile_is_approved, profile_approval_status,
                    approved_by, approved_at, profile_rejection_reason, rejected_at, updated_at`,
-        [false, 'rejected', userId, rejectionReason || null, studentId, collegeId]
+        [false, STATUS.VERIFICATION.REJECTED, userId, rejectionReason || null, studentId, collegeId]
     );
 
     logger.info(`${LOG.AUTH} Student profile rejected`, { studentId, collegeId, userId });

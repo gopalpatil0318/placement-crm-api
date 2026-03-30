@@ -11,10 +11,11 @@
  */
 
 const Joi = require('joi');
-
-const PLACEMENT_TYPES = ['full-time', 'internship', 'both'];
-const PLACEMENT_STATUSES = ['offered', 'accepted', 'rejected', 'joined', 'cancelled'];
-const ACCEPTANCE_STATUSES = ['accepted', 'rejected', 'pending'];
+const {
+    PLACEMENT_TYPES,
+    PLACEMENT_STATUSES,
+    ACCEPTANCE_STATUSES,
+} = require('../../config/constants');
 
 // ============================================================================
 // CREATE PLACEMENT
@@ -153,6 +154,7 @@ const listPlacementsSchema = Joi.object({
 
     search: Joi.string()
         .max(200)
+        .trim()
         .optional()
         .allow(''),
 

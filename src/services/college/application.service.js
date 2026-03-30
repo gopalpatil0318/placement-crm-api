@@ -15,8 +15,18 @@ const logger = require('../../config/logger');
 const {
     LOG,
     ERROR_MESSAGES,
+    SUCCESS_MESSAGES,
     STATUS,
 } = require('../../config/constants');
+
+// Explicit column list for student_applications table
+const APPLICATION_COLUMNS = `a.application_id, a.student_id, a.job_id, a.position_id, a.college_id,
+    a.application_status, a.current_round_id, a.is_eligible,
+    a.eligibility_remarks, a.applied_at, a.last_updated_at, a.withdrawn_at`;
+
+const APPLICATION_RETURNING_COLUMNS = `application_id, student_id, job_id, position_id, college_id,
+    application_status, current_round_id, is_eligible,
+    eligibility_remarks, applied_at, last_updated_at, withdrawn_at`;
 
 // Valid admin status transitions
 const ADMIN_TRANSITIONS = {
@@ -56,7 +66,7 @@ async function verifyJob(jobId, collegeId) {
 
 async function verifyApplication(applicationId, collegeId) {
     const result = await query(
-        `SELECT a.*,
+        `SELECT ${APPLICATION_COLUMNS},
                 j.job_title, j.job_status, j.application_deadline,
                 c.company_name,
                 s.first_name, s.last_name, s.student_email,
@@ -213,7 +223,7 @@ async function getJobApplications(jobId, collegeId, filters = {}) {
     const SORTABLE = {
         applied_at: 'a.applied_at',
         last_updated_at: 'a.last_updated_at',
-        student_name: 's.first_name',
+        student_name: 's.first_name, s.last_name',
         application_status: 'a.application_status',
     };
     const sortCol = SORTABLE[filters.sort_by] || 'a.applied_at';
@@ -230,7 +240,7 @@ async function getJobApplications(jobId, collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT a.*,
+            `SELECT ${APPLICATION_COLUMNS},
                     s.first_name, s.last_name, s.student_email,
                     d.dept_name,
                     p.position_name,
@@ -253,7 +263,7 @@ async function getJobApplications(jobId, collegeId, filters = {}) {
             [jobId, collegeId]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const statusSummary = {
         total: 0,
@@ -267,7 +277,7 @@ async function getJobApplications(jobId, collegeId, filters = {}) {
     };
 
     for (const row of summaryResult.rows) {
-        const count = parseInt(row.cnt, 10);
+        const count = Number.parseInt(row.cnt, 10);
         statusSummary[row.application_status] = count;
         statusSummary.total += count;
     }
@@ -359,7 +369,7 @@ async function getApplication(applicationId, collegeId) {
             round_type: row.round_type,
             round_status: row.round_status,
             result_status: row.result_status,
-            score: row.score !== null ? parseFloat(row.score) : null,
+            score: row.score === null ? null : Number.parseFloat(row.score),
             remarks: row.remarks ?? null,
             attended: row.attended,
             scheduled_at: row.scheduled_at ?? null,
@@ -391,7 +401,7 @@ async function updateApplicationStatus(applicationId, collegeId, newStatus, rema
     // 2. Same status check
     if (currentStatus === newStatus) {
         throw Object.assign(
-            new Error(`Application is already "${newStatus}"`),
+            new Error(ERROR_MESSAGES.APPLICATION_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -400,10 +410,7 @@ async function updateApplicationStatus(applicationId, collegeId, newStatus, rema
     const allowedTransitions = ADMIN_TRANSITIONS[currentStatus] ?? [];
     if (!allowedTransitions.includes(newStatus)) {
         throw Object.assign(
-            new Error(
-                `Cannot change application status from "${currentStatus}" to "${newStatus}". ` +
-                `Allowed transitions: ${allowedTransitions.length ? allowedTransitions.join(', ') : 'none (terminal state)'}`
-            ),
+            new Error(ERROR_MESSAGES.INVALID_APPLICATION_TRANSITION),
             { status: 400 }
         );
     }
@@ -413,7 +420,7 @@ async function updateApplicationStatus(applicationId, collegeId, newStatus, rema
         `UPDATE student_applications
          SET application_status = $1, eligibility_remarks = COALESCE($2, eligibility_remarks), last_updated_at = NOW()
          WHERE application_id = $3
-         RETURNING *`,
+         RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
         [newStatus, remarks, applicationId]
     );
 
@@ -462,7 +469,7 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
                 s.first_name, s.last_name
          FROM student_applications a
          JOIN students s ON a.student_id = s.student_id
-         WHERE a.application_id = ANY($1) AND a.college_id = $2`,
+         WHERE a.application_id = ANY($1::UUID[]) AND a.college_id = $2`,
         [uniqueIds, collegeId]
     );
 
@@ -514,7 +521,7 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
              SET application_status = $1,
                  eligibility_remarks = COALESCE($2, eligibility_remarks),
                  last_updated_at = NOW()
-             WHERE application_id = ANY($3)`,
+             WHERE application_id = ANY($3::UUID[])`,
             [newStatus, remarks, updated]
         );
 

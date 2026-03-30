@@ -10,19 +10,7 @@
  */
 
 const Joi = require('joi');
-
-// Valid dept_type values (matches common college structures)
-const VALID_DEPT_TYPES = [
-    'engineering',
-    'science',
-    'commerce',
-    'arts',
-    'management',
-    'pharmacy',
-    'medical',
-    'polytechnic',
-    'other',
-];
+const { DEPT_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // CREATE DEPARTMENT
@@ -49,11 +37,11 @@ const createDepartmentSchema = Joi.object({
         }),
 
     dept_type: Joi.string()
-        .valid(...VALID_DEPT_TYPES)
+        .valid(...DEPT_TYPES)
         .optional()
         .allow(null)
         .messages({
-            'any.only': `Department type must be one of: ${VALID_DEPT_TYPES.join(', ')}`,
+            'any.only': `Department type must be one of: ${DEPT_TYPES.join(', ')}`,
         }),
 
     program_duration_years: Joi.number()
@@ -104,11 +92,11 @@ const updateDepartmentSchema = Joi.object({
         }),
 
     dept_type: Joi.string()
-        .valid(...VALID_DEPT_TYPES)
+        .valid(...DEPT_TYPES)
         .optional()
         .allow(null)
         .messages({
-            'any.only': `Department type must be one of: ${VALID_DEPT_TYPES.join(', ')}`,
+            'any.only': `Department type must be one of: ${DEPT_TYPES.join(', ')}`,
         }),
 
     program_duration_years: Joi.number()

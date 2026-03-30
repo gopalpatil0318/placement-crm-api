@@ -39,7 +39,7 @@ async function getEligibleNotApplied(req, res) {
             },
             result.eligible_not_applied_count,
             { page: result.page, limit: result.limit },
-            'Eligible students who have not applied retrieved successfully'
+            SUCCESS_MESSAGES.ELIGIBLE_STUDENTS_RETRIEVED
         );
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -88,7 +88,7 @@ async function getJobDenials(req, res) {
             },
             result.total,
             { page: result.page, limit: result.limit },
-            'Job denials retrieved successfully'
+            SUCCESS_MESSAGES.JOB_DENIALS_RETRIEVED
         );
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);

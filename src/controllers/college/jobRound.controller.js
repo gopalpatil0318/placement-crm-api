@@ -73,10 +73,10 @@ async function updateRoundStatus(req, res) {
         );
 
         const statusMessages = {
-            pending: 'Round reset to pending',
-            in_progress: 'Round is now in progress',
-            completed: 'Round marked as completed',
-            cancelled: 'Round has been cancelled',
+            pending: SUCCESS_MESSAGES.ROUND_PENDING,
+            in_progress: SUCCESS_MESSAGES.ROUND_IN_PROGRESS,
+            completed: SUCCESS_MESSAGES.ROUND_COMPLETED,
+            cancelled: SUCCESS_MESSAGES.ROUND_CANCELLED,
         };
 
         return sendSuccess(res, result, statusMessages[round_status] ?? SUCCESS_MESSAGES.ROUND_UPDATED);

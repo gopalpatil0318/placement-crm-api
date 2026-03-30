@@ -64,10 +64,11 @@ router.post(
     asyncHandler(controller.resetPassword)
 );
 
-// Change password (must be authenticated)
+// Change password (must be authenticated, rate limited)
 router.post(
     '/change_password',
     authenticate,
+    authLimiter,
     validate(studentChangePasswordSchema),
     asyncHandler(controller.changePassword)
 );

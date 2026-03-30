@@ -25,8 +25,8 @@ const {
   questionIdParamSchema,
 } = require('../../validators/college/feedback.validator');
 
-// All routes require college admin or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+// All routes require college admin or TPO + rate limiting
+router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
 
 // #99  — List all feedback
 router.get(
@@ -38,7 +38,6 @@ router.get(
 // #100 — Approve / Reject feedback
 router.patch(
   '/approve_feedback/:feedbackId',
-  apiLimiter,
   validate(feedbackIdParamSchema, 'params'),
   validate(approveFeedbackSchema),
   asyncHandler(controller.approveFeedback)
@@ -54,7 +53,6 @@ router.get(
 // #102 — Approve / Reject interview question
 router.patch(
   '/approve_interview_question/:questionId',
-  apiLimiter,
   validate(questionIdParamSchema, 'params'),
   validate(approveInterviewQuestionSchema),
   asyncHandler(controller.approveInterviewQuestion)

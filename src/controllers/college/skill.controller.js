@@ -2,8 +2,9 @@
  * ============================================================================
  * COLLEGE SKILL CONTROLLER — Skills Master HTTP Handlers
  * ============================================================================
- *   #103  createSkill   POST  /api/college/create_skill
- *   #104  getAllSkills   GET   /api/college/get_all_skills
+ *   #103  createSkill   POST   /api/college/create_skill
+ *   #104  getAllSkills   GET    /api/college/get_all_skills
+ *   #105  deleteSkill   DELETE /api/college/delete_skill/:skillId
  * ============================================================================
  */
 
@@ -13,6 +14,7 @@ const logger = require('../../config/logger');
 const {
     LOG,
     SUCCESS_MESSAGES,
+    ERROR_MESSAGES,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -54,11 +56,39 @@ async function getAllSkills(req, res) {
         { skills: result.skills, categories: result.categories },
         result.total,
         { page: result.page, limit: result.limit },
-        'Skills retrieved successfully'
+        SUCCESS_MESSAGES.SKILLS_RETRIEVED
     );
+}
+
+// ============================================================================
+// #105 — DELETE SKILL
+// ============================================================================
+
+async function deleteSkill(req, res) {
+    const startTime = Date.now();
+    const collegeId = req.user.college_id;
+    const { skillId } = req.validated;
+
+    logger.info(`${LOG.API_START} DELETE /college/delete_skill/${skillId}`, {
+        userId: req.user.id,
+        collegeId,
+        skillId,
+    });
+
+    const deleted = await skillService.deleteSkill(skillId, collegeId);
+
+    logger.info(`${LOG.API_END} DELETE /college/delete_skill/${skillId}`, {
+        skillId: deleted.skill_id,
+        skillName: deleted.skill_name,
+        collegeId,
+        duration_ms: Date.now() - startTime,
+    });
+
+    return sendSuccess(res, deleted, SUCCESS_MESSAGES.SKILL_DELETED);
 }
 
 module.exports = {
     createSkill,
     getAllSkills,
+    deleteSkill,
 };

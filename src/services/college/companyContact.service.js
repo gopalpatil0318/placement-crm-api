@@ -26,6 +26,15 @@ const FIELDS = [
     'notes',
 ];
 
+// Explicit columns for RETURNING / SELECT (avoid RETURNING * / SELECT *)
+const CONTACT_RETURNING_COLUMNS = `contact_id, company_id, college_id, contact_name,
+    contact_designation, contact_email, contact_phone,
+    is_primary, is_active, notes, created_at, updated_at`;
+
+const CONTACT_SELECT_COLUMNS = `cc.contact_id, cc.company_id, cc.college_id, cc.contact_name,
+    cc.contact_designation, cc.contact_email, cc.contact_phone,
+    cc.is_primary, cc.is_active, cc.notes, cc.created_at, cc.updated_at`;
+
 // ============================================================================
 // HELPER — Verify company exists and belongs to college
 // ============================================================================
@@ -122,7 +131,7 @@ async function addContact(companyId, collegeId, data) {
             const result = await client.query(
                 `INSERT INTO company_contacts (${columns.join(', ')})
                  VALUES (${placeholders.join(', ')})
-                 RETURNING *`,
+                 RETURNING ${CONTACT_RETURNING_COLUMNS}`,
                 values
             );
             await client.query('COMMIT');
@@ -144,7 +153,7 @@ async function addContact(companyId, collegeId, data) {
     const result = await query(
         `INSERT INTO company_contacts (${columns.join(', ')})
          VALUES (${placeholders.join(', ')})
-         RETURNING *`,
+         RETURNING ${CONTACT_RETURNING_COLUMNS}`,
         values
     );
 
@@ -201,7 +210,7 @@ async function getCompanyContacts(companyId, collegeId, filters = {}) {
 
     // 3. Fetch contacts
     const contactsResult = await query(
-        `SELECT cc.*
+        `SELECT ${CONTACT_SELECT_COLUMNS}
          FROM company_contacts cc
          WHERE ${whereClause}
          ORDER BY cc.is_primary DESC, cc.is_active DESC, cc.created_at ASC`,
@@ -235,7 +244,7 @@ async function getCompanyContacts(companyId, collegeId, filters = {}) {
 async function updateContact(contactId, collegeId, data) {
     // 1. Verify contact exists and belongs to college
     const existing = await query(
-        `SELECT cc.*, c.company_name
+        `SELECT ${CONTACT_SELECT_COLUMNS}, c.company_name
          FROM company_contacts cc
          JOIN companies c ON cc.company_id = c.company_id
          WHERE cc.contact_id = $1 AND cc.college_id = $2
@@ -245,7 +254,7 @@ async function updateContact(contactId, collegeId, data) {
 
     if (!existing.rows.length) {
         throw Object.assign(
-            new Error('Contact not found'),
+            new Error(ERROR_MESSAGES.CONTACT_NOT_FOUND),
             { status: 404 }
         );
     }
@@ -298,7 +307,7 @@ async function updateContact(contactId, collegeId, data) {
                 `UPDATE company_contacts
                  SET ${setClauses.join(', ')}
                  WHERE contact_id = $1 AND college_id = $2
-                 RETURNING *`,
+                 RETURNING ${CONTACT_RETURNING_COLUMNS}`,
                 values
             );
             await client.query('COMMIT');
@@ -321,7 +330,7 @@ async function updateContact(contactId, collegeId, data) {
         `UPDATE company_contacts
          SET ${setClauses.join(', ')}
          WHERE contact_id = $1 AND college_id = $2
-         RETURNING *`,
+         RETURNING ${CONTACT_RETURNING_COLUMNS}`,
         values
     );
 
@@ -353,7 +362,7 @@ async function updateContact(contactId, collegeId, data) {
 async function toggleContactStatus(contactId, collegeId, isActive) {
     // 1. Verify contact exists
     const existing = await query(
-        `SELECT cc.*, c.company_name
+        `SELECT ${CONTACT_SELECT_COLUMNS}, c.company_name
          FROM company_contacts cc
          JOIN companies c ON cc.company_id = c.company_id
          WHERE cc.contact_id = $1 AND cc.college_id = $2
@@ -363,16 +372,15 @@ async function toggleContactStatus(contactId, collegeId, isActive) {
 
     if (!existing.rows.length) {
         throw Object.assign(
-            new Error('Contact not found'),
+            new Error(ERROR_MESSAGES.CONTACT_NOT_FOUND),
             { status: 404 }
         );
     }
 
     // 2. Already same status?
     if (existing.rows[0].is_active === isActive) {
-        const statusText = isActive ? 'active' : 'inactive';
         throw Object.assign(
-            new Error(`Contact is already ${statusText}`),
+            new Error(ERROR_MESSAGES.CONTACT_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -382,7 +390,7 @@ async function toggleContactStatus(contactId, collegeId, isActive) {
         `UPDATE company_contacts
          SET is_active = $1, updated_at = NOW()
          WHERE contact_id = $2 AND college_id = $3
-         RETURNING *`,
+         RETURNING ${CONTACT_RETURNING_COLUMNS}`,
         [isActive, contactId, collegeId]
     );
 

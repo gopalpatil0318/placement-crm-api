@@ -39,7 +39,7 @@ async function loginStudent(email, password) {
            s.student_email, s.student_password, s.student_status,
            s.college_id, s.dept_id, s.student_passout_year, s.current_year,
            s.profile_complete, s.profile_is_approved,
-           c.college_name, c.college_status,
+           c.college_name, c.college_status, c.default_academic_year,
            d.dept_name
          FROM students s
          JOIN colleges c ON s.college_id = c.college_id
@@ -123,6 +123,7 @@ async function loginStudent(email, password) {
             student_status: student.student_status,
             profile_complete: student.profile_complete,
             profile_is_approved: student.profile_is_approved,
+            default_academic_year: student.default_academic_year,
         },
     };
 }
@@ -161,8 +162,8 @@ async function forgotPassword(email) {
     const resetUrl = `${config.frontendUrl}/student/reset-password?token=${resetToken}`;
     const studentName = `${student.first_name} ${student.last_name}`;
 
-    // 3. Send reset email
-    await sendEmail({
+    // 3. Send reset email (non-blocking — don't delay response for SMTP)
+    sendEmail({
         to: student.student_email,
         subject: 'Reset Your Password — Placement CRM',
         text: [
@@ -195,9 +196,13 @@ async function forgotPassword(email) {
                 <p style="color: #999; font-size: 12px;">If you did not request this, please ignore this email. Your password will remain unchanged.</p>
             </div>
         `,
+    }).catch((err) => {
+        logger.error(`${LOG.AUTH} Failed to send student password reset email`, {
+            studentId: student.student_id, email: student.student_email, error: err.message,
+        });
     });
 
-    logger.info(`${LOG.AUTH} Student password reset email sent`, {
+    logger.info(`${LOG.AUTH} Student password reset email queued`, {
         studentId: student.student_id, email: student.student_email,
     });
 

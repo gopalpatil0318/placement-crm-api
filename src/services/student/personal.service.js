@@ -11,12 +11,28 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const {
     LOG,
     ERROR_MESSAGES,
 } = require('../../config/constants');
+
+// Columns returned by INSERT/UPDATE (excludes internal 'id')
+const RETURNING_COLUMNS = `
+    student_id, college_id,
+    mobile_number, alternate_mobile,
+    birth_date, gender, blood_group,
+    aadhaar_number, caste, category, nationality,
+    father_name, father_mobile, father_occupation, father_annual_income,
+    mother_name, mother_mobile, mother_occupation, mother_annual_income,
+    guardian_name, guardian_mobile,
+    permanent_address, permanent_city, permanent_district,
+    permanent_state, permanent_pincode,
+    current_address, current_city, current_district,
+    current_state, current_pincode,
+    same_as_permanent,
+    created_at, updated_at`;
 
 // All columns that can be set/updated (excludes id, student_id, college_id, timestamps)
 const PERSONAL_FIELDS = [
@@ -94,18 +110,45 @@ async function savePersonalInfo(studentId, collegeId, data) {
         .map(f => `${f} = EXCLUDED.${f}`)
         .concat(['updated_at = NOW()']);
 
-    // 5. Execute upsert
-    const result = await query(
-        `INSERT INTO student_personal_information (${insertColumns.join(', ')})
-         VALUES (${insertPlaceholders.join(', ')})
-         ON CONFLICT (student_id)
-         DO UPDATE SET ${updateSetClauses.join(', ')}
-         RETURNING *,
-           (xmax = 0) AS is_new`,
-        insertValues
-    );
+    // 5. Execute upsert + approval reset inside a transaction
+    const client = await getClient();
+    let record;
+    try {
+        await client.query('BEGIN');
 
-    const record = result.rows[0];
+        const result = await client.query(
+            `INSERT INTO student_personal_information (${insertColumns.join(', ')})
+             VALUES (${insertPlaceholders.join(', ')})
+             ON CONFLICT (student_id)
+             DO UPDATE SET ${updateSetClauses.join(', ')}
+             RETURNING ${RETURNING_COLUMNS},
+               (xmax = 0) AS is_new`,
+            insertValues
+        );
+
+        record = result.rows[0];
+
+        // Auto-reset profile approval when student updates personal info (skip on first insert)
+        if (!record.is_new) {
+            await client.query(
+                `UPDATE students
+                 SET profile_approval_status = 'pending', profile_is_approved = false,
+                     approved_by = NULL, approved_at = NULL,
+                     profile_rejection_reason = NULL, rejected_at = NULL,
+                     updated_at = NOW()
+                 WHERE student_id = $1 AND college_id = $2
+                   AND profile_approval_status != 'pending'`,
+                [studentId, collegeId]
+            );
+        }
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 
     // 6. Determine if it was an insert or update (xmax = 0 means INSERT, >0 means UPDATE)
     const isNew = record.is_new;
@@ -115,24 +158,10 @@ async function savePersonalInfo(studentId, collegeId, data) {
         collegeId,
     });
 
-    // Auto-reset profile approval when student updates personal info (skip on first insert)
-    if (!isNew) {
-        await query(
-            `UPDATE students
-             SET profile_approval_status = 'pending', profile_is_approved = false,
-                 approved_by = NULL, approved_at = NULL,
-                 profile_rejection_reason = NULL, rejected_at = NULL,
-                 updated_at = NOW()
-             WHERE student_id = $1 AND college_id = $2
-               AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
-    }
-
-    // 7. Return clean data (exclude internal id)
+    // 7. Return clean data
     return {
         is_new: isNew,
-        personal_info: formatPersonalInfo(record),
+        personal_info: record,
     };
 }
 
@@ -142,7 +171,19 @@ async function savePersonalInfo(studentId, collegeId, data) {
 
 async function getPersonalInfo(studentId, collegeId) {
     const result = await query(
-        `SELECT spi.*
+        `SELECT spi.student_id, spi.college_id,
+                spi.mobile_number, spi.alternate_mobile,
+                spi.birth_date, spi.gender, spi.blood_group,
+                spi.aadhaar_number, spi.caste, spi.category, spi.nationality,
+                spi.father_name, spi.father_mobile, spi.father_occupation, spi.father_annual_income,
+                spi.mother_name, spi.mother_mobile, spi.mother_occupation, spi.mother_annual_income,
+                spi.guardian_name, spi.guardian_mobile,
+                spi.permanent_address, spi.permanent_city, spi.permanent_district,
+                spi.permanent_state, spi.permanent_pincode,
+                spi.current_address, spi.current_city, spi.current_district,
+                spi.current_state, spi.current_pincode,
+                spi.same_as_permanent,
+                spi.created_at, spi.updated_at
          FROM student_personal_information spi
          WHERE spi.student_id = $1 AND spi.college_id = $2
          LIMIT 1`,
@@ -154,17 +195,7 @@ async function getPersonalInfo(studentId, collegeId) {
         return null;
     }
 
-    return formatPersonalInfo(result.rows[0]);
-}
-
-// ============================================================================
-// HELPER — Format response (exclude internal fields)
-// ============================================================================
-
-function formatPersonalInfo(record) {
-    // Remove internal DB fields from response
-    const { id, ...rest } = record;
-    return rest;
+    return result.rows[0];
 }
 
 // ============================================================================

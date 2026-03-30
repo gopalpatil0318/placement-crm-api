@@ -35,7 +35,7 @@ async function getJobApplications(req, res) {
             { applications, job_title, company_name, status_summary },
             total,
             { page, limit },
-            'Applications retrieved successfully'
+            SUCCESS_MESSAGES.JOB_APPLICATIONS_RETRIEVED
         );
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -54,7 +54,7 @@ async function getApplication(req, res) {
             req.user.college_id
         );
 
-        return sendSuccess(res, result, 'Application details retrieved successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.APPLICATION_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -77,11 +77,11 @@ async function updateApplicationStatus(req, res) {
         );
 
         const statusMessages = {
-            under_review: 'Application marked as under review',
-            shortlisted: 'Application shortlisted',
-            rejected: 'Application rejected',
-            selected: 'Candidate selected',
-            offered: 'Offer extended to candidate',
+            under_review: SUCCESS_MESSAGES.APPLICATION_UNDER_REVIEW,
+            shortlisted: SUCCESS_MESSAGES.APPLICATION_SHORTLISTED,
+            rejected: SUCCESS_MESSAGES.APPLICATION_REJECTED,
+            selected: SUCCESS_MESSAGES.CANDIDATE_SELECTED,
+            offered: SUCCESS_MESSAGES.OFFER_EXTENDED,
         };
 
         return sendSuccess(
@@ -111,7 +111,7 @@ async function bulkUpdateApplicationStatus(req, res) {
             remarks ?? null
         );
 
-        return sendSuccess(res, result, `Bulk update complete: ${result.summary.updated} updated, ${result.summary.skipped} skipped`);
+        return sendSuccess(res, result, `${SUCCESS_MESSAGES.BULK_UPDATE_COMPLETE}: ${result.summary.updated} updated, ${result.summary.skipped} skipped`);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);

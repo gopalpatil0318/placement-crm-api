@@ -12,7 +12,7 @@ const { VALIDATION } = require('../../config/constants');
 
 // Enum values matching schema CHECK constraints
 const VALID_GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
-const VALID_CATEGORIES = ['General', 'OBC', 'SC', 'ST', 'NT', 'VJ', 'SBC'];
+const VALID_CATEGORIES = ['General', 'OBC', 'OBC-NCL', 'SC', 'ST', 'EWS', 'NT', 'NT-A', 'NT-B', 'NT-C', 'NT-D', 'VJ', 'VJ-A', 'SBC', 'SEBC', 'DT/DNT', 'Open'];
 
 // ============================================================================
 // SAVE PERSONAL INFO (Upsert — create or update)

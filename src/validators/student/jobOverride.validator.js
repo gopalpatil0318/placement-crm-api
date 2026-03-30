@@ -9,8 +9,7 @@
  */
 
 const Joi = require('joi');
-
-const OVERRIDE_STATUSES = ['pending', 'approved', 'rejected'];
+const { OVERRIDE_STATUSES } = require('../../config/constants');
 
 // ============================================================================
 // REQUEST OVERRIDE
@@ -18,6 +17,7 @@ const OVERRIDE_STATUSES = ['pending', 'approved', 'rejected'];
 
 const requestOverrideSchema = Joi.object({
     request_reason: Joi.string()
+        .trim()
         .min(20)
         .max(2000)
         .required()

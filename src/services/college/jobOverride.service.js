@@ -21,6 +21,20 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
+// COLUMN CONSTANTS
+// ============================================================================
+
+const OVERRIDE_SELECT_COLUMNS = `r.override_id, r.override_status,
+    r.request_reason, r.ineligibility_reasons,
+    r.review_notes, r.rejection_reason,
+    r.requested_at, r.reviewed_at,
+    r.student_id, r.job_id, r.college_id, r.reviewed_by`;
+
+const OVERRIDE_RETURNING_COLUMNS = `override_id, override_status,
+    reviewed_at, rejection_reason, review_notes,
+    student_id, job_id, college_id, reviewed_by`;
+
+// ============================================================================
 // HELPER — Verify job exists and belongs to college
 // ============================================================================
 
@@ -77,7 +91,7 @@ async function getJobOverrideRequests(jobId, collegeId, filters = {}) {
 
     const SORTABLE = {
         requested_at: 'r.requested_at',
-        student_name: 's.first_name',
+        student_name: 's.first_name, s.last_name',
         dept_name: 'd.dept_name',
         override_status: 'r.override_status',
     };
@@ -128,7 +142,7 @@ async function getJobOverrideRequests(jobId, collegeId, filters = {}) {
 
     const summary = { pending: 0, approved: 0, rejected: 0 };
     for (const row of summaryResult.rows) {
-        summary[row.override_status] = parseInt(row.cnt, 10);
+        summary[row.override_status] = Number.parseInt(row.cnt, 10);
     }
 
     return {
@@ -140,7 +154,7 @@ async function getJobOverrideRequests(jobId, collegeId, filters = {}) {
         },
         summary,
         requests: rowsResult.rows,
-        total: parseInt(countResult.rows[0].total, 10),
+        total: Number.parseInt(countResult.rows[0].total, 10),
         page,
         limit,
     };
@@ -204,7 +218,7 @@ async function getAllOverrideRequests(collegeId, filters = {}) {
 
     const SORTABLE = {
         requested_at: 'r.requested_at',
-        student_name: 's.first_name',
+        student_name: 's.first_name, s.last_name',
         job_title: 'j.job_title',
         override_status: 'r.override_status',
     };
@@ -255,12 +269,12 @@ async function getAllOverrideRequests(collegeId, filters = {}) {
 
     const summary = { pending: 0, approved: 0, rejected: 0 };
     for (const row of summaryResult.rows) {
-        summary[row.override_status] = parseInt(row.cnt, 10);
+        summary[row.override_status] = Number.parseInt(row.cnt, 10);
     }
 
     return {
         requests: rowsResult.rows,
-        total: parseInt(countResult.rows[0].total, 10),
+        total: Number.parseInt(countResult.rows[0].total, 10),
         page,
         limit,
         summary,
@@ -283,113 +297,130 @@ async function getAllOverrideRequests(collegeId, filters = {}) {
  * @returns {Object} Updated override request
  */
 async function reviewOverrideRequest(overrideId, collegeId, userId, data) {
-    // Fetch the override request
-    const overrideResult = await query(
-        `SELECT r.*, j.job_title, co.company_name,
-                s.first_name || ' ' || s.last_name AS student_name
-         FROM job_eligibility_override_requests r
-         JOIN job_postings j ON r.job_id = j.job_id
-         JOIN companies co ON j.company_id = co.company_id
-         JOIN students s ON r.student_id = s.student_id
-         WHERE r.override_id = $1 AND r.college_id = $2
-         LIMIT 1`,
-        [overrideId, collegeId]
-    );
+    const client = await getClient();
 
-    if (!overrideResult.rows.length) {
-        throw Object.assign(
-            new Error('Override request not found'),
-            { status: 404 }
+    try {
+        await client.query('BEGIN');
+
+        // Fetch the override request with FOR UPDATE lock to prevent race conditions
+        const overrideResult = await client.query(
+            `SELECT ${OVERRIDE_SELECT_COLUMNS},
+                    j.job_title, co.company_name,
+                    s.first_name || ' ' || s.last_name AS student_name
+             FROM job_eligibility_override_requests r
+             JOIN job_postings j ON r.job_id = j.job_id
+             JOIN companies co ON j.company_id = co.company_id
+             JOIN students s ON r.student_id = s.student_id
+             WHERE r.override_id = $1 AND r.college_id = $2
+             LIMIT 1
+             FOR UPDATE OF r`,
+            [overrideId, collegeId]
         );
-    }
 
-    const override = overrideResult.rows[0];
+        if (!overrideResult.rows.length) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.OVERRIDE_NOT_FOUND),
+                { status: 404 }
+            );
+        }
 
-    if (override.override_status !== 'pending') {
-        throw Object.assign(
-            new Error(`Override request has already been ${override.override_status}. Cannot review again.`),
-            { status: 400 }
+        const override = overrideResult.rows[0];
+
+        if (override.override_status !== STATUS.OVERRIDE.PENDING) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.OVERRIDE_ALREADY_REVIEWED),
+                { status: 400 }
+            );
+        }
+
+        const newStatus = data.action === 'approve'
+            ? STATUS.OVERRIDE.APPROVED
+            : STATUS.OVERRIDE.REJECTED;
+
+        if (newStatus === STATUS.OVERRIDE.REJECTED && !data.rejection_reason?.trim()) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.OVERRIDE_REJECTION_REASON_REQUIRED),
+                { status: 400 }
+            );
+        }
+
+        // Update the override request
+        const updateResult = await client.query(
+            `UPDATE job_eligibility_override_requests
+             SET override_status = $1,
+                 reviewed_by = $2,
+                 review_notes = $3,
+                 rejection_reason = $4,
+                 reviewed_at = NOW()
+             WHERE override_id = $5
+             RETURNING ${OVERRIDE_RETURNING_COLUMNS}`,
+            [
+                newStatus,
+                userId,
+                data.review_notes?.trim() ?? null,
+                newStatus === STATUS.OVERRIDE.REJECTED ? data.rejection_reason.trim() : null,
+                overrideId,
+            ]
         );
-    }
 
-    const newStatus = data.action === 'approve' ? 'approved' : 'rejected';
+        const updated = updateResult.rows[0];
 
-    if (newStatus === 'rejected' && !data.rejection_reason?.trim()) {
-        throw Object.assign(
-            new Error('Rejection reason is required when rejecting an override request'),
-            { status: 400 }
+        // Send notification to student
+        const notifTitle = newStatus === STATUS.OVERRIDE.APPROVED
+            ? `Override Approved: ${override.job_title}`
+            : `Override Rejected: ${override.job_title}`;
+
+        const notifBody = newStatus === STATUS.OVERRIDE.APPROVED
+            ? `Your eligibility override request for ${override.job_title} at ${override.company_name} has been approved. You can now apply for this job.`
+            : `Your eligibility override request for ${override.job_title} at ${override.company_name} has been rejected. Reason: ${data.rejection_reason.trim()}`;
+
+        const notifType = newStatus === STATUS.OVERRIDE.APPROVED
+            ? NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_APPROVED
+            : NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_REJECTED;
+
+        await client.query(
+            `INSERT INTO notifications
+                (college_id, recipient_type, recipient_id, title, body,
+                 notification_type, related_entity_type, related_entity_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+                collegeId,
+                RECIPIENT_TYPE.STUDENT,
+                override.student_id,
+                notifTitle,
+                notifBody,
+                notifType,
+                'job',
+                override.job_id,
+            ]
         );
-    }
 
-    // Update the override request
-    const updateResult = await query(
-        `UPDATE job_eligibility_override_requests
-         SET override_status = $1,
-             reviewed_by = $2,
-             review_notes = $3,
-             rejection_reason = $4,
-             reviewed_at = NOW()
-         WHERE override_id = $5
-         RETURNING *`,
-        [
-            newStatus,
-            userId,
-            data.review_notes?.trim() ?? null,
-            newStatus === 'rejected' ? data.rejection_reason.trim() : null,
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Override request ${newStatus}`, {
             overrideId,
-        ]
-    );
-
-    const updated = updateResult.rows[0];
-
-    // Send notification to student
-    const notifTitle = newStatus === 'approved'
-        ? `Override Approved: ${override.job_title}`
-        : `Override Rejected: ${override.job_title}`;
-
-    const notifBody = newStatus === 'approved'
-        ? `Your eligibility override request for ${override.job_title} at ${override.company_name} has been approved. You can now apply for this job.`
-        : `Your eligibility override request for ${override.job_title} at ${override.company_name} has been rejected. Reason: ${data.rejection_reason.trim()}`;
-
-    const notifType = newStatus === 'approved'
-        ? NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_APPROVED
-        : NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_REJECTED;
-
-    await query(
-        `INSERT INTO notifications
-            (college_id, recipient_type, recipient_id, title, body,
-             notification_type, related_entity_type, related_entity_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
+            studentId: override.student_id,
+            jobId: override.job_id,
+            reviewedBy: userId,
             collegeId,
-            RECIPIENT_TYPE.STUDENT,
-            override.student_id,
-            notifTitle,
-            notifBody,
-            notifType,
-            'job',
-            override.job_id,
-        ]
-    );
+        });
 
-    logger.info(`${LOG.AUTH} Override request ${newStatus}`, {
-        overrideId,
-        studentId: override.student_id,
-        jobId: override.job_id,
-        reviewedBy: userId,
-        collegeId,
-    });
-
-    return {
-        override_id: updated.override_id,
-        override_status: updated.override_status,
-        reviewed_at: updated.reviewed_at,
-        rejection_reason: updated.rejection_reason ?? null,
-        review_notes: updated.review_notes ?? null,
-        job_title: override.job_title,
-        company_name: override.company_name,
-        student_name: override.student_name,
-    };
+        return {
+            override_id: updated.override_id,
+            override_status: updated.override_status,
+            reviewed_at: updated.reviewed_at,
+            rejection_reason: updated.rejection_reason ?? null,
+            review_notes: updated.review_notes ?? null,
+            job_title: override.job_title,
+            company_name: override.company_name,
+            student_name: override.student_name,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 // ============================================================================
@@ -409,52 +440,53 @@ async function bulkReviewOverrideRequests(collegeId, userId, data) {
     const { override_ids, action, review_notes, rejection_reason } = data;
 
     if (!override_ids || override_ids.length === 0) {
-        throw Object.assign(new Error('No override IDs provided'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.OVERRIDE_NO_IDS), { status: 400 });
     }
 
-    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    const newStatus = action === 'approve' ? STATUS.OVERRIDE.APPROVED : STATUS.OVERRIDE.REJECTED;
 
-    if (newStatus === 'rejected' && !rejection_reason?.trim()) {
+    if (newStatus === STATUS.OVERRIDE.REJECTED && !rejection_reason?.trim()) {
         throw Object.assign(
-            new Error('Rejection reason is required when bulk-rejecting override requests'),
+            new Error(ERROR_MESSAGES.OVERRIDE_BULK_REJECTION_REQUIRED),
             { status: 400 }
         );
     }
-
-    // Fetch all matching pending requests in this college
-    const fetchResult = await query(
-        `SELECT r.override_id, r.student_id, r.job_id, r.override_status,
-                j.job_title, co.company_name
-         FROM job_eligibility_override_requests r
-         JOIN job_postings j ON r.job_id = j.job_id
-         JOIN companies co ON j.company_id = co.company_id
-         WHERE r.override_id = ANY($1) AND r.college_id = $2`,
-        [override_ids, collegeId]
-    );
-
-    if (!fetchResult.rows.length) {
-        throw Object.assign(
-            new Error('No valid override requests found for the provided IDs'),
-            { status: 404 }
-        );
-    }
-
-    const pendingRequests = fetchResult.rows.filter(r => r.override_status === 'pending');
-    const alreadyReviewed = fetchResult.rows.filter(r => r.override_status !== 'pending');
-
-    if (pendingRequests.length === 0) {
-        throw Object.assign(
-            new Error('All specified override requests have already been reviewed'),
-            { status: 400 }
-        );
-    }
-
-    const pendingIds = pendingRequests.map(r => r.override_id);
 
     const client = await getClient();
 
     try {
         await client.query('BEGIN');
+
+        // Fetch all matching pending requests in this college with FOR UPDATE lock
+        const fetchResult = await client.query(
+            `SELECT r.override_id, r.student_id, r.job_id, r.override_status,
+                    j.job_title, co.company_name
+             FROM job_eligibility_override_requests r
+             JOIN job_postings j ON r.job_id = j.job_id
+             JOIN companies co ON j.company_id = co.company_id
+             WHERE r.override_id = ANY($1) AND r.college_id = $2
+             FOR UPDATE OF r`,
+            [override_ids, collegeId]
+        );
+
+        if (!fetchResult.rows.length) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.OVERRIDE_NO_VALID_IDS),
+                { status: 404 }
+            );
+        }
+
+        const pendingRequests = fetchResult.rows.filter(r => r.override_status === STATUS.OVERRIDE.PENDING);
+        const alreadyReviewed = fetchResult.rows.filter(r => r.override_status !== STATUS.OVERRIDE.PENDING);
+
+        if (pendingRequests.length === 0) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.OVERRIDE_ALL_ALREADY_REVIEWED),
+                { status: 400 }
+            );
+        }
+
+        const pendingIds = pendingRequests.map(r => r.override_id);
 
         // Bulk update all pending requests
         await client.query(
@@ -469,26 +501,26 @@ async function bulkReviewOverrideRequests(collegeId, userId, data) {
                 newStatus,
                 userId,
                 review_notes?.trim() ?? null,
-                newStatus === 'rejected' ? rejection_reason.trim() : null,
+                newStatus === STATUS.OVERRIDE.REJECTED ? rejection_reason.trim() : null,
                 pendingIds,
             ]
         );
 
         // Bulk insert notifications for all affected students
         if (pendingRequests.length > 0) {
-            const notifType = newStatus === 'approved'
+            const notifType = newStatus === STATUS.OVERRIDE.APPROVED
                 ? NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_APPROVED
                 : NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_REJECTED;
 
             // Build UNNEST arrays for batch insert
             const recipientIds = pendingRequests.map(r => r.student_id);
             const titles = pendingRequests.map(
-                r => newStatus === 'approved'
+                r => newStatus === STATUS.OVERRIDE.APPROVED
                     ? `Override Approved: ${r.job_title}`
                     : `Override Rejected: ${r.job_title}`
             );
             const bodies = pendingRequests.map(
-                r => newStatus === 'approved'
+                r => newStatus === STATUS.OVERRIDE.APPROVED
                     ? `Your eligibility override for ${r.job_title} at ${r.company_name} is approved. You can now apply.`
                     : `Your eligibility override for ${r.job_title} at ${r.company_name} was rejected. Reason: ${rejection_reason.trim()}`
             );

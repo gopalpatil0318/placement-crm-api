@@ -27,6 +27,7 @@ const listMyNotificationsSchema = Joi.object({
         }),
 
     notification_type: Joi.string()
+        .trim()
         .valid(...NOTIFICATION_TYPES)
         .optional()
         .messages({
@@ -34,11 +35,13 @@ const listMyNotificationsSchema = Joi.object({
         }),
 
     sort_by: Joi.string()
+        .trim()
         .valid('created_at')
         .optional()
         .default('created_at'),
 
     sort_order: Joi.string()
+        .trim()
         .valid('asc', 'desc')
         .optional()
         .default('desc'),

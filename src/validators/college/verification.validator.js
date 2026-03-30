@@ -22,13 +22,13 @@ const { STATUS } = require('../../config/constants');
 const pendingListSchema = Joi.object({
     page: Joi.number().positive().optional().default(1),
     limit: Joi.number().positive().max(100).optional().default(20),
-    search: Joi.string().max(100).optional(),
+    search: Joi.string().trim().max(100).optional(),
     dept_id: Joi.string().uuid().optional().messages({
         'string.guid': 'Invalid department ID format',
     }),
     student_passout_year: Joi.number().integer().min(2020).max(2040).optional(),
-    sort_by: Joi.string().valid('created_at', 'updated_at', 'first_name', 'last_name').optional().default('created_at'),
-    sort_order: Joi.string().valid('ASC', 'DESC', 'asc', 'desc').optional().default('DESC'),
+    sort_by: Joi.string().trim().valid('created_at', 'updated_at', 'first_name', 'last_name').optional().default('created_at'),
+    sort_order: Joi.string().trim().valid('ASC', 'DESC', 'asc', 'desc').optional().default('DESC'),
 });
 
 // ============================================================================
@@ -44,6 +44,7 @@ const verifyActionSchema = Joi.object({
             'any.required': 'Action is required',
         }),
     rejection_reason: Joi.string()
+        .trim()
         .max(500)
         .when('action', {
             is: STATUS.VERIFICATION.REJECTED,
@@ -79,6 +80,7 @@ const bulkVerifySchema = Joi.object({
             'any.required': 'Action is required',
         }),
     rejection_reason: Joi.string()
+        .trim()
         .max(500)
         .when('action', {
             is: STATUS.VERIFICATION.REJECTED,

@@ -9,19 +9,23 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const {
     LOG,
     ERROR_MESSAGES,
+    SUCCESS_MESSAGES,
     STATUS,
+    MCQ_TYPES,
 } = require('../../config/constants');
 
 // Fields that can be dynamically updated
 const FIELDS = ['question_text', 'question_type', 'question_options', 'is_required', 'question_order'];
 
-// MCQ question types that require options
-const MCQ_TYPES = ['mcq_single', 'mcq_multiple'];
+// Explicit column list — never SELECT * or RETURNING *
+const QUESTION_RETURNING_COLUMNS = 'question_id, job_id, question_text, question_type, question_options, is_required, question_order, created_at';
+
+const QUESTION_VERIFY_COLUMNS = 'q.question_id, q.job_id, q.question_text, q.question_type, q.question_options, q.is_required, q.question_order, q.created_at, j.job_title, j.job_status, j.college_id, c.company_name';
 
 // ============================================================================
 // HELPER — Verify job exists and belongs to college
@@ -50,7 +54,7 @@ async function verifyJob(jobId, collegeId) {
 
 async function verifyQuestion(questionId, collegeId) {
     const result = await query(
-        `SELECT q.*, j.job_title, j.job_status, j.college_id, c.company_name
+        `SELECT ${QUESTION_VERIFY_COLUMNS}
          FROM application_questions q
          JOIN job_postings j ON q.job_id = j.job_id
          JOIN companies c ON j.company_id = c.company_id
@@ -60,7 +64,7 @@ async function verifyQuestion(questionId, collegeId) {
     );
 
     if (!result.rows.length) {
-        throw Object.assign(new Error('Application question not found'), { status: 404 });
+        throw Object.assign(new Error(ERROR_MESSAGES.QUESTION_NOT_FOUND), { status: 404 });
     }
 
     return result.rows[0];
@@ -107,14 +111,14 @@ async function addQuestion(jobId, collegeId, data) {
     // 2. Cannot add to cancelled or closed jobs
     if (job.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot add questions to a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_ADD_QUESTION_CANCELLED_JOB),
             { status: 400 }
         );
     }
 
     if (job.job_status === STATUS.JOB.CLOSED) {
         throw Object.assign(
-            new Error('Cannot add questions to a closed job'),
+            new Error(ERROR_MESSAGES.CANNOT_ADD_QUESTION_CLOSED_JOB),
             { status: 400 }
         );
     }
@@ -136,12 +140,12 @@ async function addQuestion(jobId, collegeId, data) {
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
-            new Error('This question already exists for this job posting'),
+            new Error(ERROR_MESSAGES.QUESTION_DUPLICATE),
             { status: 409 }
         );
     }
 
-    const nextOrder = parseInt(maxResult.rows[0].max_order, 10) + 1;
+    const nextOrder = Number.parseInt(maxResult.rows[0].max_order, 10) + 1;
 
     // 5. Sanitize options: null for non-MCQ types
     // JSON.stringify for JSONB column — pg driver treats JS arrays as PostgreSQL arrays, not JSON
@@ -154,7 +158,7 @@ async function addQuestion(jobId, collegeId, data) {
     const result = await query(
         `INSERT INTO application_questions (job_id, question_text, question_type, question_options, is_required, question_order)
          VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
+         RETURNING ${QUESTION_RETURNING_COLUMNS}`,
         [
             jobId,
             data.question_text.trim(),
@@ -197,10 +201,10 @@ async function getJobQuestions(jobId, collegeId) {
 
     // 2. Fetch all questions ordered by question_order
     const result = await query(
-        `SELECT q.*
-         FROM application_questions q
-         WHERE q.job_id = $1
-         ORDER BY q.question_order ASC, q.created_at ASC`,
+        `SELECT ${QUESTION_RETURNING_COLUMNS}
+         FROM application_questions
+         WHERE job_id = $1
+         ORDER BY question_order ASC, created_at ASC`,
         [jobId]
     );
 
@@ -239,14 +243,14 @@ async function updateQuestion(questionId, collegeId, data) {
     // 2. Cannot edit in cancelled or closed jobs
     if (existing.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot edit questions in a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_CANCELLED_JOB),
             { status: 400 }
         );
     }
 
     if (existing.job_status === STATUS.JOB.CLOSED) {
         throw Object.assign(
-            new Error('Cannot edit questions in a closed job'),
+            new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_CLOSED_JOB),
             { status: 400 }
         );
     }
@@ -261,7 +265,7 @@ async function updateQuestion(questionId, collegeId, data) {
 
         if (appCheck.rows.length) {
             throw Object.assign(
-                new Error('Cannot edit questions after students have started applying. Consider closing the job first'),
+                new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_WITH_APPLICATIONS),
                 { status: 400 }
             );
         }
@@ -278,7 +282,7 @@ async function updateQuestion(questionId, collegeId, data) {
 
         if (duplicateCheck.rows.length) {
             throw Object.assign(
-                new Error('This question already exists for this job posting'),
+                new Error(ERROR_MESSAGES.QUESTION_DUPLICATE),
                 { status: 409 }
             );
         }
@@ -291,7 +295,7 @@ async function updateQuestion(questionId, collegeId, data) {
         // Changing to MCQ: options must be provided
         if (data.question_type && !data.question_options && !MCQ_TYPES.includes(existing.question_type)) {
             throw Object.assign(
-                new Error('Options are required when changing question type to MCQ'),
+                new Error(ERROR_MESSAGES.MCQ_OPTIONS_REQUIRED),
                 { status: 400 }
             );
         }
@@ -309,7 +313,7 @@ async function updateQuestion(questionId, collegeId, data) {
              FROM application_questions WHERE job_id = $1`,
             [existing.job_id]
         );
-        const maxOrder = parseInt(maxResult.rows[0].max_order, 10);
+        const maxOrder = Number.parseInt(maxResult.rows[0].max_order, 10);
 
         if (data.question_order > maxOrder + 1) {
             throw Object.assign(
@@ -323,7 +327,7 @@ async function updateQuestion(questionId, collegeId, data) {
     const fieldsToUpdate = FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields provided for update'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
     const setClauses = fieldsToUpdate
@@ -341,7 +345,7 @@ async function updateQuestion(questionId, collegeId, data) {
         `UPDATE application_questions
          SET ${setClauses}
          WHERE question_id = $1
-         RETURNING *`,
+         RETURNING ${QUESTION_RETURNING_COLUMNS}`,
         values
     );
 
@@ -378,14 +382,14 @@ async function deleteQuestion(questionId, collegeId) {
     // 2. Cannot delete from cancelled or closed jobs
     if (existing.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot delete questions from a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_DELETE_QUESTION_CANCELLED_JOB),
             { status: 400 }
         );
     }
 
     if (existing.job_status === STATUS.JOB.CLOSED) {
         throw Object.assign(
-            new Error('Cannot delete questions from a closed job'),
+            new Error(ERROR_MESSAGES.CANNOT_DELETE_QUESTION_CLOSED_JOB),
             { status: 400 }
         );
     }
@@ -400,31 +404,43 @@ async function deleteQuestion(questionId, collegeId) {
 
         if (appCheck.rows.length) {
             throw Object.assign(
-                new Error('Cannot delete questions after students have started applying'),
+                new Error(ERROR_MESSAGES.CANNOT_DELETE_QUESTION_WITH_APPLICATIONS),
                 { status: 400 }
             );
         }
     }
 
-    // 4. Delete the question
-    await query(
-        `DELETE FROM application_questions WHERE question_id = $1`,
-        [questionId]
-    );
+    // 4. Delete + re-order in a transaction
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    // 5. Re-order remaining questions to maintain sequential order
-    await query(
-        `WITH ordered AS (
-           SELECT question_id, ROW_NUMBER() OVER (ORDER BY question_order ASC, created_at ASC) AS new_order
-           FROM application_questions
-           WHERE job_id = $1
-         )
-         UPDATE application_questions q
-         SET question_order = o.new_order
-         FROM ordered o
-         WHERE q.question_id = o.question_id`,
-        [existing.job_id]
-    );
+        await client.query(
+            `DELETE FROM application_questions WHERE question_id = $1`,
+            [questionId]
+        );
+
+        // Re-order remaining questions to maintain sequential order
+        await client.query(
+            `WITH ordered AS (
+               SELECT question_id, ROW_NUMBER() OVER (ORDER BY question_order ASC, created_at ASC) AS new_order
+               FROM application_questions
+               WHERE job_id = $1
+             )
+             UPDATE application_questions q
+             SET question_order = o.new_order
+             FROM ordered o
+             WHERE q.question_id = o.question_id`,
+            [existing.job_id]
+        );
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 
     logger.info(`${LOG.AUTH} Application question deleted`, {
         questionId,

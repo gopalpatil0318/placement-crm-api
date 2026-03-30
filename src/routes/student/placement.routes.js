@@ -30,6 +30,9 @@ const {
 // PLACEMENT ROUTES
 // ============================================================================
 
+// Apply rate limiting to all routes
+router.use(apiLimiter);
+
 // List own placement offers/records
 router.get(
     '/get_my_placements',
@@ -42,7 +45,6 @@ router.get(
 router.patch(
     '/accept_placement/:placementId',
     authenticate,
-    apiLimiter,
     validate(placementIdParamSchema, 'params'),
     asyncHandler(controller.acceptPlacement)
 );
@@ -51,7 +53,6 @@ router.patch(
 router.patch(
     '/reject_placement/:placementId',
     authenticate,
-    apiLimiter,
     validate(placementIdParamSchema, 'params'),
     validate(rejectPlacementSchema),
     asyncHandler(controller.rejectPlacement)

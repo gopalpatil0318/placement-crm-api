@@ -131,7 +131,7 @@ async function getAllDepartments(collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         departments: deptResult.rows,
@@ -160,8 +160,8 @@ async function getDepartmentById(deptId, collegeId) {
                 COUNT(DISTINCT u.user_id)::int AS user_count,
                 COUNT(DISTINCT s.student_id)::int AS student_count
          FROM departments d
-         LEFT JOIN users u ON d.dept_id = u.dept_id
-         LEFT JOIN students s ON d.dept_id = s.dept_id
+         LEFT JOIN users u ON d.dept_id = u.dept_id AND u.user_status = 'active'
+         LEFT JOIN students s ON d.dept_id = s.dept_id AND s.student_status = 'active'
          WHERE d.dept_id = $1 AND d.college_id = $2
          GROUP BY d.dept_id`,
         [deptId, collegeId]
@@ -271,7 +271,7 @@ async function toggleDepartmentStatus(deptId, collegeId, isActive) {
     // 2. Check if already in target status
     if (existing.rows[0].is_active === isActive) {
         throw Object.assign(
-            new Error(`Department is already ${isActive ? 'active' : 'inactive'}`),
+            new Error(ERROR_MESSAGES.DEPARTMENT_ALREADY_STATUS),
             { status: 400 }
         );
     }

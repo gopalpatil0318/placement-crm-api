@@ -13,7 +13,10 @@ const { query } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const {
     ERROR_MESSAGES,
+    STATUS,
 } = require('../../config/constants');
+
+const { RECIPIENT_TYPE } = STATUS;
 
 // ============================================================================
 // 1. GET MY NOTIFICATIONS — #168
@@ -23,12 +26,12 @@ async function getMyNotifications(studentId, collegeId, filters = {}) {
     const { page, limit, offset } = getPagination(filters);
 
     const conditions = [
-        `n.recipient_type = 'student'`,
-        'n.recipient_id = $1',
-        'n.college_id = $2',
+        `n.recipient_type = $1`,
+        'n.recipient_id = $2',
+        'n.college_id = $3',
     ];
-    const params = [studentId, collegeId];
-    let paramIndex = 3;
+    const params = [RECIPIENT_TYPE.STUDENT, studentId, collegeId];
+    let paramIndex = 4;
 
     // Filter: is_read (true/false)
     if (filters.is_read !== undefined && filters.is_read !== null) {
@@ -73,7 +76,7 @@ async function getMyNotifications(studentId, collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
 
     const notifications = notificationResult.rows.map(row => ({
         notification_id: row.notification_id,
@@ -98,15 +101,15 @@ async function getUnreadCount(studentId, collegeId) {
     const result = await query(
         `SELECT COUNT(*) AS unread_count
          FROM notifications
-         WHERE recipient_type = 'student'
-           AND recipient_id = $1
-           AND college_id = $2
+         WHERE recipient_type = $1
+           AND recipient_id = $2
+           AND college_id = $3
            AND is_read = false`,
-        [studentId, collegeId]
+        [RECIPIENT_TYPE.STUDENT, studentId, collegeId]
     );
 
     return {
-        unread_count: parseInt(result.rows[0].unread_count, 10),
+        unread_count: Number.parseInt(result.rows[0]?.unread_count ?? '0', 10),
     };
 }
 
@@ -121,11 +124,11 @@ async function markAsRead(notificationId, studentId, collegeId) {
          SET is_read = true,
              read_at = NOW()
          WHERE notification_id = $1
-           AND recipient_type = 'student'
-           AND recipient_id = $2
-           AND college_id = $3
+           AND recipient_type = $2
+           AND recipient_id = $3
+           AND college_id = $4
          RETURNING notification_id, title, notification_type, is_read, read_at`,
-        [notificationId, studentId, collegeId]
+        [notificationId, RECIPIENT_TYPE.STUDENT, studentId, collegeId]
     );
 
     if (!result.rows.length) {
@@ -147,11 +150,11 @@ async function markAllAsRead(studentId, collegeId) {
         `UPDATE notifications
          SET is_read = true,
              read_at = NOW()
-         WHERE recipient_type = 'student'
-           AND recipient_id = $1
-           AND college_id = $2
+         WHERE recipient_type = $1
+           AND recipient_id = $2
+           AND college_id = $3
            AND is_read = false`,
-        [studentId, collegeId]
+        [RECIPIENT_TYPE.STUDENT, studentId, collegeId]
     );
 
     return {

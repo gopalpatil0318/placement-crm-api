@@ -33,7 +33,7 @@ async function getMyRestrictions(req, res) {
         { restrictions, summary },
         total,
         { page, limit },
-        'Restrictions retrieved successfully'
+        SUCCESS_MESSAGES.MY_RESTRICTIONS_RETRIEVED
     );
 }
 

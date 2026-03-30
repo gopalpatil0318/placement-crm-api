@@ -31,6 +31,7 @@ const companyWiseSchema = Joi.object({
 // #108 — Year comparison (2-5 comma-separated years)
 const yearComparisonSchema = Joi.object({
     passout_years: Joi.string()
+        .trim()
         .required()
         .pattern(/^\d{4}(,\d{4}){1,4}$/)
         .messages({

@@ -16,6 +16,12 @@ const {
     STATUS,
 } = require('../../config/constants');
 
+// Explicit columns for RETURNING / SELECT (no wildcard)
+const POSITION_RETURNING_COLUMNS = [
+    'position_id', 'job_id', 'position_name', 'position_description',
+    'vacancies', 'position_status', 'created_at',
+].join(', ');
+
 // Updatable fields
 const FIELDS = ['position_name', 'position_description', 'vacancies'];
 
@@ -46,7 +52,9 @@ async function verifyJob(jobId, collegeId) {
 
 async function verifyPosition(positionId, collegeId) {
     const result = await query(
-        `SELECT p.*, j.job_title, j.job_status, j.college_id, c.company_name
+        `SELECT p.position_id, p.job_id, p.position_name, p.position_description,
+                p.vacancies, p.position_status, p.created_at,
+                j.job_title, j.job_status, j.college_id, c.company_name
          FROM job_positions p
          JOIN job_postings j ON p.job_id = j.job_id
          JOIN companies c ON j.company_id = c.company_id
@@ -56,7 +64,7 @@ async function verifyPosition(positionId, collegeId) {
     );
 
     if (!result.rows.length) {
-        throw Object.assign(new Error('Position not found'), { status: 404 });
+        throw Object.assign(new Error(ERROR_MESSAGES.POSITION_NOT_FOUND), { status: 404 });
     }
 
     return result.rows[0];
@@ -79,7 +87,7 @@ function formatPosition(record) {
         ...(record.job_title !== undefined && { job_title: record.job_title }),
         ...(record.company_name !== undefined && { company_name: record.company_name }),
         ...(record.applications_count !== undefined && {
-            applications_count: parseInt(record.applications_count, 10),
+            applications_count: Number.parseInt(record.applications_count, 10),
         }),
     };
 }
@@ -104,7 +112,7 @@ async function addPosition(jobId, collegeId, data) {
     // 2. Cannot add to cancelled jobs
     if (job.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot add positions to a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_ADD_POSITION_CANCELLED_JOB),
             { status: 400 }
         );
     }
@@ -119,7 +127,7 @@ async function addPosition(jobId, collegeId, data) {
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
-            new Error(`Position "${data.position_name}" already exists for this job`),
+            new Error(ERROR_MESSAGES.POSITION_DUPLICATE_NAME),
             { status: 409 }
         );
     }
@@ -128,7 +136,7 @@ async function addPosition(jobId, collegeId, data) {
     const result = await query(
         `INSERT INTO job_positions (job_id, position_name, position_description, vacancies)
          VALUES ($1, $2, $3, $4)
-         RETURNING *`,
+         RETURNING ${POSITION_RETURNING_COLUMNS}`,
         [jobId, data.position_name, data.position_description ?? null, data.vacancies ?? null]
     );
 
@@ -165,7 +173,7 @@ async function updatePosition(positionId, collegeId, data) {
     // 2. Cannot edit in cancelled jobs
     if (existing.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot edit positions in a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_EDIT_POSITION_CANCELLED_JOB),
             { status: 400 }
         );
     }
@@ -181,7 +189,7 @@ async function updatePosition(positionId, collegeId, data) {
 
         if (duplicateCheck.rows.length) {
             throw Object.assign(
-                new Error(`Position "${data.position_name}" already exists for this job`),
+                new Error(ERROR_MESSAGES.POSITION_DUPLICATE_NAME),
                 { status: 409 }
             );
         }
@@ -191,7 +199,7 @@ async function updatePosition(positionId, collegeId, data) {
     const fieldsToUpdate = FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields provided for update'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
     const setClauses = fieldsToUpdate
@@ -203,7 +211,7 @@ async function updatePosition(positionId, collegeId, data) {
         `UPDATE job_positions
          SET ${setClauses}
          WHERE position_id = $1
-         RETURNING *`,
+         RETURNING ${POSITION_RETURNING_COLUMNS}`,
         values
     );
 
@@ -241,7 +249,7 @@ async function updatePositionStatus(positionId, collegeId, newStatus) {
     // 2. Cannot modify in cancelled jobs
     if (existing.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot modify positions in a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_MODIFY_POSITION_CANCELLED_JOB),
             { status: 400 }
         );
     }
@@ -249,7 +257,7 @@ async function updatePositionStatus(positionId, collegeId, newStatus) {
     // 3. Same status?
     if (existing.position_status === newStatus) {
         throw Object.assign(
-            new Error(`Position is already "${newStatus}"`),
+            new Error(ERROR_MESSAGES.POSITION_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -259,7 +267,7 @@ async function updatePositionStatus(positionId, collegeId, newStatus) {
         `UPDATE job_positions
          SET position_status = $1
          WHERE position_id = $2
-         RETURNING *`,
+         RETURNING ${POSITION_RETURNING_COLUMNS}`,
         [newStatus, positionId]
     );
 

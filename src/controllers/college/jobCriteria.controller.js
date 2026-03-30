@@ -12,6 +12,7 @@ const criteriaService = require('../../services/college/jobCriteria.service');
 const { sendSuccess, sendCreated, sendError } = require('../../utils/responseHelper');
 const {
     ERROR_MESSAGES,
+    SUCCESS_MESSAGES,
     HTTP_STATUS,
 } = require('../../config/constants');
 
@@ -27,7 +28,7 @@ async function setCriteria(req, res) {
             req.validated
         );
 
-        return sendCreated(res, result, 'Eligibility criteria set successfully');
+        return sendCreated(res, result, SUCCESS_MESSAGES.CRITERIA_SET);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
@@ -47,7 +48,7 @@ async function updateCriteria(req, res) {
             req.validated
         );
 
-        return sendSuccess(res, result, 'Eligibility criteria updated successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.CRITERIA_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -80,7 +81,7 @@ async function getEligibleStudents(req, res) {
                 total: result.eligible_count,
                 totalPages: Math.ceil(result.eligible_count / result.limit),
             },
-        }, 'Eligible students retrieved successfully');
+        }, SUCCESS_MESSAGES.ELIGIBLE_STUDENTS_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);

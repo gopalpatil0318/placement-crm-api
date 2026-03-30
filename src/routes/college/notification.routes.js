@@ -27,8 +27,8 @@ const {
     listSentNotificationsSchema,
 } = require('../../validators/college/notification.validator');
 
-// All notification routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+// All notification routes require COLLEGEADMIN or TPO + rate limiting
+router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
 
 // ============================================================================
 // NOTIFICATION ROUTES
@@ -37,7 +37,6 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 // Send notification to specific recipients
 router.post(
     '/send_notification',
-    apiLimiter,
     validate(sendNotificationSchema),
     asyncHandler(controller.sendNotification)
 );
@@ -45,7 +44,6 @@ router.post(
 // Send bulk notification with filters
 router.post(
     '/send_bulk_notification',
-    apiLimiter,
     validate(sendBulkNotificationSchema),
     asyncHandler(controller.sendBulkNotification)
 );

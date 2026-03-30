@@ -26,6 +26,12 @@ const {
 } = require('../../validators/student/jobOverride.validator');
 
 // ============================================================================
+// MIDDLEWARE
+// ============================================================================
+
+router.use(apiLimiter);
+
+// ============================================================================
 // ROUTES
 // ============================================================================
 
@@ -41,7 +47,6 @@ router.get(
 router.post(
     '/request_job_override/:jobId',
     authenticate,
-    apiLimiter,
     validate(jobIdParamSchema, 'params'),
     validate(requestOverrideSchema),
     asyncHandler(controller.requestOverride)

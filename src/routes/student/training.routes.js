@@ -33,6 +33,8 @@ const {
 // TRAINING ROUTES
 // ============================================================================
 
+router.use(apiLimiter);
+
 // List available training programs
 router.get(
     '/get_available_training',
@@ -45,7 +47,6 @@ router.get(
 router.post(
     '/enroll_in_training/:programId',
     authenticate,
-    apiLimiter,
     validate(programIdParamSchema, 'params'),
     asyncHandler(controller.enrollInTraining)
 );
@@ -62,7 +63,6 @@ router.get(
 router.post(
     '/submit_training_feedback/:enrollmentId',
     authenticate,
-    apiLimiter,
     validate(enrollmentIdParamSchema, 'params'),
     validate(submitFeedbackSchema),
     asyncHandler(controller.submitTrainingFeedback)

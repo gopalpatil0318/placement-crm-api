@@ -8,12 +8,16 @@
  * ============================================================================
  */
 
+/**
+ * @type {{
+ *   checkJobEligibilityForOverride: (...args: any[]) => Promise<any>,
+ *   requestOverride: (...args: any[]) => Promise<any>,
+ *   getMyOverrideRequests: (...args: any[]) => Promise<any>
+ * }}
+ */
 const service = require('../../services/student/jobOverride.service');
-const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
-const {
-    ERROR_MESSAGES,
-    HTTP_STATUS,
-} = require('../../config/constants');
+const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
+const { SUCCESS_MESSAGES } = require('../../config/constants');
 
 // ============================================================================
 // 1. CHECK OVERRIDE ELIGIBILITY
@@ -26,7 +30,7 @@ async function checkOverrideEligibility(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Override eligibility check completed');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.OVERRIDE_ELIGIBILITY_CHECKED);
 }
 
 // ============================================================================
@@ -34,21 +38,14 @@ async function checkOverrideEligibility(req, res) {
 // ============================================================================
 
 async function requestOverride(req, res) {
-    try {
-        const result = await service.requestOverride(
-            req.params.jobId,
-            req.user.id,
-            req.user.college_id,
-            req.validated
-        );
+    const result = await service.requestOverride(
+        req.params.jobId,
+        req.user.id,
+        req.user.college_id,
+        req.validated
+    );
 
-        return sendCreated(res, result, 'Eligibility override request submitted successfully');
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendCreated(res, result, SUCCESS_MESSAGES.OVERRIDE_REQUESTED);
 }
 
 // ============================================================================
@@ -67,7 +64,7 @@ async function getMyOverrideRequests(req, res) {
         result.requests,
         result.total,
         { page: result.page, limit: result.limit },
-        'Override requests retrieved successfully'
+        SUCCESS_MESSAGES.MY_OVERRIDES_RETRIEVED
     );
 }
 

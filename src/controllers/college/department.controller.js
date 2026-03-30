@@ -37,7 +37,7 @@ async function getAllDepartments(req, res) {
         req.validated
     );
 
-    return sendPaginated(res, departments, total, { page, limit }, 'Departments retrieved successfully');
+    return sendPaginated(res, departments, total, { page, limit }, SUCCESS_MESSAGES.DEPARTMENTS_RETRIEVED);
 }
 
 // ============================================================================
@@ -50,7 +50,7 @@ async function getDepartment(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Department retrieved successfully');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.DEPARTMENT_RETRIEVED);
 }
 
 // ============================================================================
@@ -81,8 +81,8 @@ async function toggleDepartmentStatus(req, res) {
     );
 
     const message = is_active
-        ? 'Department activated successfully'
-        : 'Department deactivated successfully';
+        ? SUCCESS_MESSAGES.DEPARTMENT_ACTIVATED
+        : SUCCESS_MESSAGES.DEPARTMENT_DEACTIVATED;
 
     return sendSuccess(res, result, message);
 }

@@ -220,7 +220,7 @@ async function getAllColleges({ page, limit, offset, status, type, search }) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return { colleges: listResult.rows, total };
 }

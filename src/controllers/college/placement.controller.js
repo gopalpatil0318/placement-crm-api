@@ -12,10 +12,8 @@
  */
 
 const placementService = require('../../services/college/placement.service');
-const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
+const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
 const {
-    ERROR_MESSAGES,
-    HTTP_STATUS,
     SUCCESS_MESSAGES,
 } = require('../../config/constants');
 
@@ -24,20 +22,13 @@ const {
 // ============================================================================
 
 async function createPlacement(req, res) {
-    try {
-        const result = await placementService.createPlacement(
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
+    const result = await placementService.createPlacement(
+        req.user.college_id,
+        req.user.id,
+        req.validated
+    );
 
-        return sendCreated(res, result, SUCCESS_MESSAGES.PLACEMENT_CREATED);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendCreated(res, result, SUCCESS_MESSAGES.PLACEMENT_CREATED);
 }
 
 // ============================================================================
@@ -45,23 +36,19 @@ async function createPlacement(req, res) {
 // ============================================================================
 
 async function getAllPlacements(req, res) {
-    try {
-        const { placements, total, page, limit, stats } =
-            await placementService.getAllPlacements(
-                req.user.college_id,
-                req.validated
-            );
-
-        return sendPaginated(
-            res,
-            { placements, stats },
-            total,
-            { page, limit },
-            'Placements retrieved successfully'
+    const { placements, total, page, limit, stats } =
+        await placementService.getAllPlacements(
+            req.user.college_id,
+            req.validated
         );
-    } catch (err) {
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+
+    return sendPaginated(
+        res,
+        { placements, stats },
+        total,
+        { page, limit },
+        SUCCESS_MESSAGES.PLACEMENTS_RETRIEVED
+    );
 }
 
 // ============================================================================
@@ -69,17 +56,12 @@ async function getAllPlacements(req, res) {
 // ============================================================================
 
 async function getPlacement(req, res) {
-    try {
-        const result = await placementService.getPlacement(
-            req.params.placementId,
-            req.user.college_id
-        );
+    const result = await placementService.getPlacement(
+        req.params.placementId,
+        req.user.college_id
+    );
 
-        return sendSuccess(res, result, 'Placement details retrieved successfully');
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.PLACEMENT_RETRIEVED);
 }
 
 // ============================================================================
@@ -87,19 +69,13 @@ async function getPlacement(req, res) {
 // ============================================================================
 
 async function updatePlacement(req, res) {
-    try {
-        const result = await placementService.updatePlacement(
-            req.params.placementId,
-            req.user.college_id,
-            req.validated
-        );
+    const result = await placementService.updatePlacement(
+        req.params.placementId,
+        req.user.college_id,
+        req.validated
+    );
 
-        return sendSuccess(res, result, SUCCESS_MESSAGES.PLACEMENT_UPDATED);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.PLACEMENT_UPDATED);
 }
 
 // ============================================================================
@@ -107,27 +83,21 @@ async function updatePlacement(req, res) {
 // ============================================================================
 
 async function verifyOfferLetter(req, res) {
-    try {
-        const { offer_letter_verified, remarks } = req.validated;
+    const { offer_letter_verified, remarks } = req.validated;
 
-        const result = await placementService.verifyOfferLetter(
-            req.params.placementId,
-            req.user.college_id,
-            req.user.id,
-            offer_letter_verified,
-            remarks ?? null
-        );
+    const result = await placementService.verifyOfferLetter(
+        req.params.placementId,
+        req.user.college_id,
+        req.user.id,
+        offer_letter_verified,
+        remarks ?? null
+    );
 
-        const message = offer_letter_verified
-            ? 'Offer letter verified successfully'
-            : 'Offer letter verification removed';
+    const message = offer_letter_verified
+        ? SUCCESS_MESSAGES.OFFER_LETTER_VERIFIED
+        : SUCCESS_MESSAGES.OFFER_LETTER_UNVERIFIED;
 
-        return sendSuccess(res, result, message);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, message);
 }
 
 // ============================================================================
@@ -135,34 +105,28 @@ async function verifyOfferLetter(req, res) {
 // ============================================================================
 
 async function updatePlacementStatus(req, res) {
-    try {
-        const { placement_status, acceptance_status, remarks } = req.validated;
+    const { placement_status, acceptance_status, remarks } = req.validated;
 
-        const result = await placementService.updatePlacementStatus(
-            req.params.placementId,
-            req.user.college_id,
-            placement_status,
-            acceptance_status ?? null,
-            remarks ?? null
-        );
+    const result = await placementService.updatePlacementStatus(
+        req.params.placementId,
+        req.user.college_id,
+        placement_status,
+        acceptance_status ?? null,
+        remarks ?? null
+    );
 
-        const statusMessages = {
-            accepted: 'Placement accepted',
-            rejected: 'Placement rejected',
-            joined: 'Student marked as joined',
-            cancelled: 'Placement cancelled',
-        };
+    const STATUS_SUCCESS_MAP = {
+        accepted: SUCCESS_MESSAGES.PLACEMENT_ACCEPTED,
+        rejected: SUCCESS_MESSAGES.PLACEMENT_REJECTED,
+        joined: SUCCESS_MESSAGES.PLACEMENT_JOINED,
+        cancelled: SUCCESS_MESSAGES.PLACEMENT_CANCELLED,
+    };
 
-        return sendSuccess(
-            res,
-            result,
-            statusMessages[placement_status] ?? SUCCESS_MESSAGES.PLACEMENT_UPDATED
-        );
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(
+        res,
+        result,
+        STATUS_SUCCESS_MAP[placement_status] ?? SUCCESS_MESSAGES.PLACEMENT_UPDATED
+    );
 }
 
 // ============================================================================

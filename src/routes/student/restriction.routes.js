@@ -33,6 +33,7 @@ const {
 router.get(
     '/get_my_restrictions',
     authenticate,
+    apiLimiter,
     validate(listMyRestrictionsSchema, 'query'),
     asyncHandler(controller.getMyRestrictions)
 );

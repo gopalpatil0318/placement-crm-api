@@ -35,9 +35,19 @@ const {
     applicationIdParamSchema,
 } = require('../../validators/student/job.validator');
 
+// Rate limiting applied at router level (all endpoints)
+router.use(apiLimiter);
+
 // ============================================================================
 // JOB BROWSING ROUTES
 // ============================================================================
+
+// Get distinct passout years with published jobs (for year dropdown)
+router.get(
+    '/get_available_job_years',
+    authenticate,
+    asyncHandler(controller.getAvailableJobYears)
+);
 
 // List available jobs (published, within deadline, matching passout year)
 router.get(
@@ -71,7 +81,6 @@ router.get(
 router.post(
     '/apply_for_job/:jobId',
     authenticate,
-    apiLimiter,
     validate(jobIdParamSchema, 'params'),
     validate(applyForJobSchema),
     asyncHandler(controller.applyForJob)
@@ -81,7 +90,6 @@ router.post(
 router.post(
     '/deny_job/:jobId',
     authenticate,
-    apiLimiter,
     validate(jobIdParamSchema, 'params'),
     validate(denyJobSchema),
     asyncHandler(controller.denyJob)
@@ -107,7 +115,6 @@ router.get(
 router.patch(
     '/withdraw_application/:applicationId',
     authenticate,
-    apiLimiter,
     validate(applicationIdParamSchema, 'params'),
     validate(withdrawApplicationSchema),
     asyncHandler(controller.withdrawApplication)

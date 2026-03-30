@@ -10,6 +10,21 @@ const { query } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const { ERROR_MESSAGES } = require('../../config/constants');
 
+// ── Column Constants ───────────────────────────────────────────────────────
+const FEEDBACK_SELECT_COLUMNS = `
+  pf.feedback_id, pf.job_id, pf.company_id, pf.student_id,
+  pf.rating, pf.feedback_text, pf.is_anonymous, pf.is_approved,
+  pf.created_at, pf.updated_at`;
+
+const FEEDBACK_RETURNING_COLUMNS = 'feedback_id, is_approved, updated_at';
+
+const QUESTION_SELECT_COLUMNS = `
+  iq.question_id, iq.company_id, iq.job_id, iq.student_id,
+  iq.question_description, iq.topic, iq.sample_answer,
+  iq.is_approved, iq.created_at, iq.updated_at`;
+
+const QUESTION_RETURNING_COLUMNS = 'question_id, is_approved, updated_at';
+
 // ── #99  GET /get_all_feedback ─────────────────────────────────────────────
 async function getAllFeedback(collegeId, filters) {
   const { page, limit, offset } = getPagination(filters);
@@ -38,9 +53,14 @@ async function getAllFeedback(collegeId, filters) {
     params.push(filters.rating);
   }
 
-  if (filters.search) {
+  if (filters.search?.trim()) {
     conditions.push(`pf.feedback_text ILIKE $${paramIndex++}`);
-    params.push(`%${filters.search}%`);
+    params.push(`%${filters.search.trim()}%`);
+  }
+
+  if (filters.passout_year) {
+    conditions.push(`s.student_passout_year = $${paramIndex++}`);
+    params.push(filters.passout_year);
   }
 
   const whereClause = conditions.join(' AND ');
@@ -52,14 +72,13 @@ async function getAllFeedback(collegeId, filters) {
   const dataParams = [...params, limit, offset];
   const [countResult, dataResult] = await Promise.all([
     query(
-      `SELECT COUNT(*) FROM placement_feedback pf WHERE ${whereClause}`,
+      `SELECT COUNT(*) AS total FROM placement_feedback pf
+       JOIN students s ON pf.student_id = s.student_id
+       WHERE ${whereClause}`,
       params
     ),
     query(
-      `SELECT
-         pf.feedback_id, pf.job_id, pf.company_id, pf.student_id,
-         pf.rating, pf.feedback_text, pf.is_anonymous, pf.is_approved,
-         pf.created_at, pf.updated_at,
+      `SELECT ${FEEDBACK_SELECT_COLUMNS},
          co.company_name,
          jp.job_title,
          CASE WHEN pf.is_anonymous = true THEN 'Anonymous'
@@ -77,7 +96,7 @@ async function getAllFeedback(collegeId, filters) {
       dataParams
     ),
   ]);
-  const total = parseInt(countResult.rows[0].count, 10);
+  const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
 
   return { feedback: dataResult.rows, total, page, limit };
 }
@@ -88,7 +107,8 @@ async function approveFeedback(collegeId, feedbackId, isApproved) {
     `UPDATE placement_feedback
      SET is_approved = $1, updated_at = NOW()
      WHERE feedback_id = $2 AND college_id = $3
-     RETURNING feedback_id, is_approved, updated_at`,
+     RETURNING ${FEEDBACK_RETURNING_COLUMNS}`,
+
     [isApproved, feedbackId, collegeId]
   );
 
@@ -127,9 +147,9 @@ async function getAllInterviewQuestions(collegeId, filters) {
     params.push(`%${filters.topic}%`);
   }
 
-  if (filters.search) {
+  if (filters.search?.trim()) {
     conditions.push(`(iq.question_description ILIKE $${paramIndex} OR iq.topic ILIKE $${paramIndex})`);
-    params.push(`%${filters.search}%`);
+    params.push(`%${filters.search.trim()}%`);
     paramIndex++;
   }
 
@@ -142,14 +162,11 @@ async function getAllInterviewQuestions(collegeId, filters) {
   const dataParams = [...params, limit, offset];
   const [countResult, dataResult] = await Promise.all([
     query(
-      `SELECT COUNT(*) FROM interview_questions iq WHERE ${whereClause}`,
+      `SELECT COUNT(*) AS total FROM interview_questions iq WHERE ${whereClause}`,
       params
     ),
     query(
-      `SELECT
-         iq.question_id, iq.company_id, iq.job_id, iq.student_id,
-         iq.question_description, iq.topic, iq.sample_answer,
-         iq.is_approved, iq.created_at, iq.updated_at,
+      `SELECT ${QUESTION_SELECT_COLUMNS},
          co.company_name,
          jp.job_title,
          s.first_name || ' ' || s.last_name AS student_name,
@@ -165,7 +182,7 @@ async function getAllInterviewQuestions(collegeId, filters) {
       dataParams
     ),
   ]);
-  const total = parseInt(countResult.rows[0].count, 10);
+  const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
 
   return { questions: dataResult.rows, total, page, limit };
 }
@@ -176,7 +193,8 @@ async function approveInterviewQuestion(collegeId, questionId, isApproved) {
     `UPDATE interview_questions
      SET is_approved = $1, updated_at = NOW()
      WHERE question_id = $2 AND college_id = $3
-     RETURNING question_id, is_approved, updated_at`,
+     RETURNING ${QUESTION_RETURNING_COLUMNS}`,
+
     [isApproved, questionId, collegeId]
   );
 

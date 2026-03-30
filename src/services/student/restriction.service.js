@@ -7,7 +7,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -16,14 +16,28 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
+// COLUMN CONSTANTS — explicit columns, no SELECT * or RETURNING *
+// ============================================================================
+
+const VERIFY_SELECT_COLUMNS = `
+    sr.restriction_id, sr.restriction_type, sr.reason, sr.details,
+    sr.applied_on, sr.valid_until, sr.is_active,
+    sr.appeal_submitted, sr.appeal_notes, sr.appeal_resolved_at,
+    sr.created_at, sr.updated_at,
+    u.user_name AS restricted_by_name,
+    ru.user_name AS resolved_by_name`;
+
+const APPEAL_RETURNING_COLUMNS = `restriction_id, restriction_type, reason,
+    is_active, appeal_submitted, appeal_notes,
+    applied_on, valid_until, updated_at`;
+
+// ============================================================================
 // HELPER — Verify restriction belongs to the student
 // ============================================================================
 
 async function verifyStudentRestriction(restrictionId, studentId, collegeId) {
     const result = await query(
-        `SELECT sr.*,
-                u.user_name AS restricted_by_name,
-                ru.user_name AS resolved_by_name
+        `SELECT ${VERIFY_SELECT_COLUMNS}
          FROM student_restrictions sr
          LEFT JOIN users u ON sr.restricted_by = u.user_id
          LEFT JOIN users ru ON sr.resolved_by = ru.user_id
@@ -53,7 +67,7 @@ async function getMyRestrictions(studentId, collegeId, filters = {}) {
 
     if (filters.is_active !== undefined) {
         conditions.push(`sr.is_active = $${paramIndex}`);
-        params.push(filters.is_active === 'true');
+        params.push(filters.is_active);
         paramIndex++;
     }
 
@@ -113,29 +127,19 @@ async function getMyRestrictions(studentId, collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
     const stats = summaryResult.rows[0];
 
     const restrictions = restrictionResult.rows.map(row => ({
-        restriction_id: row.restriction_id,
-        restriction_type: row.restriction_type,
-        reason: row.reason,
+        ...row,
         details: row.details ?? null,
-        applied_on: row.applied_on,
         valid_until: row.valid_until ?? null,
-        is_active: row.is_active,
         restricted_by_name: row.restricted_by_name ?? null,
-        // Appeal info
-        appeal_submitted: row.appeal_submitted,
         appeal_notes: row.appeal_notes ?? null,
         appeal_resolved_at: row.appeal_resolved_at ?? null,
         resolved_by_name: row.resolved_by_name ?? null,
-        // Computed
         is_expired: row.valid_until ? new Date(row.valid_until) < new Date() : false,
         can_appeal: row.is_active && !row.appeal_submitted,
-        // Timestamps
-        created_at: row.created_at,
-        updated_at: row.updated_at,
     }));
 
     return {
@@ -144,12 +148,12 @@ async function getMyRestrictions(studentId, collegeId, filters = {}) {
         page,
         limit,
         summary: {
-            total_restrictions: parseInt(stats.total_restrictions, 10),
-            active_count: parseInt(stats.active_count, 10),
-            resolved_count: parseInt(stats.resolved_count, 10),
-            appeals_submitted: parseInt(stats.appeals_submitted, 10),
-            appeals_resolved: parseInt(stats.appeals_resolved, 10),
-            appeals_pending: parseInt(stats.appeals_pending, 10),
+            total_restrictions: Number.parseInt(stats.total_restrictions, 10),
+            active_count: Number.parseInt(stats.active_count, 10),
+            resolved_count: Number.parseInt(stats.resolved_count, 10),
+            appeals_submitted: Number.parseInt(stats.appeals_submitted, 10),
+            appeals_resolved: Number.parseInt(stats.appeals_resolved, 10),
+            appeals_pending: Number.parseInt(stats.appeals_pending, 10),
         },
     };
 }
@@ -159,53 +163,74 @@ async function getMyRestrictions(studentId, collegeId, filters = {}) {
 // ============================================================================
 
 async function appealRestriction(restrictionId, studentId, collegeId, appealNotes) {
-    const restriction = await verifyStudentRestriction(restrictionId, studentId, collegeId);
+    const client = await getClient();
 
-    // Must be active
-    if (!restriction.is_active) {
-        throw Object.assign(
-            new Error('Cannot appeal a restriction that is no longer active'),
-            { status: 400 }
+    try {
+        await client.query('BEGIN');
+
+        // Lock the restriction row to prevent concurrent appeal submissions
+        const lockResult = await client.query(
+            `SELECT ${VERIFY_SELECT_COLUMNS}
+             FROM student_restrictions sr
+             LEFT JOIN users u ON sr.restricted_by = u.user_id
+             LEFT JOIN users ru ON sr.resolved_by = ru.user_id
+             WHERE sr.restriction_id = $1 AND sr.student_id = $2 AND sr.college_id = $3
+             FOR UPDATE OF sr`,
+            [restrictionId, studentId, collegeId]
         );
-    }
 
-    // Cannot appeal twice
-    if (restriction.appeal_submitted) {
-        throw Object.assign(
-            new Error('An appeal has already been submitted for this restriction'),
-            { status: 409 }
+        if (!lockResult.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.RESTRICTION_NOT_FOUND), { status: 404 });
+        }
+
+        const restriction = lockResult.rows[0];
+
+        // Must be active
+        if (!restriction.is_active) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.APPEAL_INACTIVE_RESTRICTION),
+                { status: 400 }
+            );
+        }
+
+        // Cannot appeal twice
+        if (restriction.appeal_submitted) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.APPEAL_ALREADY_SUBMITTED),
+                { status: 409 }
+            );
+        }
+
+        const result = await client.query(
+            `UPDATE student_restrictions
+             SET appeal_submitted = true,
+                 appeal_notes = $1,
+                 updated_at = NOW()
+             WHERE restriction_id = $2
+             RETURNING ${APPEAL_RETURNING_COLUMNS}`,
+            [appealNotes, restrictionId]
         );
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Student submitted restriction appeal`, {
+            restrictionId,
+            studentId,
+            restrictionType: restriction.restriction_type,
+            collegeId,
+        });
+
+        return {
+            ...result.rows[0],
+            valid_until: result.rows[0].valid_until ?? null,
+            restricted_by_name: restriction.restricted_by_name ?? null,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
     }
-
-    const result = await query(
-        `UPDATE student_restrictions
-         SET appeal_submitted = true,
-             appeal_notes = $1,
-             updated_at = NOW()
-         WHERE restriction_id = $2
-         RETURNING *`,
-        [appealNotes, restrictionId]
-    );
-
-    logger.info(`${LOG.AUTH} Student submitted restriction appeal`, {
-        restrictionId,
-        studentId,
-        restrictionType: restriction.restriction_type,
-        collegeId,
-    });
-
-    return {
-        restriction_id: result.rows[0].restriction_id,
-        restriction_type: result.rows[0].restriction_type,
-        reason: result.rows[0].reason,
-        is_active: result.rows[0].is_active,
-        appeal_submitted: result.rows[0].appeal_submitted,
-        appeal_notes: result.rows[0].appeal_notes,
-        applied_on: result.rows[0].applied_on,
-        valid_until: result.rows[0].valid_until ?? null,
-        restricted_by_name: restriction.restricted_by_name ?? null,
-        updated_at: result.rows[0].updated_at,
-    };
 }
 
 // ============================================================================

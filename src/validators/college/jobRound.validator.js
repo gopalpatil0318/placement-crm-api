@@ -9,9 +9,9 @@
  */
 
 const Joi = require('joi');
+const { STATUS, ROUND_TYPES } = require('../../config/constants');
 
-const ROUND_TYPES = ['aptitude', 'technical', 'hr', 'group_discussion', 'coding', 'other'];
-const ROUND_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'];
+const ROUND_STATUSES = Object.values(STATUS.ROUND);
 
 // ============================================================================
 // ADD ROUND

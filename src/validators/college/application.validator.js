@@ -34,6 +34,7 @@ const listApplicationsSchema = Joi.object({
         }),
 
     search: Joi.string()
+        .trim()
         .max(200)
         .optional()
         .allow('')

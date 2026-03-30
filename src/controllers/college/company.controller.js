@@ -47,7 +47,7 @@ async function getAllCompanies(req, res) {
             req.validated
         );
 
-        return sendPaginated(res, companies, total, { page, limit }, 'Companies retrieved successfully');
+        return sendPaginated(res, companies, total, { page, limit }, SUCCESS_MESSAGES.COMPANIES_RETRIEVED);
     } catch (err) {
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
     }
@@ -64,7 +64,7 @@ async function getCompany(req, res) {
             req.user.college_id
         );
 
-        return sendSuccess(res, result, 'Company retrieved successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.COMPANY_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -107,8 +107,8 @@ async function toggleCompanyStatus(req, res) {
         );
 
         const message = company_status === 'active'
-            ? 'Company activated successfully'
-            : 'Company deactivated successfully';
+            ? SUCCESS_MESSAGES.COMPANY_ACTIVATED
+            : SUCCESS_MESSAGES.COMPANY_DEACTIVATED;
 
         return sendSuccess(res, result, message);
     } catch (err) {

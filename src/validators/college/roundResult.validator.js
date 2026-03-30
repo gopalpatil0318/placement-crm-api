@@ -10,8 +10,9 @@
  */
 
 const Joi = require('joi');
+const { STATUS } = require('../../config/constants');
 
-const RESULT_STATUSES = ['pending', 'passed', 'failed', 'on_hold', 'absent'];
+const RESULT_STATUSES = Object.values(STATUS.ROUND_RESULT);
 
 // ============================================================================
 // ADD SINGLE ROUND RESULT

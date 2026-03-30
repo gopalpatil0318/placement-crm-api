@@ -33,6 +33,7 @@ const {
 
 // All routes require COLLEGEADMIN, TPO, or TPC
 router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO, ROLES.TPC));
+router.use(apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -56,7 +57,6 @@ router.get(
 // Review a single override request (approve or reject)
 router.patch(
     '/review_override_request/:overrideId',
-    apiLimiter,
     validate(overrideIdParamSchema, 'params'),
     validate(reviewOverrideSchema),
     asyncHandler(controller.reviewOverrideRequest)
@@ -65,7 +65,6 @@ router.patch(
 // Bulk review override requests
 router.post(
     '/bulk_review_overrides',
-    apiLimiter,
     validate(bulkReviewOverrideSchema),
     asyncHandler(controller.bulkReviewOverrides)
 );

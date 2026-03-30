@@ -9,8 +9,9 @@
  */
 
 const Joi = require('joi');
+const { STATUS } = require('../../config/constants');
 
-const POSITION_STATUSES = ['active', 'inactive', 'filled'];
+const POSITION_STATUSES = Object.values(STATUS.POSITION);
 
 // ============================================================================
 // ADD POSITION

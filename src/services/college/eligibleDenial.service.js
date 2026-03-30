@@ -15,7 +15,19 @@ const {
     LOG,
     ERROR_MESSAGES,
     STATUS,
+    NOTIFICATION_TYPE,
+    RECIPIENT_TYPE,
 } = require('../../config/constants');
+
+// Explicit column list for job_eligibility_criteria (no SELECT *)
+const ELIGIBILITY_CRITERIA_COLUMNS = [
+    'criteria_id', 'job_id',
+    'min_overall_cgpa', 'max_live_kts',
+    'min_tenth_percentage', 'min_twelfth_percentage', 'min_diploma_percentage',
+    'allowed_genders', 'allowed_departments', 'allowed_gap_statuses',
+    'passout_years', 'min_existing_package', 'max_existing_package',
+    'exclude_already_placed',
+].join(', ');
 
 // ============================================================================
 // HELPER — Verify job exists and belongs to college (returns full job info)
@@ -56,7 +68,7 @@ async function buildEligibilityConditions(jobId, collegeId, passoutYears) {
 
     // Fetch criteria for this job
     const criteriaResult = await query(
-        `SELECT * FROM job_eligibility_criteria
+        `SELECT ${ELIGIBILITY_CRITERIA_COLUMNS} FROM job_eligibility_criteria
          WHERE job_id = $1 LIMIT 1`,
         [jobId]
     );
@@ -213,7 +225,7 @@ async function getEligibleNotApplied(jobId, collegeId, filters = {}) {
     paramIndex++;
 
     // Additional filters
-    if (filters.search && filters.search.trim()) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(CONCAT(s.first_name, ' ', COALESCE(s.middle_name, ''), ' ', s.last_name) ILIKE $${paramIndex}
               OR s.student_email ILIKE $${paramIndex})`
@@ -222,7 +234,7 @@ async function getEligibleNotApplied(jobId, collegeId, filters = {}) {
         paramIndex++;
     }
 
-    if (filters.dept_name && filters.dept_name.trim()) {
+    if (filters.dept_name?.trim()) {
         conditions.push(`d.dept_name ILIKE $${paramIndex}`);
         params.push(`%${filters.dept_name.trim()}%`);
         paramIndex++;
@@ -276,8 +288,8 @@ async function getEligibleNotApplied(jobId, collegeId, filters = {}) {
             [...params, limit, offset]
         ),
     ]);
-    const eligibleNotAppliedCount = parseInt(countResult.rows[0].total, 10);
-    const totalApplied = parseInt(appliedCountResult.rows[0].total, 10);
+    const eligibleNotAppliedCount = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
+    const totalApplied = Number.parseInt(appliedCountResult.rows[0]?.total ?? '0', 10);
 
     return {
         job: {
@@ -419,33 +431,33 @@ async function notifyEligibleStudents(jobId, collegeId, userId, data) {
         const existingResult = await client.query(
             `SELECT COUNT(*) AS cnt FROM notifications
              WHERE college_id = $1
-               AND recipient_type = 'student'
-               AND recipient_id = ANY($2)
+               AND recipient_type = $2
+               AND recipient_id = ANY($3)
                AND related_entity_type = 'job'
-               AND related_entity_id = $3
-               AND notification_type = 'deadline_reminder'`,
-            [collegeId, targetStudentIds, jobId]
+               AND related_entity_id = $4
+               AND notification_type = $5`,
+            [collegeId, RECIPIENT_TYPE.STUDENT, targetStudentIds, jobId, NOTIFICATION_TYPE.DEADLINE_REMINDER]
         );
-        const alreadyNotified = parseInt(existingResult.rows[0].cnt, 10);
+        const alreadyNotified = Number.parseInt(existingResult.rows[0]?.cnt ?? '0', 10);
 
         // Batch INSERT using UNNEST + WHERE NOT EXISTS (avoids N+1 loop)
         const insertResult = await client.query(
             `INSERT INTO notifications
                 (college_id, recipient_type, recipient_id, title, body,
                  notification_type, related_entity_type, related_entity_id)
-             SELECT $1, 'student', sid, $2, $3,
-                    'deadline_reminder', 'job', $4
+             SELECT $1, $6, sid, $2, $3,
+                    $7, 'job', $4
              FROM UNNEST($5::uuid[]) AS sid
              WHERE NOT EXISTS (
                  SELECT 1 FROM notifications n
                  WHERE n.college_id = $1
-                   AND n.recipient_type = 'student'
+                   AND n.recipient_type = $6
                    AND n.recipient_id = sid
                    AND n.related_entity_type = 'job'
                    AND n.related_entity_id = $4
-                   AND n.notification_type = 'deadline_reminder'
+                   AND n.notification_type = $7
              )`,
-            [collegeId, title.trim(), body.trim(), jobId, targetStudentIds]
+            [collegeId, title.trim(), body.trim(), jobId, targetStudentIds, RECIPIENT_TYPE.STUDENT, NOTIFICATION_TYPE.DEADLINE_REMINDER]
         );
 
         notifiedCount = insertResult.rowCount;
@@ -504,7 +516,7 @@ async function getJobDenials(jobId, collegeId, filters = {}) {
     const params = [jobId, collegeId];
     let paramIndex = 3;
 
-    if (filters.search && filters.search.trim()) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(CONCAT(s.first_name, ' ', COALESCE(s.middle_name, ''), ' ', s.last_name) ILIKE $${paramIndex}
               OR s.student_email ILIKE $${paramIndex}
@@ -549,7 +561,7 @@ async function getJobDenials(jobId, collegeId, filters = {}) {
             [...params, limit, offset]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
 
     return {
         job: {

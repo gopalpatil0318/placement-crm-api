@@ -12,13 +12,9 @@
  */
 
 const Joi = require('joi');
-const { STATUS } = require('../../config/constants');
+const { STATUS, TRAINING_PROGRAM_TYPES } = require('../../config/constants');
 
-// Valid program types (matches DB CHECK constraint)
-const PROGRAM_TYPES = [
-    'aptitude', 'coding', 'soft_skills', 'interview_prep',
-    'resume_building', 'technical', 'group_discussion', 'other',
-];
+// Program types imported from constants (TRAINING_PROGRAM_TYPES)
 
 // ============================================================================
 // CREATE TRAINING PROGRAM
@@ -26,6 +22,7 @@ const PROGRAM_TYPES = [
 
 const createTrainingSchema = Joi.object({
     program_name: Joi.string()
+        .trim()
         .min(2)
         .max(200)
         .required()
@@ -37,6 +34,7 @@ const createTrainingSchema = Joi.object({
         }),
 
     program_description: Joi.string()
+        .trim()
         .max(3000)
         .optional()
         .allow(null, '')
@@ -45,14 +43,15 @@ const createTrainingSchema = Joi.object({
         }),
 
     program_type: Joi.string()
-        .valid(...PROGRAM_TYPES)
+        .valid(...TRAINING_PROGRAM_TYPES)
         .required()
         .messages({
-            'any.only': `Program type must be one of: ${PROGRAM_TYPES.join(', ')}`,
+            'any.only': `Program type must be one of: ${TRAINING_PROGRAM_TYPES.join(', ')}`,
             'any.required': 'Program type is required',
         }),
 
     trainer_name: Joi.string()
+        .trim()
         .max(200)
         .optional()
         .allow(null, '')
@@ -61,6 +60,7 @@ const createTrainingSchema = Joi.object({
         }),
 
     trainer_organization: Joi.string()
+        .trim()
         .max(200)
         .optional()
         .allow(null, '')
@@ -171,10 +171,10 @@ const listTrainingsSchema = Joi.object({
         }),
 
     program_type: Joi.string()
-        .valid(...PROGRAM_TYPES)
+        .valid(...TRAINING_PROGRAM_TYPES)
         .optional()
         .messages({
-            'any.only': `Program type must be one of: ${PROGRAM_TYPES.join(', ')}`,
+            'any.only': `Program type must be one of: ${TRAINING_PROGRAM_TYPES.join(', ')}`,
         }),
 
     target_passout_year: Joi.number()
@@ -184,6 +184,7 @@ const listTrainingsSchema = Joi.object({
         .optional(),
 
     search: Joi.string()
+        .trim()
         .max(100)
         .optional()
         .messages({
@@ -224,6 +225,7 @@ const listTrainingsSchema = Joi.object({
 
 const updateTrainingSchema = Joi.object({
     program_name: Joi.string()
+        .trim()
         .min(2)
         .max(200)
         .optional()
@@ -233,6 +235,7 @@ const updateTrainingSchema = Joi.object({
         }),
 
     program_description: Joi.string()
+        .trim()
         .max(3000)
         .optional()
         .allow(null, '')
@@ -241,13 +244,14 @@ const updateTrainingSchema = Joi.object({
         }),
 
     program_type: Joi.string()
-        .valid(...PROGRAM_TYPES)
+        .valid(...TRAINING_PROGRAM_TYPES)
         .optional()
         .messages({
-            'any.only': `Program type must be one of: ${PROGRAM_TYPES.join(', ')}`,
+            'any.only': `Program type must be one of: ${TRAINING_PROGRAM_TYPES.join(', ')}`,
         }),
 
     trainer_name: Joi.string()
+        .trim()
         .max(200)
         .optional()
         .allow(null, '')
@@ -256,6 +260,7 @@ const updateTrainingSchema = Joi.object({
         }),
 
     trainer_organization: Joi.string()
+        .trim()
         .max(200)
         .optional()
         .allow(null, '')
@@ -357,6 +362,7 @@ const listEnrollmentsSchema = Joi.object({
         }),
 
     search: Joi.string()
+        .trim()
         .max(100)
         .optional()
         .messages({

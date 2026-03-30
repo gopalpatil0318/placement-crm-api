@@ -31,6 +31,26 @@ const WITHDRAWABLE_STATUSES = [
 ];
 
 // ============================================================================
+// COLUMN CONSTANTS — explicit column lists, never SELECT * or RETURNING *
+// ============================================================================
+
+const APPLICATION_RETURNING_COLUMNS = `application_id, job_id, position_id, college_id,
+    application_status, is_eligible, eligibility_remarks, override_id, applied_at, last_updated_at`;
+
+const DENIAL_RETURNING_COLUMNS = `denial_id, student_id, job_id, college_id,
+    denial_reason, additional_comments, denied_at`;
+
+const APPLICATION_VERIFY_COLUMNS = `a.application_id, a.job_id, a.position_id,
+    a.application_status, a.current_round_id, a.is_eligible, a.eligibility_remarks,
+    a.applied_at, a.last_updated_at, a.college_id, a.student_id`;
+
+const CRITERIA_SELECT_COLUMNS = `criteria_id, job_id, min_overall_cgpa, max_live_kts,
+    min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
+    min_package, max_package,
+    allowed_genders, allowed_departments, allowed_gap_statuses,
+    exclude_already_placed, created_at, updated_at`;
+
+// ============================================================================
 // HELPER — Verify job exists and belongs to student's college
 // ============================================================================
 
@@ -65,7 +85,7 @@ async function verifyJob(jobId, collegeId) {
 
 async function verifyStudentApplication(applicationId, studentId, collegeId) {
     const result = await query(
-        `SELECT a.*,
+        `SELECT ${APPLICATION_VERIFY_COLUMNS},
                 j.job_title, j.job_status, j.application_deadline,
                 c.company_name,
                 p.position_name
@@ -120,31 +140,36 @@ async function getStudentProfile(studentId, collegeId) {
 // HELPER — Evaluate eligibility against job_eligibility_criteria
 // ============================================================================
 
-async function evaluateEligibility(jobId, student) {
-    // Fetch criteria
-    const criteriaResult = await query(
-        `SELECT * FROM job_eligibility_criteria
-         WHERE job_id = $1 LIMIT 1`,
-        [jobId]
-    );
+function checkNumericThreshold(studentValue, thresholdValue, label, suffix = '') {
+    const parsed = Number.parseFloat(studentValue) || 0;
+    if (parsed < Number.parseFloat(thresholdValue)) {
+        return `Minimum ${label}: ${thresholdValue}${suffix}, yours: ${parsed}${suffix}`;
+    }
+    return null;
+}
 
-    const criteria = criteriaResult.rows[0] || null;
+function checkAcademicCriteria(criteria, student) {
     const issues = [];
 
-    // If no criteria set, student is eligible
-    if (!criteria) {
-        return { is_eligible: true, issues: [], criteria: null };
+    const checks = [
+        { threshold: criteria.min_overall_cgpa, value: student.overall_cgpa, label: 'CGPA required', suffix: '' },
+        { threshold: criteria.min_tenth_percentage, value: student.tenth_percentage, label: '10th percentage', suffix: '%' },
+    ];
+
+    if (criteria.min_twelfth_percentage != null && student.twelfth_or_diploma === '12th') {
+        checks.push({ threshold: criteria.min_twelfth_percentage, value: student.twelfth_percentage, label: '12th percentage', suffix: '%' });
     }
 
-    // Min CGPA
-    if (criteria.min_overall_cgpa != null) {
-        const studentCGPA = parseFloat(student.overall_cgpa) || 0;
-        if (studentCGPA < parseFloat(criteria.min_overall_cgpa)) {
-            issues.push(`Minimum CGPA required: ${criteria.min_overall_cgpa}, yours: ${studentCGPA}`);
-        }
+    if (criteria.min_diploma_percentage != null && student.twelfth_or_diploma === 'Diploma') {
+        checks.push({ threshold: criteria.min_diploma_percentage, value: student.diploma_percentage, label: 'diploma percentage', suffix: '%' });
     }
 
-    // Max live KTs
+    for (const { threshold, value, label, suffix } of checks) {
+        if (threshold == null) continue;
+        const issue = checkNumericThreshold(value, threshold, label, suffix);
+        if (issue) issues.push(issue);
+    }
+
     if (criteria.max_live_kts != null) {
         const studentKTs = student.total_live_kts || 0;
         if (studentKTs > criteria.max_live_kts) {
@@ -152,45 +177,24 @@ async function evaluateEligibility(jobId, student) {
         }
     }
 
-    // 10th percentage
-    if (criteria.min_tenth_percentage != null) {
-        const tenthPct = parseFloat(student.tenth_percentage) || 0;
-        if (tenthPct < parseFloat(criteria.min_tenth_percentage)) {
-            issues.push(`Minimum 10th percentage: ${criteria.min_tenth_percentage}%, yours: ${tenthPct}%`);
-        }
-    }
+    return issues;
+}
 
-    // 12th percentage (only if student did 12th)
-    if (criteria.min_twelfth_percentage != null && student.twelfth_or_diploma === '12th') {
-        const twelfthPct = parseFloat(student.twelfth_percentage) || 0;
-        if (twelfthPct < parseFloat(criteria.min_twelfth_percentage)) {
-            issues.push(`Minimum 12th percentage: ${criteria.min_twelfth_percentage}%, yours: ${twelfthPct}%`);
-        }
-    }
+function checkDemographicCriteria(criteria, student) {
+    const issues = [];
 
-    // Diploma percentage (only if student did Diploma)
-    if (criteria.min_diploma_percentage != null && student.twelfth_or_diploma === 'Diploma') {
-        const diplomaPct = parseFloat(student.diploma_percentage) || 0;
-        if (diplomaPct < parseFloat(criteria.min_diploma_percentage)) {
-            issues.push(`Minimum diploma percentage: ${criteria.min_diploma_percentage}%, yours: ${diplomaPct}%`);
-        }
-    }
-
-    // Gender filter
     if (criteria.allowed_genders && criteria.allowed_genders.length > 0) {
         if (!student.gender || !criteria.allowed_genders.includes(student.gender)) {
             issues.push(`Allowed genders: ${criteria.allowed_genders.join(', ')}`);
         }
     }
 
-    // Department filter
     if (criteria.allowed_departments && criteria.allowed_departments.length > 0) {
         if (!criteria.allowed_departments.includes(student.dept_name)) {
             issues.push(`Allowed departments: ${criteria.allowed_departments.join(', ')}`);
         }
     }
 
-    // Gap status filter
     if (criteria.allowed_gap_statuses && criteria.allowed_gap_statuses.length > 0) {
         const gapStatus = student.any_gap_during_education ? 'gap' : 'no_gap';
         if (!criteria.allowed_gap_statuses.includes(gapStatus)) {
@@ -198,7 +202,43 @@ async function evaluateEligibility(jobId, student) {
         }
     }
 
-    // Exclude already placed (check actual placement records, not application status)
+    return issues;
+}
+
+function formatCriteriaResponse(criteria) {
+    return {
+        min_overall_cgpa: criteria.min_overall_cgpa == null ? null : Number.parseFloat(criteria.min_overall_cgpa),
+        max_live_kts: criteria.max_live_kts,
+        min_tenth_percentage: criteria.min_tenth_percentage == null ? null : Number.parseFloat(criteria.min_tenth_percentage),
+        min_twelfth_percentage: criteria.min_twelfth_percentage == null ? null : Number.parseFloat(criteria.min_twelfth_percentage),
+        min_diploma_percentage: criteria.min_diploma_percentage == null ? null : Number.parseFloat(criteria.min_diploma_percentage),
+        allowed_genders: criteria.allowed_genders ?? null,
+        allowed_departments: criteria.allowed_departments ?? null,
+        allowed_gap_statuses: criteria.allowed_gap_statuses ?? null,
+        exclude_already_placed: criteria.exclude_already_placed ?? false,
+    };
+}
+
+async function evaluateEligibility(jobId, student) {
+    const criteriaResult = await query(
+        `SELECT ${CRITERIA_SELECT_COLUMNS}
+         FROM job_eligibility_criteria
+         WHERE job_id = $1 LIMIT 1`,
+        [jobId]
+    );
+
+    const criteria = criteriaResult.rows[0] || null;
+
+    if (!criteria) {
+        return { is_eligible: true, issues: [], criteria: null };
+    }
+
+    const issues = [
+        ...checkAcademicCriteria(criteria, student),
+        ...checkDemographicCriteria(criteria, student),
+    ];
+
+    // Exclude already placed
     if (criteria.exclude_already_placed === true) {
         const placedResult = await query(
             `SELECT 1 FROM placement_results
@@ -215,17 +255,7 @@ async function evaluateEligibility(jobId, student) {
     return {
         is_eligible: issues.length === 0,
         issues,
-        criteria: {
-            min_overall_cgpa: criteria.min_overall_cgpa != null ? parseFloat(criteria.min_overall_cgpa) : null,
-            max_live_kts: criteria.max_live_kts,
-            min_tenth_percentage: criteria.min_tenth_percentage != null ? parseFloat(criteria.min_tenth_percentage) : null,
-            min_twelfth_percentage: criteria.min_twelfth_percentage != null ? parseFloat(criteria.min_twelfth_percentage) : null,
-            min_diploma_percentage: criteria.min_diploma_percentage != null ? parseFloat(criteria.min_diploma_percentage) : null,
-            allowed_genders: criteria.allowed_genders ?? null,
-            allowed_departments: criteria.allowed_departments ?? null,
-            allowed_gap_statuses: criteria.allowed_gap_statuses ?? null,
-            exclude_already_placed: criteria.exclude_already_placed ?? false,
-        },
+        criteria: formatCriteriaResponse(criteria),
     };
 }
 
@@ -248,7 +278,7 @@ async function checkApplicationBlockers(studentId, student, job) {
 
     // 3. Applications must be allowed
     if (job.allow_applications === false) {
-        blockers.push('This job is not currently accepting applications');
+        blockers.push(ERROR_MESSAGES.JOB_NOT_ACCEPTING);
     }
 
     // 4. Deadline check
@@ -258,8 +288,7 @@ async function checkApplicationBlockers(studentId, student, job) {
 
     // 5. Passout year match
     if (!Array.isArray(job.passout_years) || !job.passout_years.includes(student.student_passout_year)) {
-        const yearsDisplay = Array.isArray(job.passout_years) ? job.passout_years.join(', ') : 'unspecified';
-        blockers.push(`This job is for ${yearsDisplay} passout year students only`);
+        blockers.push(ERROR_MESSAGES.JOB_PASSOUT_YEAR_MISMATCH);
     }
 
     // 6-8. Run independent DB checks in parallel
@@ -288,7 +317,7 @@ async function checkApplicationBlockers(studentId, student, job) {
         blockers.push(ERROR_MESSAGES.ALREADY_APPLIED);
     }
     if (existingDenial.rows.length > 0) {
-        blockers.push('You have already opted out of this job');
+        blockers.push(ERROR_MESSAGES.ALREADY_OPTED_OUT);
     }
     if (restrictions.rows.length > 0) {
         blockers.push(ERROR_MESSAGES.STUDENT_RESTRICTED);
@@ -326,7 +355,7 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
     const params = [collegeId, STATUS.JOB.PUBLISHED, passoutYear];
     let paramIndex = 4;
 
-    if (filters.search && filters.search.trim()) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(j.job_title ILIKE $${paramIndex} OR c.company_name ILIKE $${paramIndex} OR j.job_description ILIKE $${paramIndex})`
         );
@@ -340,7 +369,7 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         paramIndex++;
     }
 
-    if (filters.company_name && filters.company_name.trim()) {
+    if (filters.company_name?.trim()) {
         conditions.push(`c.company_name ILIKE $${paramIndex}`);
         params.push(`%${filters.company_name.trim()}%`);
         paramIndex++;
@@ -403,7 +432,7 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         [...params, studentId, limit, offset]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const jobs = jobsResult.rows.map(row => ({
         job_id: row.job_id,
@@ -411,8 +440,8 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         job_description: row.job_description,
         job_location: row.job_location,
         salary_package: row.salary_package,
-        salary_min: row.salary_min != null ? parseFloat(row.salary_min) : null,
-        salary_max: row.salary_max != null ? parseFloat(row.salary_max) : null,
+        salary_min: row.salary_min == null ? null : Number.parseFloat(row.salary_min),
+        salary_max: row.salary_max == null ? null : Number.parseFloat(row.salary_max),
         job_type: row.job_type,
         internship_duration: row.internship_duration ?? null,
         internship_stipend: row.internship_stipend ?? null,
@@ -425,8 +454,8 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         company_website: row.company_website ?? null,
         industry_type: row.industry_type ?? null,
         // Counts
-        position_count: parseInt(row.position_count, 10),
-        total_applications: parseInt(row.total_applications, 10),
+        position_count: Number.parseInt(row.position_count, 10),
+        total_applications: Number.parseInt(row.total_applications, 10),
         // Student's status with this job
         application_status: row.application_status ?? null,
         has_applied: row.application_id != null,
@@ -460,7 +489,8 @@ async function getJobDetails(jobId, studentId, collegeId) {
         },
         // Eligibility criteria
         {
-            text: `SELECT * FROM job_eligibility_criteria
+            text: `SELECT ${CRITERIA_SELECT_COLUMNS}
+             FROM job_eligibility_criteria
              WHERE job_id = $1 LIMIT 1`,
             params: [jobId],
         },
@@ -513,8 +543,8 @@ async function getJobDetails(jobId, studentId, collegeId) {
             job_description: job.job_description,
             job_location: job.job_location,
             salary_package: job.salary_package,
-            salary_min: job.salary_min != null ? parseFloat(job.salary_min) : null,
-            salary_max: job.salary_max != null ? parseFloat(job.salary_max) : null,
+            salary_min: job.salary_min == null ? null : Number.parseFloat(job.salary_min),
+            salary_max: job.salary_max == null ? null : Number.parseFloat(job.salary_max),
             bond_duration: job.bond_duration ?? null,
             bond_details: job.bond_details ?? null,
             job_type: job.job_type,
@@ -524,7 +554,7 @@ async function getJobDetails(jobId, studentId, collegeId) {
             application_deadline: job.application_deadline,
             job_status: job.job_status,
             posted_at: job.created_at,
-            total_applications: parseInt(appCountResult.rows[0].total, 10),
+            total_applications: Number.parseInt(appCountResult.rows[0].total, 10),
         },
         company: {
             company_id: job.company_id,
@@ -540,11 +570,11 @@ async function getJobDetails(jobId, studentId, collegeId) {
         })),
         eligibility_criteria: criteria
             ? {
-                min_overall_cgpa: criteria.min_overall_cgpa != null ? parseFloat(criteria.min_overall_cgpa) : null,
+                min_overall_cgpa: criteria.min_overall_cgpa == null ? null : Number.parseFloat(criteria.min_overall_cgpa),
                 max_live_kts: criteria.max_live_kts,
-                min_tenth_percentage: criteria.min_tenth_percentage != null ? parseFloat(criteria.min_tenth_percentage) : null,
-                min_twelfth_percentage: criteria.min_twelfth_percentage != null ? parseFloat(criteria.min_twelfth_percentage) : null,
-                min_diploma_percentage: criteria.min_diploma_percentage != null ? parseFloat(criteria.min_diploma_percentage) : null,
+                min_tenth_percentage: criteria.min_tenth_percentage == null ? null : Number.parseFloat(criteria.min_tenth_percentage),
+                min_twelfth_percentage: criteria.min_twelfth_percentage == null ? null : Number.parseFloat(criteria.min_twelfth_percentage),
+                min_diploma_percentage: criteria.min_diploma_percentage == null ? null : Number.parseFloat(criteria.min_diploma_percentage),
                 allowed_genders: criteria.allowed_genders ?? null,
                 allowed_departments: criteria.allowed_departments ?? null,
                 allowed_gap_statuses: criteria.allowed_gap_statuses ?? null,
@@ -612,12 +642,12 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
             criteria: eligibility.criteria,
         },
         student_snapshot: {
-            overall_cgpa: student.overall_cgpa != null ? parseFloat(student.overall_cgpa) : null,
+            overall_cgpa: student.overall_cgpa == null ? null : Number.parseFloat(student.overall_cgpa),
             total_live_kts: student.total_live_kts ?? 0,
-            tenth_percentage: student.tenth_percentage != null ? parseFloat(student.tenth_percentage) : null,
+            tenth_percentage: student.tenth_percentage == null ? null : Number.parseFloat(student.tenth_percentage),
             twelfth_or_diploma: student.twelfth_or_diploma ?? null,
-            twelfth_percentage: student.twelfth_percentage != null ? parseFloat(student.twelfth_percentage) : null,
-            diploma_percentage: student.diploma_percentage != null ? parseFloat(student.diploma_percentage) : null,
+            twelfth_percentage: student.twelfth_percentage == null ? null : Number.parseFloat(student.twelfth_percentage),
+            diploma_percentage: student.diploma_percentage == null ? null : Number.parseFloat(student.diploma_percentage),
             gender: student.gender ?? null,
             dept_name: student.dept_name,
             gap_status: student.any_gap_during_education ? 'gap' : 'no_gap',
@@ -632,76 +662,40 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
 // 4. APPLY FOR JOB (transaction: application + answers)
 // ============================================================================
 
-async function applyForJob(jobId, studentId, collegeId, data) {
-    const [job, student] = await Promise.all([
-        verifyJob(jobId, collegeId),
-        getStudentProfile(studentId, collegeId),
-    ]);
+function throwBadRequest(message) {
+    throw Object.assign(new Error(message), { status: 400 });
+}
 
-    // Check all blockers
-    const blockers = await checkApplicationBlockers(studentId, student, job);
-    if (blockers.length > 0) {
-        throw Object.assign(
-            new Error(blockers[0]),
-            { status: 400 }
-        );
+async function resolveEligibilityOverride(studentId, jobId, eligibility) {
+    if (eligibility.is_eligible) {
+        return null;
     }
 
-    // Check eligibility
-    const eligibility = await evaluateEligibility(jobId, student);
+    const overrideCheck = await query(
+        `SELECT override_id, override_status, rejection_reason
+         FROM job_eligibility_override_requests
+         WHERE student_id = $1 AND job_id = $2
+         LIMIT 1`,
+        [studentId, jobId]
+    );
 
-    // If ineligible, check for an approved override before blocking
-    let approvedOverrideId = null;
-    if (!eligibility.is_eligible) {
-        const overrideCheck = await query(
-            `SELECT override_id, override_status, rejection_reason
-             FROM job_eligibility_override_requests
-             WHERE student_id = $1 AND job_id = $2
-             LIMIT 1`,
-            [studentId, jobId]
-        );
-
-        if (overrideCheck.rows.length > 0) {
-            const ov = overrideCheck.rows[0];
-            if (ov.override_status === 'approved') {
-                // College approved the override — allow application
-                approvedOverrideId = ov.override_id;
-            } else if (ov.override_status === 'rejected') {
-                const reason = ov.rejection_reason ? `: ${ov.rejection_reason}` : '';
-                throw Object.assign(
-                    new Error(`Your eligibility override request was rejected${reason}`),
-                    { status: 400 }
-                );
-            } else {
-                throw Object.assign(
-                    new Error('You are not eligible for this job. Your override request is pending college review.'),
-                    { status: 400 }
-                );
-            }
-        } else {
-            throw Object.assign(
-                new Error(`You are not eligible for this job. Please submit an override request for college review. Reasons: ${eligibility.issues.join('; ')}`),
-                { status: 400 }
-            );
-        }
+    if (overrideCheck.rows.length === 0) {
+        throwBadRequest(`${ERROR_MESSAGES.NOT_ELIGIBLE_SUBMIT_OVERRIDE} Reasons: ${eligibility.issues.join('; ')}`);
     }
 
-    // Validate position_id if provided
-    if (data.position_id) {
-        const posCheck = await query(
-            `SELECT 1 FROM job_positions
-             WHERE position_id = $1 AND job_id = $2 AND position_status = 'active' LIMIT 1`,
-            [data.position_id, jobId]
-        );
-        if (!posCheck.rows.length) {
-            throw Object.assign(
-                new Error('Selected position not found or is no longer active'),
-                { status: 400 }
-            );
-        }
+    const ov = overrideCheck.rows[0];
+    if (ov.override_status === 'approved') {
+        return ov.override_id;
+    }
+    if (ov.override_status === 'rejected') {
+        const reason = ov.rejection_reason ? `: ${ov.rejection_reason}` : '';
+        throwBadRequest(`${ERROR_MESSAGES.OVERRIDE_REJECTED}${reason}`);
     }
 
-    // Validate required questions are answered
+    throwBadRequest(ERROR_MESSAGES.OVERRIDE_PENDING);
+}
+
+async function validateAnswers(jobId, data) {
     const questionsResult = await query(
         `SELECT question_id, question_type, is_required, question_order
          FROM application_questions
@@ -716,48 +710,93 @@ async function applyForJob(jobId, studentId, collegeId, data) {
         answersMap.set(ans.question_id, ans);
     }
 
-    // Check required questions
     for (const q of questions) {
-        if (q.is_required) {
-            const answer = answersMap.get(q.question_id);
-            if (!answer) {
-                throw Object.assign(
-                    new Error(`Required question not answered (question #${q.question_order})`),
-                    { status: 400 }
-                );
-            }
-            // Validate answer has content
-            const hasContent =
-                (answer.answer_text && answer.answer_text.trim()) ||
-                (answer.answer_options && answer.answer_options.length > 0) ||
-                answer.answer_boolean !== null && answer.answer_boolean !== undefined;
-            if (!hasContent) {
-                throw Object.assign(
-                    new Error(`Required question #${q.question_order} must have an answer`),
-                    { status: 400 }
-                );
-            }
+        if (!q.is_required) continue;
+
+        const answer = answersMap.get(q.question_id);
+        if (!answer) {
+            throwBadRequest(`${ERROR_MESSAGES.REQUIRED_QUESTION_NOT_ANSWERED} (question #${q.question_order})`);
+        }
+
+        const hasContent =
+            answer.answer_text?.trim() ||
+            (answer.answer_options && answer.answer_options.length > 0) ||
+            (answer.answer_boolean !== null && answer.answer_boolean !== undefined);
+        if (!hasContent) {
+            throwBadRequest(`${ERROR_MESSAGES.REQUIRED_QUESTION_EMPTY} (question #${q.question_order})`);
         }
     }
 
-    // Validate answer question_ids belong to this job
     const validQuestionIds = new Set(questions.map(q => q.question_id));
     for (const ans of (data.answers || [])) {
         if (!validQuestionIds.has(ans.question_id)) {
-            throw Object.assign(
-                new Error('One or more answers reference invalid questions'),
-                { status: 400 }
-            );
+            throwBadRequest(ERROR_MESSAGES.INVALID_ANSWER_QUESTIONS);
+        }
+    }
+}
+
+async function insertApplicationAnswers(client, applicationId, answers) {
+    if (answers.length === 0) return [];
+
+    const valuePlaceholders = [];
+    const ansParams = [];
+    let idx = 1;
+    for (const ans of answers) {
+        valuePlaceholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
+        ansParams.push(
+            applicationId,
+            ans.question_id,
+            ans.answer_text || null,
+            ans.answer_options || null,
+            ans.answer_boolean ?? null
+        );
+        idx += 5;
+    }
+
+    const ansResult = await client.query(
+        `INSERT INTO application_answers
+            (application_id, question_id, answer_text, answer_options, answer_boolean)
+         VALUES ${valuePlaceholders.join(', ')}
+         RETURNING answer_id, question_id`,
+        ansParams
+    );
+    return ansResult.rows;
+}
+
+async function applyForJob(jobId, studentId, collegeId, data) {
+    const [job, student] = await Promise.all([
+        verifyJob(jobId, collegeId),
+        getStudentProfile(studentId, collegeId),
+    ]);
+
+    // Check all blockers
+    const blockers = await checkApplicationBlockers(studentId, student, job);
+    if (blockers.length > 0) {
+        throwBadRequest(blockers[0]);
+    }
+
+    const eligibility = await evaluateEligibility(jobId, student);
+    const approvedOverrideId = await resolveEligibilityOverride(studentId, jobId, eligibility);
+
+    // Validate position_id if provided
+    if (data.position_id) {
+        const posCheck = await query(
+            `SELECT 1 FROM job_positions
+             WHERE position_id = $1 AND job_id = $2 AND position_status = 'active' LIMIT 1`,
+            [data.position_id, jobId]
+        );
+        if (!posCheck.rows.length) {
+            throwBadRequest(ERROR_MESSAGES.POSITION_NOT_ACTIVE);
         }
     }
 
-    // Use transaction for application + answers
+    await validateAnswers(jobId, data);
+
     const client = await getClient();
 
     try {
         await client.query('BEGIN');
 
-        // Insert application
         const eligibilityRemarks = eligibility.is_eligible
             ? null
             : eligibility.issues.join('; ');
@@ -767,7 +806,7 @@ async function applyForJob(jobId, studentId, collegeId, data) {
                 (student_id, job_id, position_id, college_id,
                  application_status, is_eligible, eligibility_remarks, override_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING *`,
+             RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
             [
                 studentId,
                 jobId,
@@ -781,34 +820,7 @@ async function applyForJob(jobId, studentId, collegeId, data) {
         );
 
         const application = appResult.rows[0];
-
-        // Insert answers in a single multi-row INSERT (if any)
-        const answers = data.answers || [];
-        let insertedAnswers = [];
-        if (answers.length > 0) {
-            const valuePlaceholders = [];
-            const ansParams = [];
-            let idx = 1;
-            for (const ans of answers) {
-                valuePlaceholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
-                ansParams.push(
-                    application.application_id,
-                    ans.question_id,
-                    ans.answer_text || null,
-                    ans.answer_options || null,
-                    ans.answer_boolean ?? null
-                );
-                idx += 5;
-            }
-            const ansResult = await client.query(
-                `INSERT INTO application_answers
-                    (application_id, question_id, answer_text, answer_options, answer_boolean)
-                 VALUES ${valuePlaceholders.join(', ')}
-                 RETURNING answer_id, question_id`,
-                ansParams
-            );
-            insertedAnswers = ansResult.rows;
-        }
+        const insertedAnswers = await insertApplicationAnswers(client, application.application_id, data.answers || []);
 
         await client.query('COMMIT');
 
@@ -870,9 +882,8 @@ async function denyJob(jobId, studentId, collegeId, data) {
     // Passout year must match
     const student = studentRow.rows[0];
     if (!student || !Array.isArray(job.passout_years) || !job.passout_years.includes(student.student_passout_year)) {
-        const yearsDisplay = Array.isArray(job.passout_years) ? job.passout_years.join(', ') : 'unspecified';
         throw Object.assign(
-            new Error(`This job is for ${yearsDisplay} passout year students only`),
+            new Error(ERROR_MESSAGES.JOB_PASSOUT_YEAR_MISMATCH),
             { status: 403 }
         );
     }
@@ -892,13 +903,13 @@ async function denyJob(jobId, studentId, collegeId, data) {
     ]);
     if (existingApp.rows.length > 0) {
         throw Object.assign(
-            new Error('Cannot opt out — you have already applied to this job'),
+            new Error(ERROR_MESSAGES.CANNOT_OPT_OUT_ALREADY_APPLIED),
             { status: 400 }
         );
     }
     if (existingDenial.rows.length > 0) {
         throw Object.assign(
-            new Error('You have already opted out of this job'),
+            new Error(ERROR_MESSAGES.ALREADY_OPTED_OUT),
             { status: 409 }
         );
     }
@@ -907,7 +918,7 @@ async function denyJob(jobId, studentId, collegeId, data) {
         `INSERT INTO application_denials
             (student_id, job_id, college_id, denial_reason, additional_comments)
          VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
+         RETURNING ${DENIAL_RETURNING_COLUMNS}`,
         [
             studentId,
             jobId,
@@ -1022,7 +1033,7 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const statusSummary = {
         total: 0,
@@ -1036,7 +1047,7 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
     };
 
     for (const row of summaryResult.rows) {
-        const count = parseInt(row.cnt, 10);
+        const count = Number.parseInt(row.cnt, 10);
         statusSummary[row.application_status] = count;
         statusSummary.total += count;
     }
@@ -1055,8 +1066,8 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         job_type: row.job_type,
         job_location: row.job_location,
         salary_package: row.salary_package,
-        salary_min: row.salary_min != null ? parseFloat(row.salary_min) : null,
-        salary_max: row.salary_max != null ? parseFloat(row.salary_max) : null,
+        salary_min: row.salary_min == null ? null : Number.parseFloat(row.salary_min),
+        salary_max: row.salary_max == null ? null : Number.parseFloat(row.salary_max),
         job_status: row.job_status,
         application_deadline: row.application_deadline,
         // Company info
@@ -1067,8 +1078,8 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         // Round progress
         current_round_name: row.current_round_name ?? null,
         current_round_number: row.current_round_number ?? null,
-        rounds_passed: parseInt(row.rounds_passed, 10),
-        total_rounds: parseInt(row.total_rounds, 10),
+        rounds_passed: Number.parseInt(row.rounds_passed, 10),
+        total_rounds: Number.parseInt(row.total_rounds, 10),
     }));
 
     return { applications, total, page, limit, status_summary: statusSummary };
@@ -1169,7 +1180,7 @@ async function getApplicationDetails(applicationId, studentId, collegeId) {
             round_date: row.round_date ?? null,
             round_venue: row.round_venue ?? null,
             result_status: row.result_status,
-            score: row.score != null ? parseFloat(row.score) : null,
+            score: row.score == null ? null : Number.parseFloat(row.score),
             remarks: row.remarks ?? null,
             attended: row.attended,
             scheduled_at: row.scheduled_at ?? null,
@@ -1190,11 +1201,11 @@ async function getApplicationDetails(applicationId, studentId, collegeId) {
                 placement_type: placementResult.rows[0].placement_type,
                 placement_status: placementResult.rows[0].placement_status,
                 acceptance_status: placementResult.rows[0].acceptance_status ?? null,
-                fulltime_package: placementResult.rows[0].fulltime_package != null
-                    ? parseFloat(placementResult.rows[0].fulltime_package) : null,
+                fulltime_package: placementResult.rows[0].fulltime_package == null
+                    ? null : Number.parseFloat(placementResult.rows[0].fulltime_package),
                 fulltime_designation: placementResult.rows[0].fulltime_designation ?? null,
-                internship_stipend: placementResult.rows[0].internship_stipend != null
-                    ? parseFloat(placementResult.rows[0].internship_stipend) : null,
+                internship_stipend: placementResult.rows[0].internship_stipend == null
+                    ? null : Number.parseFloat(placementResult.rows[0].internship_stipend),
             }
             : null,
     };
@@ -1210,21 +1221,12 @@ async function withdrawApplication(applicationId, studentId, collegeId, reason) 
 
     // Already withdrawn
     if (currentStatus === STATUS.APPLICATION.WITHDRAWN) {
-        throw Object.assign(
-            new Error('Application is already withdrawn'),
-            { status: 400 }
-        );
+        throwBadRequest(ERROR_MESSAGES.APPLICATION_ALREADY_WITHDRAWN);
     }
 
     // Can only withdraw from specific statuses
     if (!WITHDRAWABLE_STATUSES.includes(currentStatus)) {
-        throw Object.assign(
-            new Error(
-                `Cannot withdraw application with status "${currentStatus}". ` +
-                `Withdrawal is only allowed for: ${WITHDRAWABLE_STATUSES.join(', ')}`
-            ),
-            { status: 400 }
-        );
+        throwBadRequest(`${ERROR_MESSAGES.CANNOT_WITHDRAW_STATUS}. Allowed: ${WITHDRAWABLE_STATUSES.join(', ')}`);
     }
 
     const result = await query(
@@ -1240,7 +1242,7 @@ async function withdrawApplication(applicationId, studentId, collegeId, reason) 
              END,
              last_updated_at = NOW()
          WHERE application_id = $3
-         RETURNING *`,
+         RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
         [STATUS.APPLICATION.WITHDRAWN, reason || null, applicationId]
     );
 
@@ -1263,10 +1265,28 @@ async function withdrawApplication(applicationId, studentId, collegeId, reason) 
 }
 
 // ============================================================================
+// GET AVAILABLE JOB YEARS — distinct passout years with published jobs
+// ============================================================================
+
+async function getAvailableJobYears(collegeId) {
+    const result = await query(
+        `SELECT DISTINCT unnest(passout_years) AS year
+         FROM job_postings
+         WHERE college_id = $1
+           AND job_status = $2
+         ORDER BY year DESC`,
+        [collegeId, STATUS.JOB.PUBLISHED]
+    );
+
+    return result.rows.map(r => r.year);
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
+    getAvailableJobYears,
     getAvailableJobs,
     getJobDetails,
     checkJobEligibility,

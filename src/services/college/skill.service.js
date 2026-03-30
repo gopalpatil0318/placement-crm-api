@@ -31,7 +31,7 @@ async function createSkill(collegeId, data) {
     } catch (err) {
         if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
             throw Object.assign(
-                new Error(`Skill "${data.skill_name}" already exists in your college`),
+                new Error(ERROR_MESSAGES.SKILL_DUPLICATE),
                 { status: 409 }
             );
         }
@@ -85,8 +85,13 @@ async function getAllSkills(collegeId, filters = {}) {
         ),
         query(
             `SELECT s.skill_id, s.skill_name, s.skill_category, s.created_at,
-                    (SELECT COUNT(*) FROM student_skills ss WHERE ss.skill_id = s.skill_id) AS student_count
+                    COALESCE(sc.student_count, 0) AS student_count
              FROM skills s
+             LEFT JOIN (
+                 SELECT skill_id, COUNT(*) AS student_count
+                 FROM student_skills
+                 GROUP BY skill_id
+             ) sc ON s.skill_id = sc.skill_id
              WHERE ${whereClause}
              ORDER BY ${sortCol} ${sortOrd}, s.skill_name ASC
              LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -101,13 +106,13 @@ async function getAllSkills(collegeId, filters = {}) {
             [collegeId]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number(countResult.rows[0].total);
 
     const skills = skillsResult.rows.map(row => ({
         skill_id: row.skill_id,
         skill_name: row.skill_name,
         skill_category: row.skill_category ?? null,
-        student_count: parseInt(row.student_count, 10),
+        student_count: Number(row.student_count),
         created_at: row.created_at,
     }));
 
@@ -118,12 +123,35 @@ async function getAllSkills(collegeId, filters = {}) {
         limit,
         categories: categorySummary.rows.map(r => ({
             category: r.skill_category,
-            count: parseInt(r.cnt, 10),
+            count: Number(r.cnt),
         })),
     };
+}
+
+// ============================================================================
+// #105 — DELETE SKILL (cascade-deletes student_skills via FK)
+// ============================================================================
+
+async function deleteSkill(skillId, collegeId) {
+    const result = await query(
+        `DELETE FROM skills
+         WHERE skill_id = $1 AND college_id = $2
+         RETURNING skill_id, skill_name`,
+        [skillId, collegeId]
+    );
+
+    if (result.rowCount === 0) {
+        throw Object.assign(
+            new Error(ERROR_MESSAGES.SKILL_NOT_FOUND),
+            { status: 404 }
+        );
+    }
+
+    return result.rows[0];
 }
 
 module.exports = {
     createSkill,
     getAllSkills,
+    deleteSkill,
 };

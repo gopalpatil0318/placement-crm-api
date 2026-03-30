@@ -31,6 +31,7 @@ CREATE TABLE public.colleges (
 CREATE INDEX idx_colleges_subdomain ON public.colleges USING btree (college_subdomain);
 CREATE INDEX idx_colleges_enabled_features ON public.colleges USING gin (enabled_features);
 CREATE INDEX idx_colleges_type ON public.colleges USING btree (college_type);
+CREATE INDEX idx_colleges_status ON public.colleges USING btree (college_status);
 
 -- 2. DEPARTMENTS
 CREATE TABLE public.departments (
@@ -49,6 +50,7 @@ CREATE TABLE public.departments (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_departments_college ON public.departments(college_id);
+CREATE INDEX idx_departments_college_active ON public.departments(college_id, is_active) WHERE is_active = true;
 
 
 
@@ -86,11 +88,13 @@ CREATE TABLE public.students (
 
 CREATE INDEX idx_students_college ON public.students(college_id);
 CREATE INDEX idx_students_email ON public.students(student_email);
+CREATE INDEX idx_students_email_college_lower ON public.students(college_id, LOWER(student_email));
 CREATE INDEX idx_students_dept ON public.students(dept_id);
 CREATE INDEX idx_students_passout_year ON public.students(student_passout_year);
 CREATE INDEX idx_students_status ON public.students(student_status);
 CREATE INDEX idx_students_approval_status ON public.students(college_id, profile_approval_status)
   WHERE profile_complete = true;
+CREATE INDEX idx_students_college_dept_passout ON public.students(college_id, dept_id, student_passout_year);
 
 -- 5. STUDENT PERSONAL INFORMATION (No first/middle/last name, no email, no religion)
 CREATE TABLE public.student_personal_information (
@@ -134,17 +138,18 @@ CREATE TABLE public.student_personal_information (
   CONSTRAINT fk_personal_student FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
   CONSTRAINT fk_personal_college FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT gender_check CHECK (gender IN ('Male', 'Female', 'Other', 'Prefer not to say')),
-  CONSTRAINT category_check CHECK (category IN ('General', 'OBC', 'SC', 'ST', 'NT', 'VJ', 'SBC'))
+  CONSTRAINT category_check CHECK (category IN ('General', 'OBC', 'OBC-NCL', 'SC', 'ST', 'EWS', 'NT', 'NT-A', 'NT-B', 'NT-C', 'NT-D', 'VJ', 'VJ-A', 'SBC', 'SEBC', 'DT/DNT', 'Open'))
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_personal_student ON public.student_personal_information(student_id);
+CREATE INDEX idx_personal_info_student_college ON public.student_personal_information(student_id, college_id);
 
 -- 6. STUDENT ACADEMIC INFORMATION
 CREATE TABLE public.student_academic_information (
   id UUID NOT NULL DEFAULT gen_random_uuid(),
   student_id UUID NOT NULL,
   college_id UUID NOT NULL,
-  roll_number TEXT UNIQUE,
+  roll_number TEXT,
   enrollment_number TEXT,
   admission_year INTEGER,
   admission_based_on TEXT,
@@ -167,6 +172,7 @@ CREATE TABLE public.student_academic_information (
   updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   CONSTRAINT student_academic_information_pkey PRIMARY KEY (id),
   CONSTRAINT student_academic_student_unique UNIQUE (student_id),
+  CONSTRAINT roll_number_college_unique UNIQUE (roll_number, college_id),
   CONSTRAINT fk_academic_student FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
   CONSTRAINT fk_academic_college FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT twelfth_diploma_check CHECK (twelfth_or_diploma IN ('12th', 'Diploma')),
@@ -174,6 +180,7 @@ CREATE TABLE public.student_academic_information (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_academic_student ON public.student_academic_information(student_id);
+CREATE INDEX idx_academic_info_student_college ON public.student_academic_information(student_id, college_id);
 CREATE INDEX idx_academic_roll ON public.student_academic_information(roll_number);
 
 -- 7. SEMESTER GRADES (Flexible - works for diploma/engineering/MBA/5-year)
@@ -201,6 +208,7 @@ CREATE TABLE public.student_semester_grades (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_semester_grades_student ON public.student_semester_grades(student_id);
+CREATE INDEX idx_semester_grades_student_college_sem ON public.student_semester_grades(student_id, college_id, semester_number);
 CREATE INDEX idx_semester_grades_semester ON public.student_semester_grades(semester_number);
 
 -- 7. SKILLS
@@ -235,6 +243,7 @@ CREATE TABLE public.student_skills (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_student_skills_student ON public.student_skills(student_id);
+CREATE INDEX idx_student_skills_student_college ON public.student_skills(student_id, college_id);
 CREATE INDEX idx_student_skills_skill ON public.student_skills(skill_id);
 
 -- 10. STUDENT PROJECTS (Unlimited)
@@ -265,6 +274,7 @@ CREATE TABLE public.student_projects (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_projects_student ON public.student_projects(student_id);
+CREATE INDEX idx_projects_student_college ON public.student_projects(student_id, college_id);
 
 -- 11. STUDENT EXPERIENCE
 CREATE TABLE public.student_experience (
@@ -305,6 +315,7 @@ CREATE TABLE public.student_experience (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_experience_student ON public.student_experience(student_id);
+CREATE INDEX idx_experience_student_college_status ON public.student_experience(student_id, college_id, verification_status);
 CREATE INDEX idx_experience_verification ON public.student_experience(college_id, verification_status);
 
 -- 12. ACHIEVEMENTS
@@ -343,6 +354,7 @@ CREATE TABLE public.student_achievements (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_achievements_student ON public.student_achievements(student_id);
+CREATE INDEX idx_achievements_student_college_status ON public.student_achievements(student_id, college_id, verification_status);
 CREATE INDEX idx_achievements_verification ON public.student_achievements(college_id, verification_status);
 
 -- 13. CERTIFICATES
@@ -379,6 +391,7 @@ CREATE TABLE public.student_certificates (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_certificates_student ON public.student_certificates(student_id);
+CREATE INDEX idx_certificates_student_college_status ON public.student_certificates(student_id, college_id, verification_status);
 CREATE INDEX idx_certificates_verification ON public.student_certificates(college_id, verification_status);
 
 -- 14. EXTRA-CURRICULAR ACTIVITIES
@@ -406,6 +419,7 @@ CREATE TABLE public.student_activities (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_activities_student ON public.student_activities(student_id);
+CREATE INDEX idx_activities_student_college ON public.student_activities(student_id, college_id);
 
 -- 15. STUDENT PROFILE LINKS (Professional only - no Instagram/Twitter)
 CREATE TABLE public.student_profile_links (
@@ -434,6 +448,7 @@ CREATE TABLE public.student_profile_links (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_profile_links_student ON public.student_profile_links(student_id);
+CREATE INDEX idx_profile_links_student_college ON public.student_profile_links(student_id, college_id);
 
 -- 16. USERS
 CREATE TABLE public.users (
@@ -459,3 +474,4 @@ CREATE TABLE public.users (
 CREATE INDEX idx_users_college ON public.users(college_id);
 CREATE INDEX idx_users_email ON public.users(user_email);
 CREATE INDEX idx_users_role ON public.users(user_role);
+CREATE INDEX idx_users_college_role_active ON public.users(college_id, user_role) WHERE user_status = 'active';

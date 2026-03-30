@@ -42,7 +42,16 @@ async function loginCollegeUser(email, password) {
            u.user_id, u.user_name, u.user_email,
            u.user_password, u.user_role, u.user_status,
            u.college_id, u.dept_id,
-           c.college_name, c.college_status
+           c.college_name, c.college_status,
+           c.default_academic_year, c.college_type,
+           COALESCE(
+             (SELECT json_agg(row_to_json(d) ORDER BY d.dept_name)
+              FROM (SELECT dept_id, dept_name, dept_code
+                    FROM departments
+                    WHERE college_id = c.college_id AND is_active = true
+                    ORDER BY dept_name) d
+             ), '[]'::json
+           ) AS departments
          FROM users u
          JOIN colleges c ON u.college_id = c.college_id
          WHERE LOWER(u.user_email) = LOWER($1)
@@ -108,6 +117,9 @@ async function loginCollegeUser(email, password) {
             college_id: user.college_id,
             college_name: user.college_name,
             dept_id: user.dept_id,
+            default_academic_year: user.default_academic_year,
+            college_type: user.college_type,
+            departments: user.departments,
         },
     };
 }
@@ -140,9 +152,10 @@ async function forgotPassword(email) {
         { expiresIn: '15m' }
     );
 
-    const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
+    const resetUrl = `${config.frontendUrl}/college/reset-password?token=${resetToken}`;
 
-    await sendEmail({
+    // Send reset email (non-blocking — don't delay response for SMTP)
+    sendEmail({
         to: user.user_email,
         subject: 'Reset Your Password — Placement CRM',
         text: [
@@ -175,9 +188,13 @@ async function forgotPassword(email) {
                 <p style="color: #999; font-size: 12px;">If you did not request this, please ignore this email. Your password will remain unchanged.</p>
             </div>
         `,
+    }).catch((err) => {
+        logger.error(`${LOG.AUTH} Failed to send password reset email`, {
+            userId: user.user_id, email: user.user_email, error: err.message,
+        });
     });
 
-    logger.info(`${LOG.AUTH} Password reset email sent`, {
+    logger.info(`${LOG.AUTH} Password reset email queued`, {
         userId: user.user_id, email: user.user_email,
     });
 
@@ -352,7 +369,7 @@ async function getAllUsers(collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         users: usersResult.rows,

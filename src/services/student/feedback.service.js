@@ -10,6 +10,28 @@ const { query } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const { ERROR_MESSAGES, DB_ERROR_CODES } = require('../../config/constants');
 
+// ── Column constants ───────────────────────────────────────────────────────
+const FEEDBACK_RETURNING_COLUMNS = `feedback_id, job_id, company_id, rating, feedback_text,
+                 is_anonymous, is_approved, created_at`;
+
+const FEEDBACK_SELECT_COLUMNS = `
+  pf.feedback_id, pf.job_id, pf.company_id,
+  pf.rating, pf.feedback_text, pf.is_anonymous,
+  pf.is_approved, pf.created_at, pf.updated_at,
+  co.company_name,
+  jp.job_title`;
+
+const QUESTION_RETURNING_COLUMNS = `question_id, company_id, job_id, question_description,
+               topic, sample_answer, is_approved, created_at`;
+
+const QUESTION_SELECT_COLUMNS = `
+  iq.question_id, iq.company_id, iq.job_id,
+  iq.question_description, iq.topic, iq.sample_answer,
+  iq.created_at,
+  co.company_name,
+  jp.job_title,
+  jp.passout_years[1] AS passout_year`;
+
 // ── #172 POST /submit_feedback ─────────────────────────────────────────────
 async function submitFeedback(studentId, collegeId, data) {
   // Verify job belongs to this college and student applied to it
@@ -20,7 +42,8 @@ async function submitFeedback(studentId, collegeId, data) {
      WHERE jp.job_id = $1
        AND jp.college_id = $2
        AND sa.student_id = $3
-       AND jp.company_id = $4`,
+       AND jp.company_id = $4
+     LIMIT 1`,
     [data.job_id, collegeId, studentId, data.company_id]
   );
 
@@ -36,8 +59,7 @@ async function submitFeedback(studentId, collegeId, data) {
       `INSERT INTO placement_feedback
          (college_id, job_id, company_id, student_id, rating, feedback_text, is_anonymous)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING feedback_id, job_id, company_id, rating, feedback_text,
-                 is_anonymous, is_approved, created_at`,
+       RETURNING ${FEEDBACK_RETURNING_COLUMNS}`,
       [collegeId, data.job_id, data.company_id, studentId,
        data.rating, data.feedback_text || null, data.is_anonymous]
     );
@@ -71,11 +93,7 @@ async function getMyFeedback(studentId, collegeId, filters) {
     ),
     query(
       `SELECT
-         pf.feedback_id, pf.job_id, pf.company_id,
-         pf.rating, pf.feedback_text, pf.is_anonymous,
-         pf.is_approved, pf.created_at, pf.updated_at,
-         co.company_name,
-         jp.job_title
+         ${FEEDBACK_SELECT_COLUMNS}
        FROM placement_feedback pf
        JOIN companies co ON pf.company_id = co.company_id
        JOIN job_postings jp ON pf.job_id = jp.job_id
@@ -86,7 +104,7 @@ async function getMyFeedback(studentId, collegeId, filters) {
     ),
   ]);
 
-  const total = parseInt(countResult.rows[0].count, 10);
+  const total = Number.parseInt(countResult.rows[0]?.count ?? '0', 10);
 
   return { feedback: dataResult.rows, total, page, limit };
 }
@@ -99,7 +117,8 @@ async function submitInterviewQuestion(studentId, collegeId, data) {
      FROM job_postings jp
      WHERE jp.job_id = $1
        AND jp.college_id = $2
-       AND jp.company_id = $3`,
+       AND jp.company_id = $3
+     LIMIT 1`,
     [data.job_id, collegeId, data.company_id]
   );
 
@@ -114,8 +133,7 @@ async function submitInterviewQuestion(studentId, collegeId, data) {
     `INSERT INTO interview_questions
        (college_id, company_id, job_id, student_id, question_description, topic, sample_answer)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING question_id, company_id, job_id, question_description,
-               topic, sample_answer, is_approved, created_at`,
+     RETURNING ${QUESTION_RETURNING_COLUMNS}`,
     [collegeId, data.company_id, data.job_id, studentId,
      data.question_description, data.topic || null, data.sample_answer || null]
   );
@@ -142,14 +160,14 @@ async function browseInterviewQuestions(collegeId, filters) {
     params.push(filters.job_id);
   }
 
-  if (filters.topic) {
+  if (filters.topic?.trim()) {
     conditions.push(`iq.topic ILIKE $${paramIndex++}`);
-    params.push(`%${filters.topic}%`);
+    params.push(`%${filters.topic.trim()}%`);
   }
 
-  if (filters.search) {
+  if (filters.search?.trim()) {
     conditions.push(`(iq.question_description ILIKE $${paramIndex} OR iq.topic ILIKE $${paramIndex})`);
-    params.push(`%${filters.search}%`);
+    params.push(`%${filters.search.trim()}%`);
     paramIndex++;
   }
 
@@ -167,12 +185,7 @@ async function browseInterviewQuestions(collegeId, filters) {
     ),
     query(
       `SELECT
-         iq.question_id, iq.company_id, iq.job_id,
-         iq.question_description, iq.topic, iq.sample_answer,
-         iq.created_at,
-         co.company_name,
-         jp.job_title,
-         jp.passout_years[1] AS passout_year
+         ${QUESTION_SELECT_COLUMNS}
        FROM interview_questions iq
        JOIN companies co ON iq.company_id = co.company_id
        JOIN job_postings jp ON iq.job_id = jp.job_id
@@ -183,7 +196,7 @@ async function browseInterviewQuestions(collegeId, filters) {
     ),
   ]);
 
-  const total = parseInt(countResult.rows[0].count, 10);
+  const total = Number.parseInt(countResult.rows[0]?.count ?? '0', 10);
 
   return { questions: dataResult.rows, total, page, limit };
 }

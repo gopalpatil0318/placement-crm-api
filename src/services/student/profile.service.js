@@ -358,17 +358,17 @@ async function getProfileCompletion(studentId, collegeId) {
     ], 3);
 
     const completion = calculateProfileCompletion({
-        personal: parseInt(personalResult.rows[0].cnt) > 0 && parseInt(personalResult.rows[0].filled_fields) >= 5
+        personal: Number.parseInt(personalResult.rows[0].cnt) > 0 && Number.parseInt(personalResult.rows[0].filled_fields) >= 5
             ? { filled: true } : null,
-        academic: parseInt(academicResult.rows[0].cnt) > 0 && parseInt(academicResult.rows[0].filled_fields) >= 3
+        academic: Number.parseInt(academicResult.rows[0].cnt) > 0 && Number.parseInt(academicResult.rows[0].filled_fields) >= 3
             ? { filled: true } : null,
-        semesters: parseInt(semesterResult.rows[0].cnt) > 0 ? [1] : [],
-        skills: parseInt(skillsResult.rows[0].cnt) > 0 ? [1] : [],
-        profileLinks: parseInt(profileLinksResult.rows[0].cnt) > 0 && parseInt(profileLinksResult.rows[0].filled_fields) >= 1
+        semesters: Number.parseInt(semesterResult.rows[0].cnt) > 0 ? [1] : [],
+        skills: Number.parseInt(skillsResult.rows[0].cnt) > 0 ? [1] : [],
+        profileLinks: Number.parseInt(profileLinksResult.rows[0].cnt) > 0 && Number.parseInt(profileLinksResult.rows[0].filled_fields) >= 1
             ? { filled: true } : null,
-        projects: parseInt(projectsResult.rows[0].cnt) > 0 ? [1] : [],
-        experience: parseInt(experienceResult.rows[0].cnt) > 0 ? [1] : [],
-        certificates: parseInt(certificatesResult.rows[0].cnt) > 0 ? [1] : [],
+        projects: Number.parseInt(projectsResult.rows[0].cnt) > 0 ? [1] : [],
+        experience: Number.parseInt(experienceResult.rows[0].cnt) > 0 ? [1] : [],
+        certificates: Number.parseInt(certificatesResult.rows[0].cnt) > 0 ? [1] : [],
     });
 
     return completion;

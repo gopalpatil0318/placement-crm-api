@@ -12,7 +12,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -20,6 +20,44 @@ const {
     ERROR_MESSAGES,
     STATUS,
 } = require('../../config/constants');
+
+// ============================================================================
+// EXPLICIT COLUMN CONSTANTS (no SELECT * or RETURNING *)
+// ============================================================================
+
+const PROGRAM_SELECT_COLUMNS = [
+    'tp.program_id', 'tp.college_id', 'tp.program_name', 'tp.program_description',
+    'tp.program_type', 'tp.trainer_name', 'tp.trainer_organization',
+    'tp.start_date', 'tp.end_date', 'tp.total_sessions', 'tp.session_duration_hours',
+    'tp.target_dept_ids', 'tp.target_passout_year', 'tp.max_enrollment',
+    'tp.enrollment_deadline', 'tp.program_status', 'tp.created_by',
+    'tp.created_at', 'tp.updated_at',
+].join(', ');
+
+const PROGRAM_RETURNING_COLUMNS = [
+    'program_id', 'college_id', 'program_name', 'program_description',
+    'program_type', 'trainer_name', 'trainer_organization',
+    'start_date', 'end_date', 'total_sessions', 'session_duration_hours',
+    'target_dept_ids', 'target_passout_year', 'max_enrollment',
+    'enrollment_deadline', 'program_status', 'created_by',
+    'created_at', 'updated_at',
+].join(', ');
+
+const ENROLLMENT_SELECT_COLUMNS = [
+    'te.enrollment_id', 'te.program_id', 'te.student_id', 'te.college_id',
+    'te.enrolled_at', 'te.sessions_attended', 'te.completion_status',
+    'te.completion_percentage', 'te.certificate_issued', 'te.certificate_url',
+    'te.student_feedback', 'te.student_rating', 'te.completed_at',
+    'te.created_at', 'te.updated_at',
+].join(', ');
+
+const ENROLLMENT_RETURNING_COLUMNS = [
+    'enrollment_id', 'program_id', 'student_id', 'college_id',
+    'enrolled_at', 'sessions_attended', 'completion_status',
+    'completion_percentage', 'certificate_issued', 'certificate_url',
+    'student_feedback', 'student_rating', 'completed_at',
+    'created_at', 'updated_at',
+].join(', ');
 
 // Columns that can be inserted/updated
 const PROGRAM_FIELDS = [
@@ -63,7 +101,7 @@ function formatProgram(record) {
         start_date: record.start_date || null,
         end_date: record.end_date || null,
         total_sessions: record.total_sessions || null,
-        session_duration_hours: record.session_duration_hours ? parseFloat(record.session_duration_hours) : null,
+        session_duration_hours: record.session_duration_hours ? Number.parseFloat(record.session_duration_hours) : null,
         target_dept_ids: record.target_dept_ids || null,
         target_passout_year: record.target_passout_year || null,
         max_enrollment: record.max_enrollment || null,
@@ -74,10 +112,10 @@ function formatProgram(record) {
         created_at: record.created_at,
         updated_at: record.updated_at,
         // Aggregated fields (when available)
-        ...(record.enrolled_count !== undefined && { enrolled_count: parseInt(record.enrolled_count, 10) }),
-        ...(record.completed_count !== undefined && { completed_count: parseInt(record.completed_count, 10) }),
-        ...(record.dropped_count !== undefined && { dropped_count: parseInt(record.dropped_count, 10) }),
-        ...(record.avg_rating !== undefined && { avg_rating: record.avg_rating ? parseFloat(parseFloat(record.avg_rating).toFixed(1)) : null }),
+        ...(record.enrolled_count !== undefined && { enrolled_count: Number.parseInt(record.enrolled_count, 10) }),
+        ...(record.completed_count !== undefined && { completed_count: Number.parseInt(record.completed_count, 10) }),
+        ...(record.dropped_count !== undefined && { dropped_count: Number.parseInt(record.dropped_count, 10) }),
+        ...(record.avg_rating !== undefined && { avg_rating: record.avg_rating ? Math.round(Number.parseFloat(record.avg_rating) * 10) / 10 : null }),
         // Department names (when joined)
         ...(record.target_dept_names !== undefined && { target_dept_names: record.target_dept_names }),
     };
@@ -95,7 +133,7 @@ function formatEnrollment(record) {
         enrolled_at: record.enrolled_at,
         sessions_attended: record.sessions_attended,
         completion_status: record.completion_status,
-        completion_percentage: record.completion_percentage ? parseFloat(record.completion_percentage) : 0,
+        completion_percentage: record.completion_percentage ? Number.parseFloat(record.completion_percentage) : 0,
         certificate_issued: record.certificate_issued,
         certificate_url: record.certificate_url || null,
         student_feedback: record.student_feedback || null,
@@ -107,61 +145,75 @@ function formatEnrollment(record) {
 }
 
 // ============================================================================
+// HELPERS — shared validation logic
+// ============================================================================
+
+async function checkDuplicateName(client, collegeId, programName, excludeProgramId = null) {
+    const params = [collegeId, programName];
+    let sql = `SELECT program_id FROM training_programs
+               WHERE college_id = $1 AND LOWER(program_name) = LOWER($2)`;
+    if (excludeProgramId) {
+        sql += ` AND program_id != $3`;
+        params.push(excludeProgramId);
+    }
+    sql += ' LIMIT 1';
+    const result = await client.query(sql, params);
+    if (result.rows.length) {
+        throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_DUPLICATE_NAME), { status: 409 });
+    }
+}
+
+async function validateDeptIds(client, collegeId, deptIds) {
+    if (!deptIds || deptIds.length === 0) return;
+    const deptCheck = await client.query(
+        `SELECT dept_id FROM departments WHERE college_id = $1 AND dept_id = ANY($2)`,
+        [collegeId, deptIds]
+    );
+    if (deptCheck.rows.length !== deptIds.length) {
+        throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_INVALID_DEPT_IDS), { status: 400 });
+    }
+}
+
+// ============================================================================
 // 1. CREATE TRAINING PROGRAM
 // ============================================================================
 
 async function createTrainingProgram(collegeId, userId, data) {
-    // Check duplicate program name within this college
-    const duplicateCheck = await query(
-        `SELECT program_id FROM training_programs
-         WHERE college_id = $1 AND LOWER(program_name) = LOWER($2)
-         LIMIT 1`,
-        [collegeId, data.program_name]
-    );
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    if (duplicateCheck.rows.length) {
-        throw Object.assign(
-            new Error(`Training program "${data.program_name}" already exists`),
-            { status: 409 }
-        );
-    }
+        await checkDuplicateName(client, collegeId, data.program_name);
+        await validateDeptIds(client, collegeId, data.target_dept_ids);
 
-    // Validate target_dept_ids belong to this college
-    if (data.target_dept_ids && data.target_dept_ids.length > 0) {
-        const deptCheck = await query(
-            `SELECT dept_id FROM departments
-             WHERE college_id = $1 AND dept_id = ANY($2)`,
-            [collegeId, data.target_dept_ids]
+        // Build dynamic INSERT from available fields
+        const fieldsToInsert = PROGRAM_FIELDS.filter(f => data[f] !== undefined);
+        const columns = ['college_id', 'created_by', ...fieldsToInsert];
+        const placeholders = columns.map((_, i) => `$${i + 1}`);
+        const values = [collegeId, userId, ...fieldsToInsert.map(f => data[f] ?? null)];
+
+        const result = await client.query(
+            `INSERT INTO training_programs (${columns.join(', ')})
+             VALUES (${placeholders.join(', ')})
+             RETURNING ${PROGRAM_RETURNING_COLUMNS}`,
+            values
         );
 
-        if (deptCheck.rows.length !== data.target_dept_ids.length) {
-            throw Object.assign(
-                new Error('One or more department IDs are invalid or do not belong to your college'),
-                { status: 400 }
-            );
-        }
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Training program created`, {
+            programId: result.rows[0].program_id,
+            programName: data.program_name,
+            collegeId,
+        });
+
+        return formatProgram(result.rows[0]);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
     }
-
-    // Build dynamic INSERT from available fields
-    const fieldsToInsert = PROGRAM_FIELDS.filter(f => data[f] !== undefined);
-    const columns = ['college_id', 'created_by', ...fieldsToInsert];
-    const placeholders = columns.map((_, i) => `$${i + 1}`);
-    const values = [collegeId, userId, ...fieldsToInsert.map(f => data[f] ?? null)];
-
-    const result = await query(
-        `INSERT INTO training_programs (${columns.join(', ')})
-         VALUES (${placeholders.join(', ')})
-         RETURNING *`,
-        values
-    );
-
-    logger.info(`${LOG.AUTH} Training program created`, {
-        programId: result.rows[0].program_id,
-        programName: data.program_name,
-        collegeId,
-    });
-
-    return formatProgram(result.rows[0]);
 }
 
 // ============================================================================
@@ -197,11 +249,11 @@ async function getAllTrainingPrograms(collegeId, filters = {}) {
     }
 
     // Filter: search (name, description, trainer)
-    if (filters.search) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(tp.program_name ILIKE $${paramIndex} OR tp.program_description ILIKE $${paramIndex} OR tp.trainer_name ILIKE $${paramIndex})`
         );
-        params.push(`%${filters.search}%`);
+        params.push(`%${filters.search.trim()}%`);
         paramIndex++;
     }
 
@@ -226,7 +278,7 @@ async function getAllTrainingPrograms(collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT tp.*,
+            `SELECT ${PROGRAM_SELECT_COLUMNS},
                     u.user_name AS created_by_name,
                     COALESCE(es.enrolled_count, 0) AS enrolled_count,
                     COALESCE(es.completed_count, 0) AS completed_count,
@@ -251,7 +303,7 @@ async function getAllTrainingPrograms(collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         programs: programResult.rows.map(formatProgram),
@@ -267,7 +319,7 @@ async function getAllTrainingPrograms(collegeId, filters = {}) {
 
 async function getTrainingProgramById(programId, collegeId) {
     const programResult = await query(
-        `SELECT tp.*,
+        `SELECT ${PROGRAM_SELECT_COLUMNS},
                 u.user_name AS created_by_name,
                 COALESCE(es.enrolled_count, 0) AS enrolled_count,
                 COALESCE(es.completed_count, 0) AS completed_count,
@@ -294,7 +346,8 @@ async function getTrainingProgramById(programId, collegeId) {
              WHERE te.program_id = $1
              GROUP BY te.program_id
          ) es ON es.program_id = tp.program_id
-         WHERE tp.program_id = $1 AND tp.college_id = $2`,
+         WHERE tp.program_id = $1 AND tp.college_id = $2
+         LIMIT 1`,
         [programId, collegeId]
     );
 
@@ -322,17 +375,17 @@ async function getTrainingProgramById(programId, collegeId) {
         ...formatted,
         target_dept_names: targetDeptNames,
         enrollment_stats: {
-            enrolled_count: parseInt(program.enrolled_count, 10),
-            completed_count: parseInt(program.completed_count, 10),
-            in_progress_count: parseInt(program.in_progress_count, 10),
-            dropped_count: parseInt(program.dropped_count, 10),
-            failed_count: parseInt(program.failed_count, 10),
-            avg_rating: program.avg_rating ? parseFloat(parseFloat(program.avg_rating).toFixed(1)) : null,
+            enrolled_count: Number.parseInt(program.enrolled_count, 10),
+            completed_count: Number.parseInt(program.completed_count, 10),
+            in_progress_count: Number.parseInt(program.in_progress_count, 10),
+            dropped_count: Number.parseInt(program.dropped_count, 10),
+            failed_count: Number.parseInt(program.failed_count, 10),
+            avg_rating: program.avg_rating ? Math.round(Number.parseFloat(program.avg_rating) * 10) / 10 : null,
             avg_completion_percentage: program.avg_completion_percentage
-                ? parseFloat(parseFloat(program.avg_completion_percentage).toFixed(1))
+                ? Math.round(Number.parseFloat(program.avg_completion_percentage) * 10) / 10
                 : null,
             avg_sessions_attended: program.avg_sessions_attended
-                ? parseFloat(parseFloat(program.avg_sessions_attended).toFixed(1))
+                ? Math.round(Number.parseFloat(program.avg_sessions_attended) * 10) / 10
                 : null,
         },
     };
@@ -343,88 +396,69 @@ async function getTrainingProgramById(programId, collegeId) {
 // ============================================================================
 
 async function updateTrainingProgram(programId, collegeId, data) {
-    // Verify program exists and belongs to this college
-    const existing = await query(
-        `SELECT program_id, program_status FROM training_programs
-         WHERE program_id = $1 AND college_id = $2`,
-        [programId, collegeId]
-    );
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    if (!existing.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_NOT_FOUND), { status: 404 });
-    }
-
-    // Cannot update a cancelled program
-    if (existing.rows[0].program_status === STATUS.TRAINING.CANCELLED) {
-        throw Object.assign(
-            new Error('Cannot update a cancelled training program'),
-            { status: 400 }
-        );
-    }
-
-    // Check duplicate name (if updating name)
-    if (data.program_name) {
-        const duplicateCheck = await query(
-            `SELECT program_id FROM training_programs
-             WHERE college_id = $1 AND LOWER(program_name) = LOWER($2) AND program_id != $3
+        // Verify program exists and belongs to this college
+        const existing = await client.query(
+            `SELECT program_id, program_status FROM training_programs
+             WHERE program_id = $1 AND college_id = $2
              LIMIT 1`,
-            [collegeId, data.program_name, programId]
+            [programId, collegeId]
         );
 
-        if (duplicateCheck.rows.length) {
-            throw Object.assign(
-                new Error(`Training program "${data.program_name}" already exists`),
-                { status: 409 }
-            );
+        if (!existing.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_NOT_FOUND), { status: 404 });
         }
-    }
 
-    // Validate date ordering if both dates provided
-    if (data.start_date && data.end_date) {
-        if (new Date(data.end_date) < new Date(data.start_date)) {
-            throw Object.assign(
-                new Error('End date must be on or after the start date'),
-                { status: 400 }
-            );
+        // Cannot update a cancelled program
+        if (existing.rows[0].program_status === STATUS.TRAINING.CANCELLED) {
+            throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_CANCELLED_NOT_UPDATABLE), { status: 400 });
         }
-    }
 
-    // Validate target_dept_ids if provided
-    if (data.target_dept_ids && data.target_dept_ids.length > 0) {
-        const deptCheck = await query(
-            `SELECT dept_id FROM departments
-             WHERE college_id = $1 AND dept_id = ANY($2)`,
-            [collegeId, data.target_dept_ids]
+        // Check duplicate name (if updating name)
+        if (data.program_name) {
+            await checkDuplicateName(client, collegeId, data.program_name, programId);
+        }
+
+        // Validate date ordering if both dates provided
+        if (data.start_date && data.end_date) {
+            if (new Date(data.end_date) < new Date(data.start_date)) {
+                throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_END_BEFORE_START), { status: 400 });
+            }
+        }
+
+        // Validate target_dept_ids if provided
+        await validateDeptIds(client, collegeId, data.target_dept_ids);
+
+        // Build dynamic SET clause (excludes program_status — use toggle for status)
+        const updateableFields = PROGRAM_FIELDS.filter(f => f !== 'program_status');
+        const fieldsToUpdate = updateableFields.filter(f => data[f] !== undefined);
+
+        if (!fieldsToUpdate.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_NO_FIELDS), { status: 400 });
+        }
+
+        const setClauses = fieldsToUpdate.map((f, i) => `${f} = $${i + 3}`);
+        const values = [programId, collegeId, ...fieldsToUpdate.map(f => data[f] ?? null)];
+
+        const result = await client.query(
+            `UPDATE training_programs
+             SET ${setClauses.join(', ')}, updated_at = NOW()
+             WHERE program_id = $1 AND college_id = $2
+             RETURNING ${PROGRAM_RETURNING_COLUMNS}`,
+            values
         );
 
-        if (deptCheck.rows.length !== data.target_dept_ids.length) {
-            throw Object.assign(
-                new Error('One or more department IDs are invalid or do not belong to your college'),
-                { status: 400 }
-            );
-        }
+        await client.query('COMMIT');
+        return formatProgram(result.rows[0]);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
     }
-
-    // Build dynamic SET clause (excludes program_status — use toggle for status)
-    const updateableFields = PROGRAM_FIELDS.filter(f => f !== 'program_status');
-    const fieldsToUpdate = updateableFields.filter(f => data[f] !== undefined);
-
-    if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields to update'), { status: 400 });
-    }
-
-    const setClauses = fieldsToUpdate.map((f, i) => `${f} = $${i + 3}`);
-    const values = [programId, collegeId, ...fieldsToUpdate.map(f => data[f] ?? null)];
-
-    const result = await query(
-        `UPDATE training_programs
-         SET ${setClauses.join(', ')}, updated_at = NOW()
-         WHERE program_id = $1 AND college_id = $2
-         RETURNING *`,
-        values
-    );
-
-    return formatProgram(result.rows[0]);
 }
 
 // ============================================================================
@@ -436,7 +470,8 @@ async function toggleTrainingStatus(programId, collegeId, newStatus) {
     const existing = await query(
         `SELECT program_id, program_status
          FROM training_programs
-         WHERE program_id = $1 AND college_id = $2`,
+         WHERE program_id = $1 AND college_id = $2
+         LIMIT 1`,
         [programId, collegeId]
     );
 
@@ -459,7 +494,7 @@ async function toggleTrainingStatus(programId, collegeId, newStatus) {
     const allowedTransitions = VALID_TRANSITIONS[currentStatus] || [];
     if (!allowedTransitions.includes(newStatus)) {
         throw Object.assign(
-            new Error(`Cannot change status from "${currentStatus}" to "${newStatus}". Allowed: ${allowedTransitions.join(', ') || 'none (terminal state)'}`),
+            new Error(ERROR_MESSAGES.TRAINING_INVALID_TRANSITION),
             { status: 400 }
         );
     }
@@ -468,7 +503,7 @@ async function toggleTrainingStatus(programId, collegeId, newStatus) {
         `UPDATE training_programs
          SET program_status = $3, updated_at = NOW()
          WHERE program_id = $1 AND college_id = $2
-         RETURNING *`,
+         RETURNING ${PROGRAM_RETURNING_COLUMNS}`,
         [programId, collegeId, newStatus]
     );
 
@@ -483,7 +518,8 @@ async function getTrainingEnrollments(programId, collegeId, filters = {}) {
     // Verify program exists and belongs to this college
     const programCheck = await query(
         `SELECT program_id, program_name, total_sessions FROM training_programs
-         WHERE program_id = $1 AND college_id = $2`,
+         WHERE program_id = $1 AND college_id = $2
+         LIMIT 1`,
         [programId, collegeId]
     );
 
@@ -505,11 +541,11 @@ async function getTrainingEnrollments(programId, collegeId, filters = {}) {
     }
 
     // Filter: search (student name or email)
-    if (filters.search) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(s.first_name ILIKE $${paramIndex} OR s.last_name ILIKE $${paramIndex} OR s.student_email ILIKE $${paramIndex})`
         );
-        params.push(`%${filters.search}%`);
+        params.push(`%${filters.search.trim()}%`);
         paramIndex++;
     }
 
@@ -536,7 +572,7 @@ async function getTrainingEnrollments(programId, collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT te.*,
+            `SELECT ${ENROLLMENT_SELECT_COLUMNS},
                     CONCAT(s.first_name, ' ', s.last_name) AS student_name,
                     s.student_email,
                     d.dept_name,
@@ -566,7 +602,7 @@ async function getTrainingEnrollments(programId, collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const summary = summaryResult.rows[0];
 
@@ -578,15 +614,15 @@ async function getTrainingEnrollments(programId, collegeId, filters = {}) {
         },
         enrollments: enrollmentResult.rows.map(formatEnrollment),
         summary: {
-            total_enrolled: parseInt(summary.total_enrolled, 10),
-            enrolled_count: parseInt(summary.enrolled_count, 10),
-            in_progress_count: parseInt(summary.in_progress_count, 10),
-            completed_count: parseInt(summary.completed_count, 10),
-            dropped_count: parseInt(summary.dropped_count, 10),
-            failed_count: parseInt(summary.failed_count, 10),
-            avg_completion: summary.avg_completion ? parseFloat(parseFloat(summary.avg_completion).toFixed(1)) : 0,
-            avg_sessions: summary.avg_sessions ? parseFloat(parseFloat(summary.avg_sessions).toFixed(1)) : 0,
-            avg_rating: summary.avg_rating ? parseFloat(parseFloat(summary.avg_rating).toFixed(1)) : null,
+            total_enrolled: Number.parseInt(summary.total_enrolled, 10),
+            enrolled_count: Number.parseInt(summary.enrolled_count, 10),
+            in_progress_count: Number.parseInt(summary.in_progress_count, 10),
+            completed_count: Number.parseInt(summary.completed_count, 10),
+            dropped_count: Number.parseInt(summary.dropped_count, 10),
+            failed_count: Number.parseInt(summary.failed_count, 10),
+            avg_completion: summary.avg_completion ? Math.round(Number.parseFloat(summary.avg_completion) * 10) / 10 : 0,
+            avg_sessions: summary.avg_sessions ? Math.round(Number.parseFloat(summary.avg_sessions) * 10) / 10 : 0,
+            avg_rating: summary.avg_rating ? Math.round(Number.parseFloat(summary.avg_rating) * 10) / 10 : null,
         },
         total,
         page,
@@ -599,83 +635,91 @@ async function getTrainingEnrollments(programId, collegeId, filters = {}) {
 // ============================================================================
 
 async function updateEnrollment(enrollmentId, collegeId, data) {
-    // Verify enrollment exists and belongs to this college
-    const existing = await query(
-        `SELECT te.*, tp.total_sessions, tp.program_status
-         FROM training_enrollments te
-         JOIN training_programs tp ON te.program_id = tp.program_id
-         WHERE te.enrollment_id = $1 AND te.college_id = $2`,
-        [enrollmentId, collegeId]
-    );
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    if (!existing.rows.length) {
-        throw Object.assign(new Error('Enrollment not found'), { status: 404 });
-    }
-
-    const enrollment = existing.rows[0];
-
-    // Cannot update enrollment if program is cancelled
-    if (enrollment.program_status === STATUS.TRAINING.CANCELLED) {
-        throw Object.assign(
-            new Error('Cannot update enrollment for a cancelled program'),
-            { status: 400 }
+        // Verify enrollment exists and belongs to this college
+        const existing = await client.query(
+            `SELECT ${ENROLLMENT_SELECT_COLUMNS}, tp.total_sessions, tp.program_status
+             FROM training_enrollments te
+             JOIN training_programs tp ON te.program_id = tp.program_id
+             WHERE te.enrollment_id = $1 AND te.college_id = $2`,
+            [enrollmentId, collegeId]
         );
-    }
 
-    // Validate sessions_attended does not exceed total_sessions
-    if (data.sessions_attended !== undefined && enrollment.total_sessions) {
-        if (data.sessions_attended > enrollment.total_sessions) {
-            throw Object.assign(
-                new Error(`Sessions attended cannot exceed total sessions (${enrollment.total_sessions})`),
-                { status: 400 }
-            );
+        if (!existing.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.ENROLLMENT_NOT_FOUND), { status: 404 });
         }
+
+        const enrollment = existing.rows[0];
+
+        // Cannot update enrollment if program is cancelled
+        if (enrollment.program_status === STATUS.TRAINING.CANCELLED) {
+            throw Object.assign(new Error(ERROR_MESSAGES.ENROLLMENT_CANCELLED_PROGRAM), { status: 400 });
+        }
+
+        // Validate sessions_attended does not exceed total_sessions
+        if (data.sessions_attended !== undefined && enrollment.total_sessions) {
+            if (data.sessions_attended > enrollment.total_sessions) {
+                throw Object.assign(
+                    new Error(`${ERROR_MESSAGES.ENROLLMENT_SESSIONS_EXCEED} (${enrollment.total_sessions})`),
+                    { status: 400 }
+                );
+            }
+        }
+
+        // If marking as completed, set completed_at
+        const fieldsToUpdate = ENROLLMENT_UPDATE_FIELDS.filter(f => data[f] !== undefined);
+
+        if (!fieldsToUpdate.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.TRAINING_NO_FIELDS), { status: 400 });
+        }
+
+        // Build dynamic SET clause
+        const setClauses = fieldsToUpdate.map((f, i) => `${f} = $${i + 3}`);
+        const values = [enrollmentId, collegeId, ...fieldsToUpdate.map(f => data[f] ?? null)];
+
+        // Auto-set completed_at when status changes to completed
+        if (data.completion_status === STATUS.ENROLLMENT.COMPLETED && enrollment.completion_status !== STATUS.ENROLLMENT.COMPLETED) {
+            setClauses.push('completed_at = NOW()');
+        }
+
+        // Auto-clear completed_at if status changed away from completed
+        if (data.completion_status && data.completion_status !== STATUS.ENROLLMENT.COMPLETED && enrollment.completion_status === STATUS.ENROLLMENT.COMPLETED) {
+            setClauses.push('completed_at = NULL');
+        }
+
+        await client.query(
+            `UPDATE training_enrollments
+             SET ${setClauses.join(', ')}, updated_at = NOW()
+             WHERE enrollment_id = $1 AND college_id = $2
+             RETURNING ${ENROLLMENT_RETURNING_COLUMNS}`,
+            values
+        );
+
+        // Fetch student details for response
+        const enriched = await client.query(
+            `SELECT ${ENROLLMENT_SELECT_COLUMNS},
+                    CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+                    s.student_email,
+                    d.dept_name,
+                    s.student_passout_year AS passout_year
+             FROM training_enrollments te
+             JOIN students s ON te.student_id = s.student_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             WHERE te.enrollment_id = $1`,
+            [enrollmentId]
+        );
+
+        await client.query('COMMIT');
+        return formatEnrollment(enriched.rows[0]);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
     }
-
-    // If marking as completed, set completed_at
-    const fieldsToUpdate = ENROLLMENT_UPDATE_FIELDS.filter(f => data[f] !== undefined);
-
-    if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields to update'), { status: 400 });
-    }
-
-    // Build dynamic SET clause
-    const setClauses = fieldsToUpdate.map((f, i) => `${f} = $${i + 3}`);
-    const values = [enrollmentId, collegeId, ...fieldsToUpdate.map(f => data[f] ?? null)];
-
-    // Auto-set completed_at when status changes to completed
-    if (data.completion_status === STATUS.ENROLLMENT.COMPLETED && enrollment.completion_status !== STATUS.ENROLLMENT.COMPLETED) {
-        setClauses.push('completed_at = NOW()');
-    }
-
-    // Auto-clear completed_at if status changed away from completed
-    if (data.completion_status && data.completion_status !== STATUS.ENROLLMENT.COMPLETED && enrollment.completion_status === STATUS.ENROLLMENT.COMPLETED) {
-        setClauses.push('completed_at = NULL');
-    }
-
-    const result = await query(
-        `UPDATE training_enrollments
-         SET ${setClauses.join(', ')}, updated_at = NOW()
-         WHERE enrollment_id = $1 AND college_id = $2
-         RETURNING *`,
-        values
-    );
-
-    // Fetch student details for response
-    const enriched = await query(
-        `SELECT te.*,
-                CONCAT(s.first_name, ' ', s.last_name) AS student_name,
-                s.student_email,
-                d.dept_name,
-                s.student_passout_year AS passout_year
-         FROM training_enrollments te
-         JOIN students s ON te.student_id = s.student_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         WHERE te.enrollment_id = $1`,
-        [enrollmentId]
-    );
-
-    return formatEnrollment(enriched.rows[0]);
 }
 
 // ============================================================================

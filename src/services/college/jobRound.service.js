@@ -19,6 +19,12 @@ const {
 // Updatable fields (round_number is auto-calculated, never user-editable)
 const FIELDS = ['round_name', 'round_description', 'round_type', 'round_date', 'round_venue'];
 
+// Columns returned by INSERT/UPDATE on job_rounds
+const ROUND_RETURNING_COLUMNS = [
+    'round_id', 'job_id', 'round_number', 'round_name', 'round_description',
+    'round_type', 'round_date', 'round_venue', 'round_status', 'created_at',
+].join(', ');
+
 // Valid round status transitions
 const VALID_TRANSITIONS = {
     pending: ['in_progress', 'cancelled'],
@@ -54,7 +60,9 @@ async function verifyJob(jobId, collegeId) {
 
 async function verifyRound(roundId, collegeId) {
     const result = await query(
-        `SELECT r.*, j.job_title, j.job_status, j.college_id, c.company_name
+        `SELECT r.round_id, r.job_id, r.round_number, r.round_name, r.round_description,
+                r.round_type, r.round_date, r.round_venue, r.round_status, r.created_at,
+                j.job_title, j.job_status, j.college_id, c.company_name
          FROM job_rounds r
          JOIN job_postings j ON r.job_id = j.job_id
          JOIN companies c ON j.company_id = c.company_id
@@ -113,7 +121,7 @@ async function addRound(jobId, collegeId, data) {
     // 2. Cannot add rounds to cancelled jobs
     if (job.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot add rounds to a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_ADD_ROUND_CANCELLED_JOB),
             { status: 400 }
         );
     }
@@ -135,18 +143,18 @@ async function addRound(jobId, collegeId, data) {
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
-            new Error(`Round "${data.round_name}" already exists for this job`),
+            new Error(ERROR_MESSAGES.ROUND_DUPLICATE_NAME),
             { status: 409 }
         );
     }
 
-    const nextRoundNumber = parseInt(maxResult.rows[0].max_number, 10) + 1;
+    const nextRoundNumber = Number.parseInt(maxResult.rows[0].max_number, 10) + 1;
 
     // 5. Insert the round
     const result = await query(
         `INSERT INTO job_rounds (job_id, round_number, round_name, round_description, round_type, round_date, round_venue)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING *`,
+         RETURNING ${ROUND_RETURNING_COLUMNS}`,
         [
             jobId,
             nextRoundNumber,
@@ -194,7 +202,7 @@ async function updateRound(roundId, collegeId, data) {
     // 2. Cannot edit in cancelled jobs
     if (existing.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot edit rounds in a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_EDIT_ROUND_CANCELLED_JOB),
             { status: 400 }
         );
     }
@@ -202,7 +210,7 @@ async function updateRound(roundId, collegeId, data) {
     // 3. Cannot edit completed or cancelled rounds
     if (existing.round_status === STATUS.ROUND.COMPLETED || existing.round_status === STATUS.ROUND.CANCELLED) {
         throw Object.assign(
-            new Error(`Cannot edit a round that is "${existing.round_status}"`),
+            new Error(ERROR_MESSAGES.ROUND_NOT_EDITABLE),
             { status: 400 }
         );
     }
@@ -218,7 +226,7 @@ async function updateRound(roundId, collegeId, data) {
 
         if (duplicateCheck.rows.length) {
             throw Object.assign(
-                new Error(`Round "${data.round_name}" already exists for this job`),
+                new Error(ERROR_MESSAGES.ROUND_DUPLICATE_NAME),
                 { status: 409 }
             );
         }
@@ -228,7 +236,7 @@ async function updateRound(roundId, collegeId, data) {
     const fieldsToUpdate = FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields provided for update'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
     const setClauses = fieldsToUpdate
@@ -240,7 +248,7 @@ async function updateRound(roundId, collegeId, data) {
         `UPDATE job_rounds
          SET ${setClauses}
          WHERE round_id = $1
-         RETURNING *`,
+         RETURNING ${ROUND_RETURNING_COLUMNS}`,
         values
     );
 
@@ -283,7 +291,7 @@ async function updateRoundStatus(roundId, collegeId, newStatus) {
     // 2. Cannot modify in cancelled jobs
     if (existing.job_status === STATUS.JOB.CANCELLED) {
         throw Object.assign(
-            new Error('Cannot modify rounds in a cancelled job'),
+            new Error(ERROR_MESSAGES.CANNOT_MODIFY_ROUND_CANCELLED_JOB),
             { status: 400 }
         );
     }
@@ -291,7 +299,7 @@ async function updateRoundStatus(roundId, collegeId, newStatus) {
     // 3. Same status check
     if (existing.round_status === newStatus) {
         throw Object.assign(
-            new Error(`Round is already "${newStatus}"`),
+            new Error(ERROR_MESSAGES.ROUND_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -300,10 +308,7 @@ async function updateRoundStatus(roundId, collegeId, newStatus) {
     const allowedTransitions = VALID_TRANSITIONS[existing.round_status] ?? [];
     if (!allowedTransitions.includes(newStatus)) {
         throw Object.assign(
-            new Error(
-                `Cannot change round status from "${existing.round_status}" to "${newStatus}". ` +
-                `Allowed transitions: ${allowedTransitions.length ? allowedTransitions.join(', ') : 'none (terminal state)'}`
-            ),
+            new Error(ERROR_MESSAGES.INVALID_ROUND_STATUS_TRANSITION),
             { status: 400 }
         );
     }
@@ -313,7 +318,7 @@ async function updateRoundStatus(roundId, collegeId, newStatus) {
         `UPDATE job_rounds
          SET round_status = $1
          WHERE round_id = $2
-         RETURNING *`,
+         RETURNING ${ROUND_RETURNING_COLUMNS}`,
         [newStatus, roundId]
     );
 

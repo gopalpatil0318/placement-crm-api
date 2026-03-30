@@ -15,6 +15,7 @@
  */
 
 const Joi = require('joi');
+const { JOB_TYPES, STATUS } = require('../../config/constants');
 
 // ============================================================================
 // GET /get_available_jobs — Query params
@@ -23,7 +24,7 @@ const Joi = require('joi');
 const listAvailableJobsSchema = Joi.object({
     // Filters
     search: Joi.string().max(200).optional().allow(''),
-    job_type: Joi.string().valid('full-time', 'internship', 'both').optional(),
+    job_type: Joi.string().valid(...JOB_TYPES).optional(),
     company_name: Joi.string().max(200).optional().allow(''),
 
     // Sorting
@@ -35,7 +36,7 @@ const listAvailableJobsSchema = Joi.object({
 
     // Pagination
     page: Joi.number().integer().min(1).optional().default(1),
-    limit: Joi.number().integer().min(1).max(100).optional().default(10),
+    limit: Joi.number().integer().min(1).max(200).optional().default(10),
 });
 
 // ============================================================================
@@ -49,10 +50,11 @@ const applyForJobSchema = Joi.object({
             Joi.object({
                 question_id: Joi.string().uuid().required(),
                 answer_text: Joi.string().max(5000).optional().allow(null, ''),
-                answer_options: Joi.array().items(Joi.string().max(500)).optional().allow(null),
+                answer_options: Joi.array().items(Joi.string().max(500)).max(50).optional().allow(null),
                 answer_boolean: Joi.boolean().optional().allow(null),
             })
         )
+        .max(100)
         .optional()
         .default([]),
 });
@@ -77,7 +79,7 @@ const denyJobSchema = Joi.object({
 const listMyApplicationsSchema = Joi.object({
     // Filters
     application_status: Joi.string()
-        .valid('pending', 'under_review', 'shortlisted', 'rejected', 'selected', 'offered', 'withdrawn')
+        .valid(...Object.values(STATUS.APPLICATION))
         .optional(),
 
     // Sorting
@@ -89,7 +91,7 @@ const listMyApplicationsSchema = Joi.object({
 
     // Pagination
     page: Joi.number().integer().min(1).optional().default(1),
-    limit: Joi.number().integer().min(1).max(100).optional().default(10),
+    limit: Joi.number().integer().min(1).max(200).optional().default(10),
 });
 
 // ============================================================================

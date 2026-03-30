@@ -8,7 +8,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -18,6 +18,24 @@ const {
     NOTIFICATION_TYPE,
     RECIPIENT_TYPE,
 } = require('../../config/constants');
+
+// ============================================================================
+// COLUMN CONSTANTS
+// ============================================================================
+
+const CRITERIA_SELECT_COLUMNS = `
+    criteria_id, job_id, min_overall_cgpa, max_live_kts,
+    min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
+    allowed_genders, allowed_departments, allowed_gap_statuses,
+    exclude_already_placed, min_hsc_percentage, min_ssc_percentage,
+    min_package_lpa, max_package_lpa
+`;
+
+const OVERRIDE_RETURNING_COLUMNS = `
+    override_id, job_id, student_id, college_id,
+    override_status, request_reason, ineligibility_reasons,
+    requested_at
+`;
 
 // ============================================================================
 // HELPER — Verify job exists and belongs to student's college
@@ -74,76 +92,74 @@ async function getStudentProfile(studentId, collegeId) {
 }
 
 // ============================================================================
+// HELPER — Check a numeric criterion (returns issue string or null)
+// ============================================================================
+
+function checkMinCriterion(criterionValue, studentValue, label) {
+    if (criterionValue == null) return null;
+    const actual = Number.parseFloat(studentValue) || 0;
+    const required = Number.parseFloat(criterionValue);
+    if (actual < required) {
+        return `Minimum ${label}: ${required}, yours: ${actual}`;
+    }
+    return null;
+}
+
+function checkMaxCriterion(criterionValue, studentValue, label) {
+    if (criterionValue == null) return null;
+    const actual = studentValue || 0;
+    if (actual > criterionValue) {
+        return `Maximum ${label}: ${criterionValue}, yours: ${actual}`;
+    }
+    return null;
+}
+
+function checkArrayCriterion(allowed, actual, label) {
+    if (!allowed || allowed.length === 0) return null;
+    if (!actual || !allowed.includes(actual)) {
+        return `${label}: ${allowed.join(', ')}`;
+    }
+    return null;
+}
+
+// ============================================================================
 // HELPER — Evaluate eligibility (same logic as student/job.service)
 // ============================================================================
 
 async function evaluateEligibility(jobId, student) {
     const criteriaResult = await query(
-        `SELECT * FROM job_eligibility_criteria WHERE job_id = $1 LIMIT 1`,
+        `SELECT ${CRITERIA_SELECT_COLUMNS} FROM job_eligibility_criteria WHERE job_id = $1 LIMIT 1`,
         [jobId]
     );
 
     const criteria = criteriaResult.rows[0] || null;
-    const issues = [];
-
     if (!criteria) {
         return { is_eligible: true, issues: [] };
     }
 
-    if (criteria.min_overall_cgpa != null) {
-        const cgpa = parseFloat(student.overall_cgpa) || 0;
-        if (cgpa < parseFloat(criteria.min_overall_cgpa)) {
-            issues.push(`Minimum CGPA required: ${criteria.min_overall_cgpa}, yours: ${cgpa}`);
-        }
-    }
+    // Collect all criterion checks (returns issue string or null)
+    const checks = [
+        checkMinCriterion(criteria.min_overall_cgpa, student.overall_cgpa, 'CGPA required'),
+        checkMaxCriterion(criteria.max_live_kts, student.total_live_kts, 'live backlogs allowed'),
+        checkMinCriterion(criteria.min_tenth_percentage, student.tenth_percentage, '10th percentage'),
+        student.twelfth_or_diploma === '12th'
+            ? checkMinCriterion(criteria.min_twelfth_percentage, student.twelfth_percentage, '12th percentage')
+            : null,
+        student.twelfth_or_diploma === 'Diploma'
+            ? checkMinCriterion(criteria.min_diploma_percentage, student.diploma_percentage, 'diploma percentage')
+            : null,
+        checkArrayCriterion(criteria.allowed_genders, student.gender, 'Allowed genders'),
+        checkArrayCriterion(criteria.allowed_departments, student.dept_name, 'Allowed departments'),
+        checkArrayCriterion(
+            criteria.allowed_gap_statuses,
+            student.any_gap_during_education ? 'gap' : 'no_gap',
+            'Allowed education gap statuses'
+        ),
+    ];
 
-    if (criteria.max_live_kts != null) {
-        const kts = student.total_live_kts || 0;
-        if (kts > criteria.max_live_kts) {
-            issues.push(`Maximum live backlogs allowed: ${criteria.max_live_kts}, yours: ${kts}`);
-        }
-    }
+    const issues = checks.filter(Boolean);
 
-    if (criteria.min_tenth_percentage != null) {
-        const pct = parseFloat(student.tenth_percentage) || 0;
-        if (pct < parseFloat(criteria.min_tenth_percentage)) {
-            issues.push(`Minimum 10th percentage: ${criteria.min_tenth_percentage}%, yours: ${pct}%`);
-        }
-    }
-
-    if (criteria.min_twelfth_percentage != null && student.twelfth_or_diploma === '12th') {
-        const pct = parseFloat(student.twelfth_percentage) || 0;
-        if (pct < parseFloat(criteria.min_twelfth_percentage)) {
-            issues.push(`Minimum 12th percentage: ${criteria.min_twelfth_percentage}%, yours: ${pct}%`);
-        }
-    }
-
-    if (criteria.min_diploma_percentage != null && student.twelfth_or_diploma === 'Diploma') {
-        const pct = parseFloat(student.diploma_percentage) || 0;
-        if (pct < parseFloat(criteria.min_diploma_percentage)) {
-            issues.push(`Minimum diploma percentage: ${criteria.min_diploma_percentage}%, yours: ${pct}%`);
-        }
-    }
-
-    if (criteria.allowed_genders && criteria.allowed_genders.length > 0) {
-        if (!student.gender || !criteria.allowed_genders.includes(student.gender)) {
-            issues.push(`Allowed genders: ${criteria.allowed_genders.join(', ')}`);
-        }
-    }
-
-    if (criteria.allowed_departments && criteria.allowed_departments.length > 0) {
-        if (!criteria.allowed_departments.includes(student.dept_name)) {
-            issues.push(`Allowed departments: ${criteria.allowed_departments.join(', ')}`);
-        }
-    }
-
-    if (criteria.allowed_gap_statuses && criteria.allowed_gap_statuses.length > 0) {
-        const gapStatus = student.any_gap_during_education ? 'gap' : 'no_gap';
-        if (!criteria.allowed_gap_statuses.includes(gapStatus)) {
-            issues.push('Education gap status not permitted for this job');
-        }
-    }
-
+    // Already placed check
     if (criteria.exclude_already_placed === true) {
         const placedResult = await query(
             `SELECT 1 FROM placement_results
@@ -187,7 +203,7 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
 
     // Existing override request
     const overrideResult = await query(
-        `SELECT override_id, override_status, rejection_reason, requested_at, reviewed_at
+        `SELECT override_id, override_status, rejection_reason, review_notes, requested_at, reviewed_at
          FROM job_eligibility_override_requests
          WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
         [studentId, jobId]
@@ -203,14 +219,12 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
     );
 
     return {
-        job: {
-            job_id: job.job_id,
-            job_title: job.job_title,
-            company_name: job.company_name,
-            passout_years: job.passout_years,
-            application_deadline: job.application_deadline,
-            job_status: job.job_status,
-        },
+        job_id: job.job_id,
+        job_title: job.job_title,
+        company_name: job.company_name,
+        passout_years: job.passout_years,
+        application_deadline: job.application_deadline,
+        job_status: job.job_status,
         year_eligible: !yearMismatch,
         criteria_eligible: eligibility.is_eligible,
         is_fully_eligible: !yearMismatch && eligibility.is_eligible,
@@ -226,6 +240,7 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
                 override_id: existingOverride.override_id,
                 override_status: existingOverride.override_status,
                 rejection_reason: existingOverride.rejection_reason ?? null,
+                review_notes: existingOverride.review_notes ?? null,
                 requested_at: existingOverride.requested_at,
                 reviewed_at: existingOverride.reviewed_at ?? null,
             }
@@ -267,7 +282,7 @@ async function requestOverride(jobId, studentId, collegeId, data) {
 
     if (job.allow_applications === false) {
         throw Object.assign(
-            new Error('This job is not currently accepting applications'),
+            new Error(ERROR_MESSAGES.JOB_NOT_ACCEPTING),
             { status: 400 }
         );
     }
@@ -280,10 +295,7 @@ async function requestOverride(jobId, studentId, collegeId, data) {
     const passoutYears = Array.isArray(job.passout_years) ? job.passout_years : [];
     if (!passoutYears.includes(student.student_passout_year)) {
         throw Object.assign(
-            new Error(
-                `This job is for ${passoutYears.join(' / ')} passout year students only. ` +
-                `Your passout year (${student.student_passout_year}) cannot be overridden.`
-            ),
+            new Error(ERROR_MESSAGES.PASSOUT_YEAR_NOT_OVERRIDABLE),
             { status: 400 }
         );
     }
@@ -309,21 +321,20 @@ async function requestOverride(jobId, studentId, collegeId, data) {
 
     if (existingApp.rows.length > 0) {
         throw Object.assign(
-            new Error('You have already applied to this job. No override needed.'),
+            new Error(ERROR_MESSAGES.STUDENT_OVERRIDE_ALREADY_APPLIED),
             { status: 400 }
         );
     }
 
     if (existingOverride.rows.length > 0) {
-        const status = existingOverride.rows[0].override_status;
+        const overrideStatus = existingOverride.rows[0].override_status;
+        const messageMap = {
+            [STATUS.OVERRIDE.PENDING]: ERROR_MESSAGES.STUDENT_OVERRIDE_PENDING,
+            [STATUS.OVERRIDE.APPROVED]: ERROR_MESSAGES.STUDENT_OVERRIDE_APPROVED,
+            [STATUS.OVERRIDE.REJECTED]: ERROR_MESSAGES.STUDENT_OVERRIDE_REJECTED,
+        };
         throw Object.assign(
-            new Error(
-                status === 'pending'
-                    ? 'You already have a pending override request for this job.'
-                    : status === 'approved'
-                        ? 'Your override request was already approved. You can now apply.'
-                        : 'Your override request was rejected. You cannot submit another request for this job.'
-            ),
+            new Error(messageMap[overrideStatus] || ERROR_MESSAGES.STUDENT_OVERRIDE_PENDING),
             { status: 409 }
         );
     }
@@ -332,64 +343,76 @@ async function requestOverride(jobId, studentId, collegeId, data) {
     const eligibility = await evaluateEligibility(jobId, student);
     if (eligibility.is_eligible) {
         throw Object.assign(
-            new Error('You are already eligible for this job. No override request needed. You can apply directly.'),
+            new Error(ERROR_MESSAGES.STUDENT_ALREADY_ELIGIBLE),
             { status: 400 }
         );
     }
 
-    // Insert override request
+    // Insert override request + notification in a transaction
     const ineligibilityText = eligibility.issues.join('; ');
+    const client = await getClient();
 
-    const insertResult = await query(
-        `INSERT INTO job_eligibility_override_requests
-            (student_id, job_id, college_id, request_reason, ineligibility_reasons)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [studentId, jobId, collegeId, data.request_reason.trim(), ineligibilityText]
-    );
+    try {
+        await client.query('BEGIN');
 
-    const override = insertResult.rows[0];
+        const insertResult = await client.query(
+            `INSERT INTO job_eligibility_override_requests
+                (student_id, job_id, college_id, request_reason, ineligibility_reasons)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING ${OVERRIDE_RETURNING_COLUMNS}`,
+            [studentId, jobId, collegeId, data.request_reason.trim(), ineligibilityText]
+        );
 
-    // Notify TPO users in this college about the new override request
-    await query(
-        `INSERT INTO notifications
-            (college_id, recipient_type, recipient_id, title, body,
-             notification_type, related_entity_type, related_entity_id)
-         SELECT $1, $2, u.user_id,
-                $3, $4,
-                $5, $6, $7
-         FROM users u
-         WHERE u.college_id = $1
-           AND u.user_role IN ('tpo', 'collegeadmin', 'tpc')
-           AND u.user_status = 'active'`,
-        [
-            collegeId,
-            RECIPIENT_TYPE.USER,
-            `Override Request: ${job.job_title}`,
-            `${student.first_name} ${student.last_name} (${student.dept_name}) has requested an eligibility override for ${job.job_title} at ${job.company_name}. Reason: ${data.request_reason.trim().substring(0, 150)}`,
-            NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_REQUESTED,
-            'job',
+        const override = insertResult.rows[0];
+
+        // Notify TPO users in this college about the new override request
+        await client.query(
+            `INSERT INTO notifications
+                (college_id, recipient_type, recipient_id, title, body,
+                 notification_type, related_entity_type, related_entity_id)
+             SELECT $1, $2, u.user_id,
+                    $3, $4,
+                    $5, $6, $7
+             FROM users u
+             WHERE u.college_id = $1
+               AND u.user_role IN ('tpo', 'collegeadmin', 'tpc')
+               AND u.user_status = 'active'`,
+            [
+                collegeId,
+                RECIPIENT_TYPE.USER,
+                `Override Request: ${job.job_title}`,
+                `${student.first_name} ${student.last_name} (${student.dept_name}) has requested an eligibility override for ${job.job_title} at ${job.company_name}. Reason: ${data.request_reason.trim().substring(0, 150)}`,
+                NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_REQUESTED,
+                'job',
+                jobId,
+            ]
+        );
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Eligibility override request submitted`, {
+            overrideId: override.override_id,
+            studentId,
             jobId,
-        ]
-    );
+            collegeId,
+        });
 
-    logger.info(`${LOG.AUTH} Eligibility override request submitted`, {
-        overrideId: override.override_id,
-        studentId,
-        jobId,
-        collegeId,
-    });
-
-    return {
-        override_id: override.override_id,
-        job_id: override.job_id,
-        override_status: override.override_status,
-        request_reason: override.request_reason,
-        ineligibility_reasons: override.ineligibility_reasons,
-        requested_at: override.requested_at,
-        job_title: job.job_title,
-        company_name: job.company_name,
-    };
+        return {
+            override_id: override.override_id,
+            job_id: override.job_id,
+            override_status: override.override_status,
+            request_reason: override.request_reason,
+            ineligibility_reasons: override.ineligibility_reasons,
+            requested_at: override.requested_at,
+            job_title: job.job_title,
+            company_name: job.company_name,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 // ============================================================================
@@ -437,7 +460,8 @@ async function getMyOverrideRequests(studentId, collegeId, filters = {}) {
                     r.requested_at, r.reviewed_at,
                     j.job_id, j.job_title, j.passout_years,
                     j.application_deadline, j.job_status,
-                    c.company_name,
+                    j.job_type, c.company_name,
+                    c.industry,
                     u.user_name AS reviewed_by_name
              FROM job_eligibility_override_requests r
              JOIN job_postings j ON r.job_id = j.job_id
@@ -452,7 +476,7 @@ async function getMyOverrideRequests(studentId, collegeId, filters = {}) {
 
     return {
         requests: rowsResult.rows,
-        total: parseInt(countResult.rows[0].total, 10),
+        total: Number.parseInt(countResult.rows[0].total, 10),
         page,
         limit,
     };

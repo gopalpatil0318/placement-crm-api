@@ -76,6 +76,7 @@ router.post(
 router.post(
     '/change_password',
     authenticate,
+    authLimiter,
     validate(changePasswordSchema),
     asyncHandler(controller.changePassword)
 );

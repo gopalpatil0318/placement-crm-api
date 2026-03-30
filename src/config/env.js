@@ -9,7 +9,7 @@
  */
 
 const dotenv = require('dotenv');
-const path = require('path');
+const path = require('node:path');
 
 // Load .env from project root
 dotenv.config({
@@ -36,7 +36,7 @@ if (missing.length > 0) {
 // ============================================================================
 
 function parseIntSafe(value, fallback) {
-  const parsed = parseInt(value, 10);
+  const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
@@ -67,9 +67,9 @@ const config = Object.freeze({
   dbConnectionTimeout: parseIntSafe(process.env.DB_CONNECTION_TIMEOUT, 10000),
   dbQueryTimeout: parseIntSafe(process.env.DB_QUERY_TIMEOUT, 30000),
 
-  // Rate Limiting
+  // Rate Limiting (API — per user per window; keep generous for SPA with prefetching)
   rateLimitWindowMs: parseIntSafe(process.env.RATE_LIMIT_WINDOW_MS, 60000),
-  rateLimitMax: parseIntSafe(process.env.RATE_LIMIT_MAX, 100),
+  rateLimitMax: parseIntSafe(process.env.RATE_LIMIT_MAX, 200),
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',

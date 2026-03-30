@@ -30,7 +30,7 @@ async function getAvailableTraining(req, res) {
             req.validated
         );
 
-    return sendPaginated(res, programs, total, { page, limit }, 'Available training programs retrieved successfully');
+    return sendPaginated(res, programs, total, { page, limit }, SUCCESS_MESSAGES.AVAILABLE_TRAININGS_RETRIEVED);
 }
 
 // ============================================================================
@@ -80,7 +80,7 @@ async function getEnrolledTraining(req, res) {
         { enrollments, summary },
         total,
         { page, limit },
-        'Enrolled training programs retrieved successfully'
+        SUCCESS_MESSAGES.ENROLLED_TRAININGS_RETRIEVED
     );
 }
 

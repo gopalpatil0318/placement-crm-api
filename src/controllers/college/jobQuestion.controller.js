@@ -29,7 +29,7 @@ async function addQuestion(req, res) {
             req.validated
         );
 
-        return sendCreated(res, result, 'Application question added successfully');
+        return sendCreated(res, result, SUCCESS_MESSAGES.QUESTION_ADDED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
@@ -49,7 +49,7 @@ async function getJobQuestions(req, res) {
             req.user.college_id
         );
 
-        return sendSuccess(res, result, 'Job questions retrieved successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.QUESTIONS_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -68,7 +68,7 @@ async function updateQuestion(req, res) {
             req.validated
         );
 
-        return sendSuccess(res, result, 'Question updated successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.QUESTION_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);

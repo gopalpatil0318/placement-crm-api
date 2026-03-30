@@ -13,11 +13,9 @@
  */
 
 const trainingService = require('../../services/college/training.service');
-const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
+const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
 const {
     SUCCESS_MESSAGES,
-    ERROR_MESSAGES,
-    HTTP_STATUS,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -25,19 +23,13 @@ const {
 // ============================================================================
 
 async function createTrainingProgram(req, res) {
-    try {
-        const result = await trainingService.createTrainingProgram(
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
+    const result = await trainingService.createTrainingProgram(
+        req.user.college_id,
+        req.user.id,
+        req.validated
+    );
 
-        return sendCreated(res, result, SUCCESS_MESSAGES.TRAINING_CREATED);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendCreated(res, result, SUCCESS_MESSAGES.TRAINING_CREATED);
 }
 
 // ============================================================================
@@ -45,16 +37,12 @@ async function createTrainingProgram(req, res) {
 // ============================================================================
 
 async function getAllTrainingPrograms(req, res) {
-    try {
-        const { programs, total, page, limit } = await trainingService.getAllTrainingPrograms(
-            req.user.college_id,
-            req.validated
-        );
+    const { programs, total, page, limit } = await trainingService.getAllTrainingPrograms(
+        req.user.college_id,
+        req.validated
+    );
 
-        return sendPaginated(res, programs, total, { page, limit }, 'Training programs retrieved successfully');
-    } catch (err) {
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendPaginated(res, programs, total, { page, limit }, SUCCESS_MESSAGES.TRAININGS_RETRIEVED);
 }
 
 // ============================================================================
@@ -62,17 +50,12 @@ async function getAllTrainingPrograms(req, res) {
 // ============================================================================
 
 async function getTrainingProgram(req, res) {
-    try {
-        const result = await trainingService.getTrainingProgramById(
-            req.params.programId,
-            req.user.college_id
-        );
+    const result = await trainingService.getTrainingProgramById(
+        req.params.programId,
+        req.user.college_id
+    );
 
-        return sendSuccess(res, result, 'Training program retrieved successfully');
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.TRAINING_RETRIEVED);
 }
 
 // ============================================================================
@@ -80,20 +63,13 @@ async function getTrainingProgram(req, res) {
 // ============================================================================
 
 async function updateTrainingProgram(req, res) {
-    try {
-        const result = await trainingService.updateTrainingProgram(
-            req.params.programId,
-            req.user.college_id,
-            req.validated
-        );
+    const result = await trainingService.updateTrainingProgram(
+        req.params.programId,
+        req.user.college_id,
+        req.validated
+    );
 
-        return sendSuccess(res, result, SUCCESS_MESSAGES.TRAINING_UPDATED);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.TRAINING_UPDATED);
 }
 
 // ============================================================================
@@ -101,22 +77,15 @@ async function updateTrainingProgram(req, res) {
 // ============================================================================
 
 async function toggleTrainingStatus(req, res) {
-    try {
-        const { program_status } = req.validated;
+    const { program_status } = req.validated;
 
-        const result = await trainingService.toggleTrainingStatus(
-            req.params.programId,
-            req.user.college_id,
-            program_status
-        );
+    const result = await trainingService.toggleTrainingStatus(
+        req.params.programId,
+        req.user.college_id,
+        program_status
+    );
 
-        const message = `Training program status changed to "${program_status}"`;
-        return sendSuccess(res, result, message);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.TRAINING_STATUS_CHANGED);
 }
 
 // ============================================================================
@@ -124,25 +93,20 @@ async function toggleTrainingStatus(req, res) {
 // ============================================================================
 
 async function getTrainingEnrollments(req, res) {
-    try {
-        const { program, enrollments, summary, total, page, limit } =
-            await trainingService.getTrainingEnrollments(
-                req.params.programId,
-                req.user.college_id,
-                req.validated
-            );
-
-        return sendPaginated(
-            res,
-            { program, enrollments, summary },
-            total,
-            { page, limit },
-            'Enrollments retrieved successfully'
+    const { program, enrollments, summary, total, page, limit } =
+        await trainingService.getTrainingEnrollments(
+            req.params.programId,
+            req.user.college_id,
+            req.validated
         );
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+
+    return sendPaginated(
+        res,
+        { program, enrollments, summary },
+        total,
+        { page, limit },
+        SUCCESS_MESSAGES.ENROLLMENTS_RETRIEVED
+    );
 }
 
 // ============================================================================
@@ -150,19 +114,13 @@ async function getTrainingEnrollments(req, res) {
 // ============================================================================
 
 async function updateEnrollment(req, res) {
-    try {
-        const result = await trainingService.updateEnrollment(
-            req.params.enrollmentId,
-            req.user.college_id,
-            req.validated
-        );
+    const result = await trainingService.updateEnrollment(
+        req.params.enrollmentId,
+        req.user.college_id,
+        req.validated
+    );
 
-        return sendSuccess(res, result, 'Enrollment updated successfully');
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.ENROLLMENT_UPDATED);
 }
 
 // ============================================================================

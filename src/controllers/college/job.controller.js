@@ -50,7 +50,7 @@ async function getAllJobs(req, res) {
             req.validated
         );
 
-        return sendPaginated(res, jobs, total, { page, limit }, 'Jobs retrieved successfully');
+        return sendPaginated(res, jobs, total, { page, limit }, SUCCESS_MESSAGES.JOBS_RETRIEVED);
     } catch (err) {
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
     }
@@ -67,7 +67,7 @@ async function getJob(req, res) {
             req.user.college_id
         );
 
-        return sendSuccess(res, result, 'Job details retrieved successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.JOB_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -111,7 +111,7 @@ async function updateJobStatus(req, res) {
         const statusMessages = {
             published: SUCCESS_MESSAGES.JOB_PUBLISHED,
             closed: SUCCESS_MESSAGES.JOB_CLOSED,
-            cancelled: 'Job posting cancelled',
+            cancelled: SUCCESS_MESSAGES.JOB_CANCELLED,
         };
 
         return sendSuccess(res, result, statusMessages[job_status] || SUCCESS_MESSAGES.JOB_UPDATED);

@@ -11,7 +11,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG, ERROR_MESSAGES } = require('../../config/constants');
 
@@ -24,68 +24,78 @@ const LINK_FIELDS = [
     'bio', 'area_of_interest',
 ];
 
+const RETURNING_COLUMNS = `personal_portfolio_url, resume_url, profile_image_url,
+    github_url, linkedin_url, leetcode_url, codechef_url, codeforces_url,
+    hackerrank_url, geeksforgeeks_url, medium_url, bio, area_of_interest,
+    created_at, updated_at`;
+
 // ============================================================================
 // 1. SAVE PROFILE LINKS (Upsert — ON CONFLICT DO UPDATE)
 // ============================================================================
 
 async function saveProfileLinks(studentId, collegeId, data) {
-    // 1. Verify student exists
-    const studentCheck = await query(
-        `SELECT student_id FROM students WHERE student_id = $1 AND college_id = $2 LIMIT 1`,
-        [studentId, collegeId]
-    );
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    if (!studentCheck.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
-    }
-
-    // 2. Build column lists for insert
-    const fieldsPresent = LINK_FIELDS.filter(f => data[f] !== undefined);
-    const insertColumns = ['student_id', 'college_id', ...fieldsPresent];
-    const insertValues = [studentId, collegeId, ...fieldsPresent.map(f => data[f])];
-    const placeholders = insertValues.map((_, i) => `$${i + 1}`);
-
-    // 3. Build SET clause for ON CONFLICT — update only provided fields
-    const updateSet = fieldsPresent
-        .map((field, index) => `${field} = $${index + 3}`)
-        .concat(['updated_at = NOW()']);
-
-    const result = await query(
-        `INSERT INTO student_profile_links (${insertColumns.join(', ')})
-         VALUES (${placeholders.join(', ')})
-         ON CONFLICT (student_id)
-         DO UPDATE SET ${updateSet.join(', ')}
-         RETURNING *,
-           (xmax = 0) AS is_new`,
-        insertValues
-    );
-
-    const isNew = result.rows[0].is_new;
-    const record = result.rows[0];
-
-    logger.info(`${LOG.API_END} Profile links ${isNew ? 'created' : 'updated'}`, {
-        studentId,
-        is_new: isNew,
-    });
-
-    // Auto-reset profile approval when student updates profile links (skip on first insert)
-    if (!isNew) {
-        await query(
-            `UPDATE students
-             SET profile_approval_status = 'pending', profile_is_approved = false,
-                 approved_by = NULL, approved_at = NULL,
-                 profile_rejection_reason = NULL, rejected_at = NULL,
-                 updated_at = NOW()
-             WHERE student_id = $1 AND college_id = $2
-               AND profile_approval_status != 'pending'`,
+        // 1. Verify student exists
+        const studentCheck = await client.query(
+            `SELECT student_id FROM students WHERE student_id = $1 AND college_id = $2 LIMIT 1`,
             [studentId, collegeId]
         );
-    }
 
-    return {
-        is_new: isNew,
-        data: formatProfileLinks(record),
-    };
+        if (!studentCheck.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
+        }
+
+        // 2. Build column lists for insert
+        const fieldsPresent = LINK_FIELDS.filter(f => data[f] !== undefined);
+        const insertColumns = ['student_id', 'college_id', ...fieldsPresent];
+        const insertValues = [studentId, collegeId, ...fieldsPresent.map(f => data[f])];
+        const placeholders = insertValues.map((_, i) => `$${i + 1}`);
+
+        // 3. Build SET clause for ON CONFLICT — update only provided fields
+        const updateSet = fieldsPresent
+            .map((field, index) => `${field} = $${index + 3}`)
+            .concat(['updated_at = NOW()']);
+
+        const result = await client.query(
+            `INSERT INTO student_profile_links (${insertColumns.join(', ')})
+             VALUES (${placeholders.join(', ')})
+             ON CONFLICT (student_id)
+             DO UPDATE SET ${updateSet.join(', ')}
+             RETURNING ${RETURNING_COLUMNS},
+               (xmax = 0) AS is_new`,
+            insertValues
+        );
+
+        const isNew = result.rows[0].is_new;
+
+        logger.info(`${LOG.API_END} Profile links ${isNew ? 'created' : 'updated'}`, {
+            studentId,
+            is_new: isNew,
+        });
+
+        // 4. Reset profile approval
+        await client.query(
+            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
+             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
+             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
+            [studentId, collegeId]
+        );
+
+        await client.query('COMMIT');
+
+        return {
+            is_new: isNew,
+            data: result.rows[0],
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 // ============================================================================
@@ -94,7 +104,7 @@ async function saveProfileLinks(studentId, collegeId, data) {
 
 async function getProfileLinks(studentId, collegeId) {
     const result = await query(
-        `SELECT * FROM student_profile_links
+        `SELECT ${RETURNING_COLUMNS} FROM student_profile_links
          WHERE student_id = $1 AND college_id = $2
          LIMIT 1`,
         [studentId, collegeId]
@@ -104,31 +114,7 @@ async function getProfileLinks(studentId, collegeId) {
         return null;
     }
 
-    return formatProfileLinks(result.rows[0]);
-}
-
-// ============================================================================
-// HELPER — Format response
-// ============================================================================
-
-function formatProfileLinks(record) {
-    return {
-        personal_portfolio_url: record.personal_portfolio_url,
-        resume_url: record.resume_url,
-        profile_image_url: record.profile_image_url,
-        github_url: record.github_url,
-        linkedin_url: record.linkedin_url,
-        leetcode_url: record.leetcode_url,
-        codechef_url: record.codechef_url,
-        codeforces_url: record.codeforces_url,
-        hackerrank_url: record.hackerrank_url,
-        geeksforgeeks_url: record.geeksforgeeks_url,
-        medium_url: record.medium_url,
-        bio: record.bio,
-        area_of_interest: record.area_of_interest,
-        created_at: record.created_at,
-        updated_at: record.updated_at,
-    };
+    return result.rows[0];
 }
 
 // ============================================================================

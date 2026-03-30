@@ -55,7 +55,7 @@ async function getAllPolicies(req, res) {
             { policies, summary },
             total,
             { page, limit },
-            'Placement policies retrieved successfully'
+            SUCCESS_MESSAGES.POLICIES_RETRIEVED
         );
     } catch (err) {
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -73,7 +73,7 @@ async function getPolicy(req, res) {
             req.user.college_id
         );
 
-        return sendSuccess(res, result, 'Placement policy retrieved successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.POLICY_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -116,8 +116,8 @@ async function togglePolicyStatus(req, res) {
         );
 
         const message = is_active
-            ? 'Policy activated successfully'
-            : 'Policy deactivated successfully';
+            ? SUCCESS_MESSAGES.POLICY_ACTIVATED
+            : SUCCESS_MESSAGES.POLICY_DEACTIVATED;
 
         return sendSuccess(res, result, message);
     } catch (err) {

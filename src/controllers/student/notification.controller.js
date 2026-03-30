@@ -30,7 +30,7 @@ async function getMyNotifications(req, res) {
             req.validated
         );
 
-    return sendPaginated(res, notifications, total, { page, limit }, 'Notifications retrieved successfully');
+    return sendPaginated(res, notifications, total, { page, limit }, SUCCESS_MESSAGES.MY_NOTIFICATIONS_RETRIEVED);
 }
 
 // ============================================================================
@@ -43,7 +43,7 @@ async function getUnreadNotificationCount(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Unread count retrieved');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.UNREAD_COUNT_RETRIEVED);
 }
 
 // ============================================================================

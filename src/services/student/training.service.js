@@ -19,6 +19,33 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
+// EXPLICIT COLUMN LISTS (no SELECT * / RETURNING *)
+// ============================================================================
+
+const PROGRAM_SELECT_COLUMNS = `
+    tp.program_id, tp.program_name, tp.program_description, tp.program_type,
+    tp.trainer_name, tp.trainer_organization, tp.start_date, tp.end_date,
+    tp.total_sessions, tp.session_duration_hours, tp.max_enrollment,
+    tp.enrollment_deadline, tp.program_status, tp.target_dept_ids,
+    tp.target_passout_year, tp.created_by, tp.created_at
+`.replaceAll('\n', '');
+
+const ENROLLMENT_SELECT_COLUMNS = `
+    te.enrollment_id, te.program_id, te.student_id, te.college_id,
+    te.enrolled_at, te.sessions_attended, te.completion_status,
+    te.completion_percentage, te.certificate_issued, te.certificate_url,
+    te.student_feedback, te.student_rating, te.completed_at,
+    te.created_at, te.updated_at
+`.replaceAll('\n', '');
+
+const ENROLLMENT_RETURNING_COLUMNS = `
+    enrollment_id, program_id, student_id, college_id, enrolled_at,
+    sessions_attended, completion_status, completion_percentage,
+    certificate_issued, certificate_url, student_feedback, student_rating,
+    completed_at, created_at, updated_at
+`.replaceAll('\n', '');
+
+// ============================================================================
 // 1. GET AVAILABLE TRAININGS
 // ============================================================================
 // Shows programs with status 'enrollment_open' that student hasn't enrolled in,
@@ -43,7 +70,7 @@ async function getAvailableTrainings(studentId, collegeId, filters = {}) {
     // Build WHERE clause
     const conditions = [
         'tp.college_id = $1',
-        "tp.program_status = 'enrollment_open'",
+        `tp.program_status = '${STATUS.TRAINING.ENROLLMENT_OPEN}'`,
         // Not already enrolled
         `NOT EXISTS (
             SELECT 1 FROM training_enrollments te
@@ -93,18 +120,23 @@ async function getAvailableTrainings(studentId, collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT tp.*,
+            `SELECT ${PROGRAM_SELECT_COLUMNS},
                     u.user_name AS created_by_name,
-                    (SELECT COUNT(*) FROM training_enrollments te WHERE te.program_id = tp.program_id) AS enrolled_count
+                    COALESCE(ec.enrolled_count, 0) AS enrolled_count
              FROM training_programs tp
              LEFT JOIN users u ON tp.created_by = u.user_id
+             LEFT JOIN (
+                 SELECT program_id, COUNT(*) AS enrolled_count
+                 FROM training_enrollments
+                 GROUP BY program_id
+             ) ec ON tp.program_id = ec.program_id
              WHERE ${whereClause}
              ORDER BY ${sortCol} ${sortOrd}
              LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
             [...params, limit, offset]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const programs = programResult.rows.map(row => ({
         program_id: row.program_id,
@@ -116,12 +148,12 @@ async function getAvailableTrainings(studentId, collegeId, filters = {}) {
         start_date: row.start_date || null,
         end_date: row.end_date || null,
         total_sessions: row.total_sessions || null,
-        session_duration_hours: row.session_duration_hours ? parseFloat(row.session_duration_hours) : null,
+        session_duration_hours: row.session_duration_hours ? Number.parseFloat(row.session_duration_hours) : null,
         max_enrollment: row.max_enrollment || null,
         enrollment_deadline: row.enrollment_deadline || null,
-        enrolled_count: parseInt(row.enrolled_count, 10),
+        enrolled_count: Number.parseInt(row.enrolled_count, 10),
         spots_remaining: row.max_enrollment
-            ? Math.max(0, row.max_enrollment - parseInt(row.enrolled_count, 10))
+            ? Math.max(0, row.max_enrollment - Number.parseInt(row.enrolled_count, 10))
             : null,
         is_deadline_passed: row.enrollment_deadline
             ? new Date(row.enrollment_deadline) < new Date()
@@ -145,7 +177,7 @@ async function enrollInTraining(programId, studentId, collegeId) {
 
         // 1. Lock & verify program exists, is open, and has capacity
         const programResult = await client.query(
-            `SELECT tp.*,
+            `SELECT ${PROGRAM_SELECT_COLUMNS},
                     (SELECT COUNT(*) FROM training_enrollments te WHERE te.program_id = tp.program_id) AS enrolled_count
              FROM training_programs tp
              WHERE tp.program_id = $1 AND tp.college_id = $2
@@ -170,16 +202,16 @@ async function enrollInTraining(programId, studentId, collegeId) {
         // Check enrollment deadline
         if (program.enrollment_deadline && new Date(program.enrollment_deadline) < new Date()) {
             throw Object.assign(
-                new Error('Enrollment deadline has passed for this program'),
+                new Error(ERROR_MESSAGES.ENROLLMENT_DEADLINE_PASSED),
                 { status: 400 }
             );
         }
 
         // Check max enrollment capacity (atomic under row lock)
-        const enrolledCount = parseInt(program.enrolled_count, 10);
+        const enrolledCount = Number.parseInt(program.enrolled_count, 10);
         if (program.max_enrollment && enrolledCount >= program.max_enrollment) {
             throw Object.assign(
-                new Error('This program has reached its maximum enrollment capacity'),
+                new Error(ERROR_MESSAGES.MAX_ENROLLMENT_REACHED),
                 { status: 400 }
             );
         }
@@ -200,7 +232,7 @@ async function enrollInTraining(programId, studentId, collegeId) {
         if (program.target_dept_ids && program.target_dept_ids.length > 0) {
             if (!program.target_dept_ids.includes(student.dept_id)) {
                 throw Object.assign(
-                    new Error('This program is not available for your department'),
+                    new Error(ERROR_MESSAGES.DEPT_NOT_ELIGIBLE),
                     { status: 400 }
                 );
             }
@@ -208,7 +240,7 @@ async function enrollInTraining(programId, studentId, collegeId) {
 
         if (program.target_passout_year && program.target_passout_year !== student.passout_year) {
             throw Object.assign(
-                new Error('This program is not available for your passout year'),
+                new Error(ERROR_MESSAGES.YEAR_NOT_ELIGIBLE),
                 { status: 400 }
             );
         }
@@ -231,7 +263,7 @@ async function enrollInTraining(programId, studentId, collegeId) {
         const result = await client.query(
             `INSERT INTO training_enrollments (program_id, student_id, college_id)
              VALUES ($1, $2, $3)
-             RETURNING *`,
+             RETURNING ${ENROLLMENT_RETURNING_COLUMNS}`,
             [programId, studentId, collegeId]
         );
 
@@ -304,7 +336,7 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT te.*,
+            `SELECT ${ENROLLMENT_SELECT_COLUMNS},
                     tp.program_name,
                     tp.program_description,
                     tp.program_type,
@@ -325,11 +357,11 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
         query(
             `SELECT
                  COUNT(*) AS total_enrolled,
-                 COUNT(*) FILTER (WHERE te.completion_status = 'enrolled') AS enrolled_count,
-                 COUNT(*) FILTER (WHERE te.completion_status = 'in_progress') AS in_progress_count,
-                 COUNT(*) FILTER (WHERE te.completion_status = 'completed') AS completed_count,
-                 COUNT(*) FILTER (WHERE te.completion_status = 'dropped') AS dropped_count,
-                 COUNT(*) FILTER (WHERE te.completion_status = 'failed') AS failed_count,
+                 COUNT(*) FILTER (WHERE te.completion_status = '${STATUS.ENROLLMENT.ENROLLED}') AS enrolled_count,
+                 COUNT(*) FILTER (WHERE te.completion_status = '${STATUS.ENROLLMENT.IN_PROGRESS}') AS in_progress_count,
+                 COUNT(*) FILTER (WHERE te.completion_status = '${STATUS.ENROLLMENT.COMPLETED}') AS completed_count,
+                 COUNT(*) FILTER (WHERE te.completion_status = '${STATUS.ENROLLMENT.DROPPED}') AS dropped_count,
+                 COUNT(*) FILTER (WHERE te.completion_status = '${STATUS.ENROLLMENT.FAILED}') AS failed_count,
                  COUNT(*) FILTER (WHERE te.certificate_issued = true) AS certificates_earned
              FROM training_enrollments te
              WHERE te.student_id = $1 AND te.college_id = $2`,
@@ -337,7 +369,7 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
     const stats = summaryResult.rows[0];
 
     const enrollments = enrollmentResult.rows.map(row => ({
@@ -352,11 +384,11 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
         start_date: row.start_date || null,
         end_date: row.end_date || null,
         total_sessions: row.total_sessions || null,
-        session_duration_hours: row.session_duration_hours ? parseFloat(row.session_duration_hours) : null,
+        session_duration_hours: row.session_duration_hours ? Number.parseFloat(row.session_duration_hours) : null,
         enrolled_at: row.enrolled_at,
         sessions_attended: row.sessions_attended,
         completion_status: row.completion_status,
-        completion_percentage: row.completion_percentage ? parseFloat(row.completion_percentage) : 0,
+        completion_percentage: row.completion_percentage ? Number.parseFloat(row.completion_percentage) : 0,
         certificate_issued: row.certificate_issued,
         certificate_url: row.certificate_url || null,
         student_feedback: row.student_feedback || null,
@@ -365,7 +397,7 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
         // Computed
         has_submitted_feedback: !!(row.student_feedback || row.student_rating),
         attendance_percentage: row.total_sessions
-            ? parseFloat(((row.sessions_attended / row.total_sessions) * 100).toFixed(1))
+            ? Number.parseFloat(((row.sessions_attended / row.total_sessions) * 100).toFixed(1))
             : null,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -377,13 +409,13 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
         page,
         limit,
         summary: {
-            total_enrolled: parseInt(stats.total_enrolled, 10),
-            enrolled_count: parseInt(stats.enrolled_count, 10),
-            in_progress_count: parseInt(stats.in_progress_count, 10),
-            completed_count: parseInt(stats.completed_count, 10),
-            dropped_count: parseInt(stats.dropped_count, 10),
-            failed_count: parseInt(stats.failed_count, 10),
-            certificates_earned: parseInt(stats.certificates_earned, 10),
+            total_enrolled: Number.parseInt(stats.total_enrolled, 10),
+            enrolled_count: Number.parseInt(stats.enrolled_count, 10),
+            in_progress_count: Number.parseInt(stats.in_progress_count, 10),
+            completed_count: Number.parseInt(stats.completed_count, 10),
+            dropped_count: Number.parseInt(stats.dropped_count, 10),
+            failed_count: Number.parseInt(stats.failed_count, 10),
+            certificates_earned: Number.parseInt(stats.certificates_earned, 10),
         },
     };
 }
@@ -393,77 +425,91 @@ async function getEnrolledTrainings(studentId, collegeId, filters = {}) {
 // ============================================================================
 
 async function submitTrainingFeedback(enrollmentId, studentId, collegeId, data) {
-    // Verify enrollment exists and belongs to this student
-    const enrollmentResult = await query(
-        `SELECT te.*, tp.program_name, tp.program_status
-         FROM training_enrollments te
-         JOIN training_programs tp ON te.program_id = tp.program_id
-         WHERE te.enrollment_id = $1 AND te.student_id = $2 AND te.college_id = $3`,
-        [enrollmentId, studentId, collegeId]
-    );
+    const client = await getClient();
 
-    if (!enrollmentResult.rows.length) {
-        throw Object.assign(new Error('Enrollment not found'), { status: 404 });
-    }
+    try {
+        await client.query('BEGIN');
 
-    const enrollment = enrollmentResult.rows[0];
-
-    // Cannot submit feedback for a program that hasn't started
-    if (enrollment.program_status === STATUS.TRAINING.UPCOMING || enrollment.program_status === STATUS.TRAINING.ENROLLMENT_OPEN) {
-        throw Object.assign(
-            new Error('You can only submit feedback for programs that are in progress or completed'),
-            { status: 400 }
+        // Lock & verify enrollment exists and belongs to this student
+        const enrollmentResult = await client.query(
+            `SELECT ${ENROLLMENT_SELECT_COLUMNS}, tp.program_name, tp.program_status
+             FROM training_enrollments te
+             JOIN training_programs tp ON te.program_id = tp.program_id
+             WHERE te.enrollment_id = $1 AND te.student_id = $2 AND te.college_id = $3
+             FOR UPDATE OF te`,
+            [enrollmentId, studentId, collegeId]
         );
-    }
 
-    // Cannot submit if student dropped out
-    if (enrollment.completion_status === 'dropped') {
-        throw Object.assign(
-            new Error('Cannot submit feedback for a program you dropped out of'),
-            { status: 400 }
+        if (!enrollmentResult.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.ENROLLMENT_NOT_FOUND), { status: 404 });
+        }
+
+        const enrollment = enrollmentResult.rows[0];
+
+        // Cannot submit feedback for a program that hasn't started
+        if (enrollment.program_status === STATUS.TRAINING.UPCOMING || enrollment.program_status === STATUS.TRAINING.ENROLLMENT_OPEN) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.TRAINING_FEEDBACK_NOT_STARTED),
+                { status: 400 }
+            );
+        }
+
+        // Cannot submit if student dropped out
+        if (enrollment.completion_status === STATUS.ENROLLMENT.DROPPED) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.TRAINING_FEEDBACK_DROP_FORBIDDEN),
+                { status: 400 }
+            );
+        }
+
+        // Check if already submitted feedback (atomic under row lock)
+        if (enrollment.student_feedback || enrollment.student_rating) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.TRAINING_FEEDBACK_ALREADY_SUBMITTED),
+                { status: 409 }
+            );
+        }
+
+        // Update enrollment with feedback
+        const result = await client.query(
+            `UPDATE training_enrollments
+             SET student_rating = $1,
+                 student_feedback = $2,
+                 updated_at = NOW()
+             WHERE enrollment_id = $3
+             RETURNING ${ENROLLMENT_RETURNING_COLUMNS}`,
+            [data.student_rating, data.student_feedback, enrollmentId]
         );
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Student submitted training feedback`, {
+            enrollmentId,
+            studentId,
+            programName: enrollment.program_name,
+            rating: data.student_rating,
+            collegeId,
+        });
+
+        return {
+            enrollment_id: result.rows[0].enrollment_id,
+            program_id: result.rows[0].program_id,
+            program_name: enrollment.program_name,
+            student_rating: result.rows[0].student_rating,
+            student_feedback: result.rows[0].student_feedback,
+            completion_status: result.rows[0].completion_status,
+            sessions_attended: result.rows[0].sessions_attended,
+            completion_percentage: result.rows[0].completion_percentage
+                ? Number.parseFloat(result.rows[0].completion_percentage)
+                : 0,
+            updated_at: result.rows[0].updated_at,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
     }
-
-    // Check if already submitted feedback
-    if (enrollment.student_feedback || enrollment.student_rating) {
-        throw Object.assign(
-            new Error('You have already submitted feedback for this program'),
-            { status: 409 }
-        );
-    }
-
-    // Update enrollment with feedback
-    const result = await query(
-        `UPDATE training_enrollments
-         SET student_rating = $1,
-             student_feedback = $2,
-             updated_at = NOW()
-         WHERE enrollment_id = $3
-         RETURNING *`,
-        [data.student_rating, data.student_feedback, enrollmentId]
-    );
-
-    logger.info(`${LOG.AUTH} Student submitted training feedback`, {
-        enrollmentId,
-        studentId,
-        programName: enrollment.program_name,
-        rating: data.student_rating,
-        collegeId,
-    });
-
-    return {
-        enrollment_id: result.rows[0].enrollment_id,
-        program_id: result.rows[0].program_id,
-        program_name: enrollment.program_name,
-        student_rating: result.rows[0].student_rating,
-        student_feedback: result.rows[0].student_feedback,
-        completion_status: result.rows[0].completion_status,
-        sessions_attended: result.rows[0].sessions_attended,
-        completion_percentage: result.rows[0].completion_percentage
-            ? parseFloat(result.rows[0].completion_percentage)
-            : 0,
-        updated_at: result.rows[0].updated_at,
-    };
 }
 
 // ============================================================================

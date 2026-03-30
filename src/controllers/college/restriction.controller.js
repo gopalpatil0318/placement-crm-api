@@ -10,33 +10,22 @@
  */
 
 const restrictionService = require('../../services/college/restriction.service');
-const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
-const {
-    SUCCESS_MESSAGES,
-    ERROR_MESSAGES,
-    HTTP_STATUS,
-} = require('../../config/constants');
+const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
+const { SUCCESS_MESSAGES } = require('../../config/constants');
 
 // ============================================================================
 // 1. ADD RESTRICTION
 // ============================================================================
 
 async function addRestriction(req, res) {
-    try {
-        const result = await restrictionService.addRestriction(
-            req.params.studentId,
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
+    const result = await restrictionService.addRestriction(
+        req.params.studentId,
+        req.user.college_id,
+        req.user.id,
+        req.validated
+    );
 
-        return sendCreated(res, result, SUCCESS_MESSAGES.RESTRICTION_ADDED);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        if (err.status === 409) return sendError(res, err.message, HTTP_STATUS.CONFLICT);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendCreated(res, result, SUCCESS_MESSAGES.RESTRICTION_ADDED);
 }
 
 // ============================================================================
@@ -44,16 +33,12 @@ async function addRestriction(req, res) {
 // ============================================================================
 
 async function getAllRestrictions(req, res) {
-    try {
-        const { restrictions, total, page, limit } = await restrictionService.getAllRestrictions(
-            req.user.college_id,
-            req.validated
-        );
+    const { restrictions, total, page, limit } = await restrictionService.getAllRestrictions(
+        req.user.college_id,
+        req.validated
+    );
 
-        return sendPaginated(res, restrictions, total, { page, limit }, 'Restrictions retrieved successfully');
-    } catch (err) {
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendPaginated(res, restrictions, total, { page, limit }, SUCCESS_MESSAGES.RESTRICTIONS_RETRIEVED);
 }
 
 // ============================================================================
@@ -61,18 +46,13 @@ async function getAllRestrictions(req, res) {
 // ============================================================================
 
 async function getStudentRestrictions(req, res) {
-    try {
-        const result = await restrictionService.getStudentRestrictions(
-            req.params.studentId,
-            req.user.college_id,
-            req.validated || {}
-        );
+    const result = await restrictionService.getStudentRestrictions(
+        req.params.studentId,
+        req.user.college_id,
+        req.validated || {}
+    );
 
-        return sendSuccess(res, result, 'Student restrictions retrieved successfully');
-    } catch (err) {
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_RESTRICTIONS_RETRIEVED);
 }
 
 // ============================================================================
@@ -80,24 +60,18 @@ async function getStudentRestrictions(req, res) {
 // ============================================================================
 
 async function updateRestriction(req, res) {
-    try {
-        const result = await restrictionService.updateRestriction(
-            req.params.restrictionId,
-            req.user.college_id,
-            req.user.id,
-            req.validated
-        );
+    const result = await restrictionService.updateRestriction(
+        req.params.restrictionId,
+        req.user.college_id,
+        req.user.id,
+        req.validated
+    );
 
-        const message = req.validated.is_active === false
-            ? 'Restriction resolved successfully'
-            : SUCCESS_MESSAGES.RESTRICTION_UPDATED;
+    const message = req.validated.is_active === false
+        ? SUCCESS_MESSAGES.RESTRICTION_RESOLVED
+        : SUCCESS_MESSAGES.RESTRICTION_UPDATED;
 
-        return sendSuccess(res, result, message);
-    } catch (err) {
-        if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
-        if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
-        return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
-    }
+    return sendSuccess(res, result, message);
 }
 
 // ============================================================================

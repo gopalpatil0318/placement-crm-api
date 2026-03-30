@@ -19,6 +19,7 @@
 
 const dashboardService = require('../../services/college/dashboard.service');
 const { sendSuccess } = require('../../utils/responseHelper');
+const { SUCCESS_MESSAGES } = require('../../config/constants');
 
 // ============================================================================
 // #105a — OVERVIEW (loaded on login)
@@ -29,7 +30,7 @@ async function getOverview(req, res) {
         req.user.college_id,
         req.validated.passout_year
     );
-    return sendSuccess(res, data, 'Dashboard overview retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.DASHBOARD_OVERVIEW_RETRIEVED);
 }
 
 // ============================================================================
@@ -41,7 +42,7 @@ async function getPlacementStats(req, res) {
         req.user.college_id,
         req.validated.passout_year
     );
-    return sendSuccess(res, data, 'Placement statistics retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.PLACEMENT_STATS_RETRIEVED);
 }
 
 // ============================================================================
@@ -53,7 +54,7 @@ async function getApplicationFunnel(req, res) {
         req.user.college_id,
         req.validated.passout_year
     );
-    return sendSuccess(res, data, 'Application funnel retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.APPLICATION_FUNNEL_RETRIEVED);
 }
 
 // ============================================================================
@@ -65,7 +66,7 @@ async function getStudentReadiness(req, res) {
         req.user.college_id,
         req.validated.passout_year
     );
-    return sendSuccess(res, data, 'Student readiness data retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.STUDENT_READINESS_RETRIEVED);
 }
 
 // ============================================================================
@@ -77,7 +78,7 @@ async function getDiversityStats(req, res) {
         req.user.college_id,
         req.validated.passout_year
     );
-    return sendSuccess(res, data, 'Diversity statistics retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.DIVERSITY_STATS_RETRIEVED);
 }
 
 // ============================================================================
@@ -89,7 +90,7 @@ async function getTrainingStats(req, res) {
         req.user.college_id,
         req.validated.passout_year
     );
-    return sendSuccess(res, data, 'Training & feedback statistics retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.TRAINING_STATS_RETRIEVED);
 }
 
 // ============================================================================
@@ -102,7 +103,7 @@ async function getDepartmentWise(req, res) {
         req.validated.passout_year,
         req.validated.dept_id
     );
-    return sendSuccess(res, data, 'Department-wise statistics retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.DEPARTMENT_STATS_RETRIEVED);
 }
 
 // ============================================================================
@@ -115,7 +116,7 @@ async function getCompanyWise(req, res) {
         req.validated.passout_year,
         req.validated.company_id
     );
-    return sendSuccess(res, data, 'Company-wise statistics retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.COMPANY_STATS_RETRIEVED);
 }
 
 // ============================================================================
@@ -123,12 +124,12 @@ async function getCompanyWise(req, res) {
 // ============================================================================
 
 async function getYearComparison(req, res) {
-    const years = req.validated.passout_years.split(',').map(Number);
+    const years = req.validated.passout_years.split(',').map(y => Number.parseInt(y, 10));
     const data = await dashboardService.getYearComparison(
         req.user.college_id,
         years
     );
-    return sendSuccess(res, data, 'Year comparison data retrieved');
+    return sendSuccess(res, data, SUCCESS_MESSAGES.YEAR_COMPARISON_RETRIEVED);
 }
 
 module.exports = {

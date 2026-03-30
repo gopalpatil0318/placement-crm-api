@@ -19,6 +19,11 @@ const { LOG, ERROR_MESSAGES } = require('../../config/constants');
 // Fields that can be updated via updatePolicy
 const UPDATABLE_FIELDS = ['passout_year', 'policy_title', 'policy_description'];
 
+// Explicit column list — never RETURNING * or SELECT *
+const POLICY_RETURNING_COLUMNS = `policy_id, college_id, passout_year, policy_title,
+                   policy_description, is_active, created_by,
+                   created_at, updated_at`;
+
 // Allowed sort columns (whitelist to prevent SQL injection)
 const SORTABLE = {
     created_at: 'pp.created_at',
@@ -74,7 +79,7 @@ async function checkDuplicateTitle(collegeId, passoutYear, title, excludePolicyI
 
     if (result.rows.length) {
         throw Object.assign(
-            new Error(`A policy with this title already exists for passout year ${passoutYear}`),
+            new Error(ERROR_MESSAGES.POLICY_DUPLICATE_TITLE),
             { status: 409 }
         );
     }
@@ -102,9 +107,7 @@ async function createPolicy(collegeId, userId, data) {
         `INSERT INTO placement_policies
             (college_id, passout_year, policy_title, policy_description, created_by)
          VALUES ($1, $2, $3, $4, $5)
-         RETURNING policy_id, college_id, passout_year, policy_title,
-                   policy_description, is_active, created_by,
-                   created_at, updated_at`,
+         RETURNING ${POLICY_RETURNING_COLUMNS}`,
         [collegeId, passout_year, policy_title.trim(), policy_description.trim(), userId]
     );
 
@@ -193,7 +196,7 @@ async function getAllPolicies(collegeId, filters = {}) {
             [collegeId]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         policies: dataResult.rows,
@@ -266,7 +269,7 @@ async function updatePolicy(policyId, collegeId, data) {
 
     if (setClauses.length === 0) {
         throw Object.assign(
-            new Error('At least one field must be provided to update'),
+            new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE),
             { status: 400 }
         );
     }
@@ -291,9 +294,7 @@ async function updatePolicy(policyId, collegeId, data) {
         `UPDATE placement_policies
          SET ${setClauses.join(', ')}, updated_at = NOW()
          WHERE policy_id = $${paramIndex} AND college_id = $${paramIndex + 1}
-         RETURNING policy_id, college_id, passout_year, policy_title,
-                   policy_description, is_active, created_by,
-                   created_at, updated_at`,
+         RETURNING ${POLICY_RETURNING_COLUMNS}`,
         params
     );
 
@@ -323,7 +324,7 @@ async function togglePolicyStatus(policyId, collegeId, isActive) {
 
     if (existing.is_active === isActive) {
         throw Object.assign(
-            new Error(`Policy is already ${isActive ? 'active' : 'inactive'}`),
+            new Error(ERROR_MESSAGES.POLICY_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -332,9 +333,7 @@ async function togglePolicyStatus(policyId, collegeId, isActive) {
         `UPDATE placement_policies
          SET is_active = $1, updated_at = NOW()
          WHERE policy_id = $2 AND college_id = $3
-         RETURNING policy_id, college_id, passout_year, policy_title,
-                   policy_description, is_active, created_by,
-                   created_at, updated_at`,
+         RETURNING ${POLICY_RETURNING_COLUMNS}`,
         [isActive, policyId, collegeId]
     );
 

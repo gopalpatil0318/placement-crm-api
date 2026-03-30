@@ -10,12 +10,10 @@
  */
 
 const Joi = require('joi');
-const { STATUS } = require('../../config/constants');
+const { STATUS, JOB_TYPES, QUESTION_TYPES } = require('../../config/constants');
 
 // Valid enums
-const JOB_TYPES = ['full-time', 'internship', 'both'];
 const JOB_STATUSES = Object.values(STATUS.JOB);
-const QUESTION_TYPES = ['mcq_single', 'mcq_multiple', 'text', 'essay', 'yes_no'];
 
 // ============================================================================
 // SUB-SCHEMAS — Positions, Criteria, Rounds, Questions
@@ -145,8 +143,8 @@ const roundSchema = Joi.object({
 
 const questionSchema = Joi.object({
     question_text: Joi.string()
-        .min(3)
-        .max(1000)
+        .min(5)
+        .max(2000)
         .required()
         .messages({
             'string.empty': 'Question text is required',
@@ -232,11 +230,13 @@ const createJobSchema = Joi.object({
 
     salary_min: Joi.number()
         .min(0)
+        .max(99999999)
         .optional()
         .allow(null),
 
     salary_max: Joi.number()
         .min(0)
+        .max(99999999)
         .optional()
         .allow(null),
 
@@ -400,11 +400,13 @@ const updateJobSchema = Joi.object({
 
     salary_min: Joi.number()
         .min(0)
+        .max(99999999)
         .optional()
         .allow(null),
 
     salary_max: Joi.number()
         .min(0)
+        .max(99999999)
         .optional()
         .allow(null),
 

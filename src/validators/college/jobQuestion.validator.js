@@ -9,9 +9,7 @@
  */
 
 const Joi = require('joi');
-
-const QUESTION_TYPES = ['mcq_single', 'mcq_multiple', 'text', 'essay', 'yes_no'];
-const MCQ_TYPES = ['mcq_single', 'mcq_multiple'];
+const { QUESTION_TYPES, MCQ_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // CUSTOM VALIDATION — MCQ options validation

@@ -35,6 +35,7 @@ const {
 
 // All routes require COLLEGEADMIN or TPO
 router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+router.use(apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -42,7 +43,6 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 
 router.post(
     '/create_placement',
-    apiLimiter,
     validate(createPlacementSchema),
     asyncHandler(controller.createPlacement)
 );
@@ -61,7 +61,6 @@ router.get(
 
 router.put(
     '/update_placement/:placementId',
-    apiLimiter,
     validate(placementIdParamSchema, 'params'),
     validate(updatePlacementSchema),
     asyncHandler(controller.updatePlacement)
@@ -69,7 +68,6 @@ router.put(
 
 router.patch(
     '/verify_offer_letter/:placementId',
-    apiLimiter,
     validate(placementIdParamSchema, 'params'),
     validate(verifyOfferLetterSchema),
     asyncHandler(controller.verifyOfferLetter)
@@ -77,7 +75,6 @@ router.patch(
 
 router.patch(
     '/update_placement_status/:placementId',
-    apiLimiter,
     validate(placementIdParamSchema, 'params'),
     validate(updatePlacementStatusSchema),
     asyncHandler(controller.updatePlacementStatus)

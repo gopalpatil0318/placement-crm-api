@@ -49,7 +49,7 @@ const getMyFeedback = async (req, res) => {
     result.feedback,
     result.total,
     { page: result.page, limit: result.limit },
-    SUCCESS_MESSAGES.FETCHED_SUCCESSFULLY
+    SUCCESS_MESSAGES.MY_FEEDBACK_RETRIEVED
   );
 };
 
@@ -90,7 +90,7 @@ const browseInterviewQuestions = async (req, res) => {
     result.questions,
     result.total,
     { page: result.page, limit: result.limit },
-    SUCCESS_MESSAGES.FETCHED_SUCCESSFULLY
+    SUCCESS_MESSAGES.BROWSE_QUESTIONS_RETRIEVED
   );
 };
 

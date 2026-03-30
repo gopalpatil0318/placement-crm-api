@@ -29,6 +29,39 @@ const UPDATABLE_FIELDS = [
     'passout_years', 'application_deadline', 'allow_applications',
 ];
 
+// Explicit column lists — no SELECT * or RETURNING *
+const JOB_RETURNING_COLUMNS = [
+    'job_id', 'college_id', 'company_id', 'job_title', 'job_description',
+    'job_location', 'salary_package', 'salary_min', 'salary_max',
+    'bond_duration', 'bond_details', 'job_type',
+    'internship_duration', 'internship_stipend',
+    'passout_years', 'application_deadline', 'job_status',
+    'allow_applications', 'created_by', 'created_at', 'updated_at',
+].join(', ');
+
+const POSITION_COLUMNS = [
+    'position_id', 'job_id', 'position_name', 'position_description',
+    'vacancies', 'position_status', 'created_at',
+].join(', ');
+
+const CRITERIA_COLUMNS = [
+    'criteria_id', 'job_id', 'min_overall_cgpa', 'max_live_kts',
+    'min_tenth_percentage', 'min_twelfth_percentage', 'min_diploma_percentage',
+    'allowed_genders', 'allowed_departments', 'allowed_gap_statuses',
+    'passout_years', 'min_existing_package', 'max_existing_package',
+    'exclude_already_placed', 'created_at',
+].join(', ');
+
+const ROUND_COLUMNS = [
+    'round_id', 'job_id', 'round_number', 'round_name', 'round_description',
+    'round_type', 'round_date', 'round_venue', 'round_status', 'created_at',
+].join(', ');
+
+const QUESTION_COLUMNS = [
+    'question_id', 'job_id', 'question_text', 'question_type',
+    'question_options', 'is_required', 'question_order', 'created_at',
+].join(', ');
+
 // Valid status transitions
 const STATUS_TRANSITIONS = {
     [STATUS.JOB.DRAFT]: [STATUS.JOB.PUBLISHED, STATUS.JOB.CANCELLED],
@@ -73,7 +106,7 @@ async function createJob(collegeId, userId, data) {
 
     if (companyCheck.rows[0].company_status !== STATUS.COMPANY.ACTIVE) {
         throw Object.assign(
-            new Error('Cannot create a job for an inactive company. Activate the company first'),
+            new Error(ERROR_MESSAGES.INACTIVE_COMPANY),
             { status: 400 }
         );
     }
@@ -83,7 +116,7 @@ async function createJob(collegeId, userId, data) {
     const deadline = new Date(application_deadline);
     if (deadline <= now) {
         throw Object.assign(
-            new Error('Application deadline must be in the future'),
+            new Error(ERROR_MESSAGES.DEADLINE_MUST_BE_FUTURE),
             { status: 400 }
         );
     }
@@ -93,7 +126,7 @@ async function createJob(collegeId, userId, data) {
         salary_max !== undefined && salary_max !== null &&
         Number(salary_min) > Number(salary_max)) {
         throw Object.assign(
-            new Error('Minimum salary cannot be greater than maximum salary'),
+            new Error(ERROR_MESSAGES.SALARY_MIN_EXCEEDS_MAX),
             { status: 400 }
         );
     }
@@ -112,7 +145,7 @@ async function createJob(collegeId, userId, data) {
                 job_type, internship_duration, internship_stipend,
                 passout_years, application_deadline, job_status, created_by)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-             RETURNING *`,
+             RETURNING ${JOB_RETURNING_COLUMNS}`,
             [
                 collegeId, company_id, job_title, job_description ?? null, job_location,
                 salary_package ?? null, salary_min ?? null, salary_max ?? null,
@@ -133,7 +166,7 @@ async function createJob(collegeId, userId, data) {
         const posResult = await client.query(
             `INSERT INTO job_positions (job_id, position_name, position_description, vacancies)
              SELECT $1, unnest($2::text[]), unnest($3::text[]), unnest($4::int[])
-             RETURNING *`,
+             RETURNING ${POSITION_COLUMNS}`,
             [jobId, posNames, posDescs, posVacancies]
         );
         const insertedPositions = posResult.rows;
@@ -150,7 +183,7 @@ async function createJob(collegeId, userId, data) {
                     passout_years, min_existing_package, max_existing_package,
                     exclude_already_placed)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                 RETURNING *`,
+                 RETURNING ${CRITERIA_COLUMNS}`,
                 [
                     jobId,
                     ec.min_overall_cgpa ?? null,
@@ -185,7 +218,7 @@ async function createJob(collegeId, userId, data) {
                    (job_id, round_number, round_name, round_description, round_type, round_date, round_venue)
                  SELECT $1, unnest($2::int[]), unnest($3::text[]), unnest($4::text[]),
                         unnest($5::text[]), unnest($6::timestamptz[]), unnest($7::text[])
-                 RETURNING *`,
+                 RETURNING ${ROUND_COLUMNS}`,
                 [jobId, roundNumbers, roundNames, roundDescs, roundTypes, roundDates, roundVenues]
             );
             insertedRounds = roundResult.rows;
@@ -205,7 +238,7 @@ async function createJob(collegeId, userId, data) {
                    (job_id, question_text, question_type, question_options, is_required, question_order)
                  SELECT $1, unnest($2::text[]), unnest($3::text[]), unnest($4::jsonb[]),
                         unnest($5::boolean[]), unnest($6::int[])
-                 RETURNING *`,
+                 RETURNING ${QUESTION_COLUMNS}`,
                 [jobId, qTexts, qTypes, qOptions, qRequired, qOrders]
             );
             insertedQuestions = qResult.rows;
@@ -315,7 +348,7 @@ async function getAllJobs(collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT j.*,
+            `SELECT j.${JOB_RETURNING_COLUMNS.split(', ').join(', j.')},
                     c.company_name,
                     c.company_logo,
                     COALESCE(pos.cnt, 0) AS positions_count,
@@ -340,13 +373,13 @@ async function getAllJobs(collegeId, filters = {}) {
             [...params, limit, offset]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         jobs: jobResult.rows.map(row => ({
             ...row,
-            positions_count: parseInt(row.positions_count, 10),
-            applications_count: parseInt(row.applications_count, 10),
+            positions_count: Number.parseInt(row.positions_count, 10),
+            applications_count: Number.parseInt(row.applications_count, 10),
         })),
         total,
         page,
@@ -368,13 +401,14 @@ async function getAllJobs(collegeId, filters = {}) {
 async function getJobById(jobId, collegeId) {
     // 1. Fetch job with company info
     const jobResult = await query(
-        `SELECT j.*,
+        `SELECT j.${JOB_RETURNING_COLUMNS.split(', ').join(', j.')},
                 c.company_name, c.company_logo, c.company_website,
                 u.user_name AS created_by_name
          FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
          LEFT JOIN users u ON j.created_by = u.user_id
-         WHERE j.job_id = $1 AND j.college_id = $2`,
+         WHERE j.job_id = $1 AND j.college_id = $2
+         LIMIT 1`,
         [jobId, collegeId]
     );
 
@@ -385,25 +419,25 @@ async function getJobById(jobId, collegeId) {
     // 2. Fetch all related data — chunked to max 3 connections at a time
     const [positionsRes, criteriaRes, roundsRes, questionsRes, applicationsCountRes] = await chunkedQuery([
         {
-            text: `SELECT * FROM job_positions
+            text: `SELECT ${POSITION_COLUMNS} FROM job_positions
              WHERE job_id = $1
              ORDER BY created_at ASC`,
             params: [jobId],
         },
         {
-            text: `SELECT * FROM job_eligibility_criteria
+            text: `SELECT ${CRITERIA_COLUMNS} FROM job_eligibility_criteria
              WHERE job_id = $1
              LIMIT 1`,
             params: [jobId],
         },
         {
-            text: `SELECT * FROM job_rounds
+            text: `SELECT ${ROUND_COLUMNS} FROM job_rounds
              WHERE job_id = $1
              ORDER BY round_number ASC`,
             params: [jobId],
         },
         {
-            text: `SELECT * FROM application_questions
+            text: `SELECT ${QUESTION_COLUMNS} FROM application_questions
              WHERE job_id = $1
              ORDER BY question_order ASC`,
             params: [jobId],
@@ -430,11 +464,11 @@ async function getJobById(jobId, collegeId) {
         rounds: roundsRes.rows,
         questions: questionsRes.rows,
         application_stats: {
-            total: parseInt(appStats.total, 10),
-            pending: parseInt(appStats.pending || 0, 10),
-            shortlisted: parseInt(appStats.shortlisted || 0, 10),
-            selected: parseInt(appStats.selected || 0, 10),
-            rejected: parseInt(appStats.rejected || 0, 10),
+            total: Number.parseInt(appStats.total, 10),
+            pending: Number.parseInt(appStats.pending || 0, 10),
+            shortlisted: Number.parseInt(appStats.shortlisted || 0, 10),
+            selected: Number.parseInt(appStats.selected || 0, 10),
+            rejected: Number.parseInt(appStats.rejected || 0, 10),
         },
     };
 }
@@ -454,7 +488,9 @@ async function getJobById(jobId, collegeId) {
 async function updateJob(jobId, collegeId, data) {
     // 1. Verify job exists
     const existing = await query(
-        `SELECT j.*, c.company_name FROM job_postings j
+        `SELECT j.job_id, j.job_status, j.salary_min, j.salary_max,
+                j.application_deadline, c.company_name
+         FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
          WHERE j.job_id = $1 AND j.college_id = $2
          LIMIT 1`,
@@ -469,7 +505,7 @@ async function updateJob(jobId, collegeId, data) {
     const currentStatus = existing.rows[0].job_status;
     if (currentStatus === STATUS.JOB.CANCELLED || currentStatus === STATUS.JOB.CLOSED) {
         throw Object.assign(
-            new Error(`Cannot edit a ${currentStatus} job posting`),
+            new Error(ERROR_MESSAGES.JOB_NOT_EDITABLE),
             { status: 400 }
         );
     }
@@ -480,7 +516,7 @@ async function updateJob(jobId, collegeId, data) {
         const deadline = new Date(data.application_deadline);
         if (deadline <= now) {
             throw Object.assign(
-                new Error('Application deadline must be in the future'),
+                new Error(ERROR_MESSAGES.DEADLINE_MUST_BE_FUTURE),
                 { status: 400 }
             );
         }
@@ -492,7 +528,7 @@ async function updateJob(jobId, collegeId, data) {
     if (salaryMin !== null && salaryMax !== null &&
         Number(salaryMin) > Number(salaryMax)) {
         throw Object.assign(
-            new Error('Minimum salary cannot be greater than maximum salary'),
+            new Error(ERROR_MESSAGES.SALARY_MIN_EXCEEDS_MAX),
             { status: 400 }
         );
     }
@@ -501,7 +537,7 @@ async function updateJob(jobId, collegeId, data) {
     const fieldsToUpdate = UPDATABLE_FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields provided for update'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
     const setClauses = fieldsToUpdate
@@ -513,7 +549,7 @@ async function updateJob(jobId, collegeId, data) {
         `UPDATE job_postings
          SET ${setClauses.join(', ')}
          WHERE job_id = $1 AND college_id = $2
-         RETURNING *`,
+         RETURNING ${JOB_RETURNING_COLUMNS}`,
         values
     );
 
@@ -548,7 +584,8 @@ async function updateJob(jobId, collegeId, data) {
 async function updateJobStatus(jobId, collegeId, newStatus) {
     // 1. Verify job exists
     const existing = await query(
-        `SELECT j.*, c.company_name FROM job_postings j
+        `SELECT j.job_id, j.job_status, j.application_deadline, c.company_name
+         FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
          WHERE j.job_id = $1 AND j.college_id = $2
          LIMIT 1`,
@@ -564,7 +601,7 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
     // 2. Same status?
     if (currentStatus === newStatus) {
         throw Object.assign(
-            new Error(`Job is already "${newStatus}"`),
+            new Error(ERROR_MESSAGES.JOB_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -573,7 +610,7 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
     const allowedTransitions = STATUS_TRANSITIONS[currentStatus] || [];
     if (!allowedTransitions.includes(newStatus)) {
         throw Object.assign(
-            new Error(`Cannot change job status from "${currentStatus}" to "${newStatus}". Allowed: ${allowedTransitions.join(', ') || 'none'}`),
+            new Error(`${ERROR_MESSAGES.INVALID_JOB_STATUS_TRANSITION}. Allowed: ${allowedTransitions.join(', ') || 'none'}`),
             { status: 400 }
         );
     }
@@ -585,9 +622,9 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
              WHERE job_id = $1 AND position_status = 'active'`,
             [jobId]
         );
-        if (parseInt(posCheck.rows[0].cnt, 10) === 0) {
+        if (Number.parseInt(posCheck.rows[0].cnt, 10) === 0) {
             throw Object.assign(
-                new Error('Cannot publish a job without at least one active position'),
+                new Error(ERROR_MESSAGES.JOB_NO_ACTIVE_POSITIONS),
                 { status: 400 }
             );
         }
@@ -597,7 +634,7 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
             const deadline = new Date(existing.rows[0].application_deadline);
             if (deadline <= new Date()) {
                 throw Object.assign(
-                    new Error('Cannot reopen a job with an expired deadline. Update the deadline first'),
+                    new Error(ERROR_MESSAGES.JOB_EXPIRED_DEADLINE_REOPEN),
                     { status: 400 }
                 );
             }
@@ -611,7 +648,7 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
         `UPDATE job_postings
          SET job_status = $1, allow_applications = $2, updated_at = NOW()
          WHERE job_id = $3 AND college_id = $4
-         RETURNING *`,
+         RETURNING ${JOB_RETURNING_COLUMNS}`,
         [newStatus, allowApplications, jobId, collegeId]
     );
 

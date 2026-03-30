@@ -49,7 +49,7 @@ async function getCompanyContacts(req, res) {
             req.validated || {}
         );
 
-        return sendSuccess(res, result, 'Company contacts retrieved successfully');
+        return sendSuccess(res, result, SUCCESS_MESSAGES.CONTACTS_RETRIEVED);
     } catch (err) {
         if (err.status === 404) return sendError(res, err.message, HTTP_STATUS.NOT_FOUND);
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
@@ -92,8 +92,8 @@ async function toggleContactStatus(req, res) {
         );
 
         const message = is_active
-            ? 'Contact activated successfully'
-            : 'Contact deactivated successfully';
+            ? SUCCESS_MESSAGES.CONTACT_ACTIVATED
+            : SUCCESS_MESSAGES.CONTACT_DEACTIVATED;
 
         return sendSuccess(res, result, message);
     } catch (err) {

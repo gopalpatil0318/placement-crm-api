@@ -9,7 +9,7 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const {
@@ -18,36 +18,20 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
-// HELPER — Format restriction record for API response
+// COLUMN CONSTANTS — explicit columns, no SELECT * or RETURNING *
 // ============================================================================
 
-function formatRestriction(record) {
-    return {
-        restriction_id: record.restriction_id,
-        student_id: record.student_id,
-        college_id: record.college_id,
-        restriction_type: record.restriction_type,
-        reason: record.reason,
-        details: record.details || null,
-        restricted_by: record.restricted_by,
-        restricted_by_name: record.restricted_by_name || null,
-        applied_on: record.applied_on,
-        valid_until: record.valid_until || null,
-        is_active: record.is_active,
-        appeal_submitted: record.appeal_submitted,
-        appeal_notes: record.appeal_notes || null,
-        appeal_resolved_at: record.appeal_resolved_at || null,
-        resolved_by: record.resolved_by || null,
-        resolved_by_name: record.resolved_by_name || null,
-        created_at: record.created_at,
-        updated_at: record.updated_at,
-        // Joined fields (when available)
-        ...(record.student_name !== undefined && { student_name: record.student_name }),
-        ...(record.student_email !== undefined && { student_email: record.student_email }),
-        ...(record.dept_name !== undefined && { dept_name: record.dept_name }),
-        ...(record.student_passout_year !== undefined && { student_passout_year: record.student_passout_year }),
-    };
-}
+const RESTRICTION_SELECT_COLUMNS = `
+    sr.restriction_id, sr.student_id, sr.college_id, sr.restriction_type,
+    sr.reason, sr.details, sr.restricted_by, sr.applied_on, sr.valid_until,
+    sr.is_active, sr.appeal_submitted, sr.appeal_notes, sr.appeal_resolved_at,
+    sr.resolved_by, sr.created_at, sr.updated_at`;
+
+const RESTRICTION_RETURNING_COLUMNS = `
+    restriction_id, student_id, college_id, restriction_type,
+    reason, details, restricted_by, applied_on, valid_until,
+    is_active, appeal_submitted, appeal_notes, appeal_resolved_at,
+    resolved_by, created_at, updated_at`;
 
 // ============================================================================
 // 1. ADD RESTRICTION
@@ -91,7 +75,7 @@ async function addRestriction(studentId, collegeId, restrictedBy, data) {
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
-            new Error(`Student already has an active "${restriction_type}" restriction`),
+            new Error(ERROR_MESSAGES.RESTRICTION_DUPLICATE_ACTIVE),
             { status: 409 }
         );
     }
@@ -103,7 +87,7 @@ async function addRestriction(studentId, collegeId, restrictedBy, data) {
         const validDate = new Date(valid_until);
         if (validDate < today) {
             throw Object.assign(
-                new Error('Valid until date must be today or in the future'),
+                new Error(ERROR_MESSAGES.RESTRICTION_VALID_UNTIL_PAST),
                 { status: 400 }
             );
         }
@@ -115,7 +99,7 @@ async function addRestriction(studentId, collegeId, restrictedBy, data) {
            (student_id, college_id, restriction_type, reason, details,
             restricted_by, valid_until)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING *`,
+         RETURNING ${RESTRICTION_RETURNING_COLUMNS}`,
         [studentId, collegeId, restriction_type, reason, details,
             restrictedBy, valid_until]
     );
@@ -138,14 +122,15 @@ async function addRestriction(studentId, collegeId, restrictedBy, data) {
         collegeId,
     });
 
-    return formatRestriction({
+    return {
         ...restriction,
         restricted_by_name: userResult.rows[0]?.user_name || null,
+        resolved_by_name: null,
         student_name: `${student.first_name} ${student.last_name}`,
         student_email: student.student_email,
         dept_name: student.dept_name,
         student_passout_year: student.student_passout_year,
-    });
+    };
 }
 
 // ============================================================================
@@ -182,11 +167,11 @@ async function getAllRestrictions(collegeId, filters = {}) {
     }
 
     // Optional: search by student name
-    if (filters.search) {
+    if (filters.search?.trim()) {
         conditions.push(
             `(s.first_name ILIKE $${paramIndex} OR s.last_name ILIKE $${paramIndex} OR s.student_email ILIKE $${paramIndex})`
         );
-        params.push(`%${filters.search}%`);
+        params.push(`%${filters.search.trim()}%`);
         paramIndex++;
     }
 
@@ -202,7 +187,7 @@ async function getAllRestrictions(collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT sr.*,
+            `SELECT ${RESTRICTION_SELECT_COLUMNS},
                     s.first_name || ' ' || s.last_name AS student_name,
                     s.student_email,
                     s.student_passout_year,
@@ -220,10 +205,10 @@ async function getAllRestrictions(collegeId, filters = {}) {
             [...params, limit, offset]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
-        restrictions: restrictionResult.rows.map(formatRestriction),
+        restrictions: restrictionResult.rows,
         total,
         page,
         limit,
@@ -271,16 +256,17 @@ async function getStudentRestrictions(studentId, collegeId, filters = {}) {
 
     const whereClause = conditions.join(' AND ');
 
-    // 3. Fetch restrictions
+    // 3. Fetch restrictions (safety guard: max 100)
     const restrictionResult = await query(
-        `SELECT sr.*,
+        `SELECT ${RESTRICTION_SELECT_COLUMNS},
                 u.user_name AS restricted_by_name,
                 ru.user_name AS resolved_by_name
          FROM student_restrictions sr
          LEFT JOIN users u ON sr.restricted_by = u.user_id
          LEFT JOIN users ru ON sr.resolved_by = ru.user_id
          WHERE ${whereClause}
-         ORDER BY sr.is_active DESC, sr.created_at DESC`,
+         ORDER BY sr.is_active DESC, sr.created_at DESC
+         LIMIT 100`,
         params
     );
 
@@ -296,7 +282,7 @@ async function getStudentRestrictions(studentId, collegeId, filters = {}) {
         },
         total_restrictions: restrictionResult.rows.length,
         active_restrictions: restrictionResult.rows.filter(r => r.is_active).length,
-        restrictions: restrictionResult.rows.map(formatRestriction),
+        restrictions: restrictionResult.rows,
     };
 }
 
@@ -315,87 +301,102 @@ async function getStudentRestrictions(studentId, collegeId, filters = {}) {
  * @returns {Object} Updated restriction
  */
 async function updateRestriction(restrictionId, collegeId, userId, data) {
-    // 1. Verify restriction exists and belongs to college
-    const existing = await query(
-        `SELECT sr.*, s.first_name, s.last_name, s.student_email,
-                s.student_passout_year, d.dept_name
-         FROM student_restrictions sr
-         JOIN students s ON sr.student_id = s.student_id
-         LEFT JOIN departments d ON s.dept_id = d.dept_id
-         WHERE sr.restriction_id = $1 AND sr.college_id = $2
-         LIMIT 1`,
-        [restrictionId, collegeId]
-    );
+    const client = await getClient();
 
-    if (!existing.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.RESTRICTION_NOT_FOUND), { status: 404 });
-    }
+    try {
+        await client.query('BEGIN');
 
-    // 2. Handle is_active changes
-    if (data.is_active === false) {
-        // Resolving — auto-set resolved_by
-        data.resolved_by = userId;
-    } else if (data.is_active === true && existing.rows[0].is_active === false) {
-        // Re-activating — clear resolved fields
-        data.resolved_by = null;
-    }
+        // 1. Verify restriction exists and belongs to college (lock row)
+        const existing = await client.query(
+            `SELECT ${RESTRICTION_SELECT_COLUMNS},
+                    s.first_name, s.last_name, s.student_email,
+                    s.student_passout_year, d.dept_name
+             FROM student_restrictions sr
+             JOIN students s ON sr.student_id = s.student_id
+             LEFT JOIN departments d ON s.dept_id = d.dept_id
+             WHERE sr.restriction_id = $1 AND sr.college_id = $2
+             LIMIT 1
+             FOR UPDATE OF sr`,
+            [restrictionId, collegeId]
+        );
 
-    // 3. Validate valid_until >= today if provided
-    if (data.valid_until) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const validDate = new Date(data.valid_until);
-        if (validDate < today) {
-            throw Object.assign(
-                new Error('Valid until date must be today or in the future'),
-                { status: 400 }
-            );
+        if (!existing.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.RESTRICTION_NOT_FOUND), { status: 404 });
         }
+
+        // 2. Handle is_active changes
+        if (data.is_active === false) {
+            // Resolving — auto-set resolved_by
+            data.resolved_by = userId;
+        } else if (data.is_active === true && existing.rows[0].is_active === false) {
+            // Re-activating — clear resolved fields
+            data.resolved_by = null;
+        }
+
+        // 3. Validate valid_until >= today if provided
+        if (data.valid_until) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const validDate = new Date(data.valid_until);
+            if (validDate < today) {
+                throw Object.assign(
+                    new Error(ERROR_MESSAGES.RESTRICTION_VALID_UNTIL_PAST),
+                    { status: 400 }
+                );
+            }
+        }
+
+        // 4. Build dynamic UPDATE
+        const UPDATABLE_FIELDS = ['is_active', 'valid_until', 'details', 'reason', 'resolved_by'];
+        const fieldsToUpdate = UPDATABLE_FIELDS.filter(f => data[f] !== undefined);
+
+        const setClauses = fieldsToUpdate
+            .map((field, index) => `${field} = $${index + 3}`)
+            .concat(['updated_at = NOW()']);
+        const values = [restrictionId, collegeId, ...fieldsToUpdate.map(f => data[f])];
+
+        const result = await client.query(
+            `UPDATE student_restrictions
+             SET ${setClauses.join(', ')}
+             WHERE restriction_id = $1 AND college_id = $2
+             RETURNING ${RESTRICTION_RETURNING_COLUMNS}`,
+            values
+        );
+
+        // 5. Fetch user names for response
+        const [restrictedByUser, resolvedByUser] = await Promise.all([
+            client.query(`SELECT user_name FROM users WHERE user_id = $1 LIMIT 1`, [result.rows[0].restricted_by]),
+            result.rows[0].resolved_by
+                ? client.query(`SELECT user_name FROM users WHERE user_id = $1 LIMIT 1`, [result.rows[0].resolved_by])
+                : Promise.resolve({ rows: [] }),
+        ]);
+
+        await client.query('COMMIT');
+
+        const existingStudent = existing.rows[0];
+
+        logger.info(`${LOG.AUTH} Restriction updated`, {
+            restrictionId,
+            updatedFields: fieldsToUpdate,
+            collegeId,
+            updatedBy: userId,
+        });
+
+        return {
+            ...result.rows[0],
+            restricted_by_name: restrictedByUser.rows[0]?.user_name || null,
+            resolved_by_name: resolvedByUser.rows[0]?.user_name || null,
+            student_name: `${existingStudent.first_name} ${existingStudent.last_name}`,
+            student_email: existingStudent.student_email,
+            dept_name: existingStudent.dept_name,
+            student_passout_year: existingStudent.student_passout_year,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
     }
-
-    // 4. Build dynamic UPDATE
-    const UPDATABLE_FIELDS = ['is_active', 'valid_until', 'details', 'reason', 'resolved_by'];
-    const fieldsToUpdate = UPDATABLE_FIELDS.filter(f => data[f] !== undefined);
-
-    const setClauses = fieldsToUpdate
-        .map((field, index) => `${field} = $${index + 3}`)
-        .concat(['updated_at = NOW()']);
-    const values = [restrictionId, collegeId, ...fieldsToUpdate.map(f => data[f])];
-
-    const result = await query(
-        `UPDATE student_restrictions
-         SET ${setClauses.join(', ')}
-         WHERE restriction_id = $1 AND college_id = $2
-         RETURNING *`,
-        values
-    );
-
-    // 5. Fetch user names for response
-    const [restrictedByUser, resolvedByUser] = await Promise.all([
-        query(`SELECT user_name FROM users WHERE user_id = $1 LIMIT 1`, [result.rows[0].restricted_by]),
-        result.rows[0].resolved_by
-            ? query(`SELECT user_name FROM users WHERE user_id = $1 LIMIT 1`, [result.rows[0].resolved_by])
-            : Promise.resolve({ rows: [] }),
-    ]);
-
-    const existingStudent = existing.rows[0];
-
-    logger.info(`${LOG.AUTH} Restriction updated`, {
-        restrictionId,
-        updatedFields: fieldsToUpdate,
-        collegeId,
-        updatedBy: userId,
-    });
-
-    return formatRestriction({
-        ...result.rows[0],
-        restricted_by_name: restrictedByUser.rows[0]?.user_name || null,
-        resolved_by_name: resolvedByUser.rows[0]?.user_name || null,
-        student_name: `${existingStudent.first_name} ${existingStudent.last_name}`,
-        student_email: existingStudent.student_email,
-        dept_name: existingStudent.dept_name,
-        student_passout_year: existingStudent.student_passout_year,
-    });
 }
 
 // ============================================================================

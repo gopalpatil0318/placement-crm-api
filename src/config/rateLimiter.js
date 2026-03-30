@@ -4,8 +4,8 @@
  * ============================================================================
  *
  * Two limiters:
- *   authLimiter  — 5 attempts per 15 min (login/forgot-password)
- *   apiLimiter   — 50 requests per 1 min (general API)
+ *   authLimiter  — 10 attempts per 15 min (login/forgot-password)
+ *   apiLimiter   — 200 requests per 1 min (general API, env-configurable)
  *
  * Features:
  *   - Human-friendly retry messages with countdown

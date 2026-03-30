@@ -24,6 +24,15 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
+// 0. GET AVAILABLE JOB YEARS
+// ============================================================================
+
+async function getAvailableJobYears(req, res) {
+    const years = await jobService.getAvailableJobYears(req.user.college_id);
+    return sendSuccess(res, { years }, SUCCESS_MESSAGES.JOB_YEARS_RETRIEVED);
+}
+
+// ============================================================================
 // 1. GET AVAILABLE JOBS
 // ============================================================================
 
@@ -39,7 +48,7 @@ async function getAvailableJobs(req, res) {
         jobs,
         total,
         { page, limit },
-        'Available jobs retrieved successfully'
+        SUCCESS_MESSAGES.AVAILABLE_JOBS_RETRIEVED
     );
 }
 
@@ -54,7 +63,7 @@ async function getJobDetails(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Job details retrieved successfully');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.JOB_DETAILS_RETRIEVED);
 }
 
 // ============================================================================
@@ -68,7 +77,7 @@ async function checkJobEligibility(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Eligibility check completed');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.ELIGIBILITY_CHECKED);
 }
 
 // ============================================================================
@@ -136,7 +145,7 @@ async function denyJob(req, res) {
     return sendSuccess(
         res,
         result,
-        'Job opted out successfully',
+        SUCCESS_MESSAGES.JOB_OPTED_OUT,
         HTTP_STATUS.CREATED
     );
 }
@@ -158,7 +167,7 @@ async function getMyApplications(req, res) {
         { applications, status_summary },
         total,
         { page, limit },
-        'Applications retrieved successfully'
+        SUCCESS_MESSAGES.APPLICATIONS_RETRIEVED
     );
 }
 
@@ -173,7 +182,7 @@ async function getApplicationDetails(req, res) {
         req.user.college_id
     );
 
-    return sendSuccess(res, result, 'Application details retrieved successfully');
+    return sendSuccess(res, result, SUCCESS_MESSAGES.APPLICATION_DETAILS_RETRIEVED);
 }
 
 // ============================================================================
@@ -212,6 +221,7 @@ async function withdrawApplication(req, res) {
 // ============================================================================
 
 module.exports = {
+    getAvailableJobYears,
     getAvailableJobs,
     getJobDetails,
     checkJobEligibility,

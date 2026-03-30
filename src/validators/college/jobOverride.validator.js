@@ -12,9 +12,7 @@
  */
 
 const Joi = require('joi');
-
-const OVERRIDE_STATUSES = ['pending', 'approved', 'rejected'];
-const REVIEW_ACTIONS = ['approve', 'reject'];
+const { OVERRIDE_STATUSES, REVIEW_ACTIONS } = require('../../config/constants');
 
 // ============================================================================
 // LIST JOB OVERRIDE REQUESTS (query)
@@ -30,6 +28,7 @@ const listJobOverridesSchema = Joi.object({
 
     dept_name: Joi.string()
         .max(150)
+        .trim()
         .optional(),
 
     sort_by: Joi.string()
@@ -77,6 +76,7 @@ const listAllOverridesSchema = Joi.object({
 
     dept_name: Joi.string()
         .max(150)
+        .trim()
         .optional(),
 
     passout_year: Joi.number()
@@ -136,6 +136,7 @@ const reviewOverrideSchema = Joi.object({
 
     review_notes: Joi.string()
         .max(1000)
+        .trim()
         .optional()
         .allow(null, ''),
 
@@ -144,6 +145,7 @@ const reviewOverrideSchema = Joi.object({
         then: Joi.string()
             .min(5)
             .max(500)
+            .trim()
             .required()
             .messages({
                 'string.empty': 'Rejection reason is required when rejecting',
@@ -152,6 +154,7 @@ const reviewOverrideSchema = Joi.object({
             }),
         otherwise: Joi.string()
             .max(500)
+            .trim()
             .optional()
             .allow(null, ''),
     }),
@@ -183,6 +186,7 @@ const bulkReviewOverrideSchema = Joi.object({
 
     review_notes: Joi.string()
         .max(1000)
+        .trim()
         .optional()
         .allow(null, ''),
 
@@ -191,6 +195,7 @@ const bulkReviewOverrideSchema = Joi.object({
         then: Joi.string()
             .min(5)
             .max(500)
+            .trim()
             .required()
             .messages({
                 'string.empty': 'Rejection reason is required when bulk-rejecting',
@@ -199,6 +204,7 @@ const bulkReviewOverrideSchema = Joi.object({
             }),
         otherwise: Joi.string()
             .max(500)
+            .trim()
             .optional()
             .allow(null, ''),
     }),

@@ -18,12 +18,29 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
+// COLUMN CONSTANTS
+// ============================================================================
+
+const PLACEMENT_VERIFY_COLUMNS = `
+    pr.placement_id, pr.student_id, pr.college_id, pr.company_id, pr.job_id,
+    pr.position_id, pr.application_id,
+    pr.placement_type,
+    pr.fulltime_package, pr.fulltime_designation, pr.fulltime_joining_date,
+    pr.internship_stipend, pr.internship_duration, pr.internship_start_date,
+    pr.offer_letter_url, pr.offer_letter_verified,
+    pr.placement_status, pr.acceptance_status,
+    pr.passout_year, pr.created_at, pr.updated_at`;
+
+const PLACEMENT_RETURNING_COLUMNS = `
+    placement_id, placement_status, acceptance_status, updated_at`;
+
+// ============================================================================
 // HELPER — Verify placement belongs to the student
 // ============================================================================
 
 async function verifyStudentPlacement(placementId, studentId, collegeId) {
     const result = await query(
-        `SELECT pr.*,
+        `SELECT ${PLACEMENT_VERIFY_COLUMNS},
                 c.company_name, c.company_website, c.industry AS industry_type,
                 j.job_title, j.job_type, j.job_location,
                 p.position_name
@@ -124,7 +141,7 @@ async function getMyPlacements(studentId, collegeId, filters = {}) {
         ),
     ]);
 
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     const statusSummary = {
         total: 0,
@@ -136,7 +153,7 @@ async function getMyPlacements(studentId, collegeId, filters = {}) {
     };
 
     for (const row of summaryResult.rows) {
-        const count = parseInt(row.cnt, 10);
+        const count = Number.parseInt(row.cnt, 10);
         statusSummary[row.placement_status] = count;
         statusSummary.total += count;
     }
@@ -146,11 +163,11 @@ async function getMyPlacements(studentId, collegeId, filters = {}) {
         application_id: row.application_id,
         placement_type: row.placement_type,
         // Full-time details
-        fulltime_package: row.fulltime_package != null ? parseFloat(row.fulltime_package) : null,
+        fulltime_package: row.fulltime_package != null ? Number.parseFloat(row.fulltime_package) : null,
         fulltime_designation: row.fulltime_designation ?? null,
         fulltime_joining_date: row.fulltime_joining_date ?? null,
         // Internship details
-        internship_stipend: row.internship_stipend != null ? parseFloat(row.internship_stipend) : null,
+        internship_stipend: row.internship_stipend != null ? Number.parseFloat(row.internship_stipend) : null,
         internship_duration: row.internship_duration ?? null,
         internship_start_date: row.internship_start_date ?? null,
         // Offer letter
@@ -189,29 +206,17 @@ async function acceptPlacement(placementId, studentId, collegeId) {
 
     // Validate current status
     if (placement.placement_status !== STATUS.PLACEMENT.OFFERED) {
-        throw Object.assign(
-            new Error(
-                `Cannot accept a placement with status "${placement.placement_status}". ` +
-                `Only offers with status "offered" can be accepted`
-            ),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_NOT_OFFERED_ACCEPT), { status: 400 });
     }
 
     // Check if already accepted
     if (placement.acceptance_status === 'accepted') {
-        throw Object.assign(
-            new Error('You have already accepted this offer'),
-            { status: 409 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_ALREADY_ACCEPTED), { status: 409 });
     }
 
     // Check if already rejected
     if (placement.acceptance_status === 'rejected') {
-        throw Object.assign(
-            new Error('This offer has already been rejected and cannot be accepted'),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_ALREADY_REJECTED_CANNOT_ACCEPT), { status: 400 });
     }
 
     const result = await query(
@@ -220,7 +225,7 @@ async function acceptPlacement(placementId, studentId, collegeId) {
              placement_status = $1,
              updated_at = NOW()
          WHERE placement_id = $2
-         RETURNING *`,
+         RETURNING ${PLACEMENT_RETURNING_COLUMNS}`,
         [STATUS.PLACEMENT.ACCEPTED, placementId]
     );
 
@@ -242,10 +247,10 @@ async function acceptPlacement(placementId, studentId, collegeId) {
         job_title: placement.job_title,
         company_name: placement.company_name,
         position_name: placement.position_name ?? null,
-        fulltime_package: placement.fulltime_package != null ? parseFloat(placement.fulltime_package) : null,
+        fulltime_package: placement.fulltime_package != null ? Number.parseFloat(placement.fulltime_package) : null,
         fulltime_designation: placement.fulltime_designation ?? null,
         fulltime_joining_date: placement.fulltime_joining_date ?? null,
-        internship_stipend: placement.internship_stipend != null ? parseFloat(placement.internship_stipend) : null,
+        internship_stipend: placement.internship_stipend != null ? Number.parseFloat(placement.internship_stipend) : null,
     };
 }
 
@@ -258,29 +263,17 @@ async function rejectPlacement(placementId, studentId, collegeId, reason) {
 
     // Validate current status
     if (placement.placement_status !== STATUS.PLACEMENT.OFFERED) {
-        throw Object.assign(
-            new Error(
-                `Cannot reject a placement with status "${placement.placement_status}". ` +
-                `Only offers with status "offered" can be rejected`
-            ),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_NOT_OFFERED_REJECT), { status: 400 });
     }
 
     // Check if already rejected
     if (placement.acceptance_status === 'rejected') {
-        throw Object.assign(
-            new Error('You have already rejected this offer'),
-            { status: 409 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_ALREADY_REJECTED), { status: 409 });
     }
 
     // Check if already accepted
     if (placement.acceptance_status === 'accepted') {
-        throw Object.assign(
-            new Error('This offer has already been accepted and cannot be rejected'),
-            { status: 400 }
-        );
+        throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_ALREADY_ACCEPTED_CANNOT_REJECT), { status: 400 });
     }
 
     const result = await query(
@@ -289,7 +282,7 @@ async function rejectPlacement(placementId, studentId, collegeId, reason) {
              placement_status = $1,
              updated_at = NOW()
          WHERE placement_id = $2
-         RETURNING *`,
+         RETURNING ${PLACEMENT_RETURNING_COLUMNS}`,
         [STATUS.PLACEMENT.REJECTED, placementId]
     );
 

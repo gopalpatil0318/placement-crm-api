@@ -20,11 +20,12 @@
  */
 
 const { query } = require('../../config/db');
+const { STATUS, PLACEMENT_TYPES, ERROR_MESSAGES } = require('../../config/constants');
 
 // Shared placement filter: valid (non-cancelled, non-rejected) offers
-const VALID_PLACEMENT = `placement_status NOT IN ('cancelled', 'rejected')`;
-const PUBLISHED_JOBS  = `job_status IN ('published', 'closed')`;
-
+const VALID_PLACEMENT = `placement_status NOT IN ('${STATUS.PLACEMENT.CANCELLED}', '${STATUS.PLACEMENT.REJECTED}')`;
+const PUBLISHED_JOBS  = `job_status IN ('${STATUS.JOB.PUBLISHED}', '${STATUS.JOB.CLOSED}')`;
+const NOT_DROPOUT     = `student_status != '${STATUS.STUDENT.DROPOUT}'`;
 // ============================================================================
 // #105a — DASHBOARD OVERVIEW  (loaded on login — super lightweight)
 // ============================================================================
@@ -36,7 +37,7 @@ async function getOverview(collegeId, passoutYear) {
             FROM students
             WHERE college_id = $1
               AND student_passout_year = $2
-              AND student_status != 'dropout'
+              AND ${NOT_DROPOUT}
         ),
         placement_agg AS (
             SELECT
@@ -118,13 +119,13 @@ async function getPlacementStats(collegeId, passoutYear) {
         // Offer status breakdown + multiple-offer students
         query(`
             SELECT
-                COUNT(*) FILTER (WHERE placement_type IN ('full-time', 'both'))::int AS fulltime_offers,
-                COUNT(*) FILTER (WHERE placement_type IN ('internship', 'both'))::int AS internship_offers,
-                COUNT(*) FILTER (WHERE placement_status = 'offered')::int  AS pending_offers,
-                COUNT(*) FILTER (WHERE placement_status = 'accepted')::int AS accepted_offers,
-                COUNT(*) FILTER (WHERE placement_status = 'joined')::int   AS joined_count,
-                COUNT(*) FILTER (WHERE placement_status = 'rejected')::int AS rejected_offers,
-                COUNT(*) FILTER (WHERE placement_status = 'cancelled')::int AS cancelled_offers,
+                COUNT(*) FILTER (WHERE placement_type IN ('${PLACEMENT_TYPES[0]}', '${PLACEMENT_TYPES[2]}'))::int AS fulltime_offers,
+                COUNT(*) FILTER (WHERE placement_type IN ('${PLACEMENT_TYPES[1]}', '${PLACEMENT_TYPES[2]}'))::int AS internship_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.OFFERED}')::int  AS pending_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.ACCEPTED}')::int AS accepted_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.JOINED}')::int   AS joined_count,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.REJECTED}')::int AS rejected_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.CANCELLED}')::int AS cancelled_offers,
                 (
                     SELECT COUNT(*)::int FROM (
                         SELECT student_id
@@ -146,7 +147,7 @@ async function getPlacementStats(collegeId, passoutYear) {
             FROM placement_results
             WHERE college_id = $1 AND passout_year = $2
               AND ${VALID_PLACEMENT}
-              AND placement_type IN ('internship', 'both')
+              AND placement_type IN ('${PLACEMENT_TYPES[1]}', '${PLACEMENT_TYPES[2]}')
         `, params),
     ]);
 
@@ -169,16 +170,16 @@ async function getApplicationFunnel(collegeId, passoutYear) {
             SELECT
                 COUNT(*)::int                AS total_applications,
                 COUNT(DISTINCT sa.student_id)::int AS unique_applicants,
-                COUNT(*) FILTER (WHERE sa.application_status = 'pending')::int       AS pending,
-                COUNT(*) FILTER (WHERE sa.application_status = 'under_review')::int  AS under_review,
-                COUNT(*) FILTER (WHERE sa.application_status = 'shortlisted')::int   AS shortlisted,
-                COUNT(*) FILTER (WHERE sa.application_status = 'selected')::int      AS selected,
-                COUNT(*) FILTER (WHERE sa.application_status = 'offered')::int       AS offered,
-                COUNT(*) FILTER (WHERE sa.application_status = 'rejected')::int      AS rejected,
-                COUNT(*) FILTER (WHERE sa.application_status = 'withdrawn')::int     AS withdrawn,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.PENDING}')::int       AS pending,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.UNDER_REVIEW}')::int  AS under_review,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.SHORTLISTED}')::int   AS shortlisted,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.SELECTED}')::int      AS selected,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.OFFERED}')::int       AS offered,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.REJECTED}')::int      AS rejected,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.WITHDRAWN}')::int     AS withdrawn,
                 CASE WHEN COUNT(*) > 0
                     THEN ROUND(
-                        (COUNT(*) FILTER (WHERE sa.application_status IN ('selected', 'offered'))::numeric / COUNT(*)) * 100, 2
+                        (COUNT(*) FILTER (WHERE sa.application_status IN ('${STATUS.APPLICATION.SELECTED}', '${STATUS.APPLICATION.OFFERED}'))::numeric / COUNT(*)) * 100, 2
                     )
                     ELSE 0
                 END AS selection_rate,
@@ -216,11 +217,11 @@ async function getStudentReadiness(collegeId, passoutYear) {
         query(`
             SELECT
                 COUNT(*)::int AS total_students,
-                COUNT(*) FILTER (WHERE student_status = 'active')::int    AS active,
-                COUNT(*) FILTER (WHERE student_status = 'inactive')::int  AS inactive,
-                COUNT(*) FILTER (WHERE student_status = 'suspended')::int AS suspended,
-                COUNT(*) FILTER (WHERE student_status = 'graduated')::int AS graduated,
-                COUNT(*) FILTER (WHERE student_status = 'dropout')::int   AS dropout,
+                COUNT(*) FILTER (WHERE student_status = '${STATUS.STUDENT.ACTIVE}')::int    AS active,
+                COUNT(*) FILTER (WHERE student_status = '${STATUS.STUDENT.INACTIVE}')::int  AS inactive,
+                COUNT(*) FILTER (WHERE student_status = '${STATUS.STUDENT.SUSPENDED}')::int AS suspended,
+                COUNT(*) FILTER (WHERE student_status = '${STATUS.STUDENT.GRADUATED}')::int AS graduated,
+                COUNT(*) FILTER (WHERE student_status = '${STATUS.STUDENT.DROPOUT}')::int   AS dropout,
                 COUNT(*) FILTER (WHERE profile_complete = true)::int      AS profile_complete,
                 COUNT(*) FILTER (WHERE profile_complete = false)::int     AS profile_incomplete,
                 COUNT(*) FILTER (WHERE profile_is_approved = true)::int   AS profile_approved,
@@ -232,11 +233,11 @@ async function getStudentReadiness(collegeId, passoutYear) {
         query(`
             SELECT
                 COUNT(*)::int AS total_active_restrictions,
-                COUNT(*) FILTER (WHERE sr.restriction_type = 'bar_from_placements')::int   AS bar_from_placements,
-                COUNT(*) FILTER (WHERE sr.restriction_type = 'bar_from_company')::int      AS bar_from_company,
-                COUNT(*) FILTER (WHERE sr.restriction_type = 'probation')::int             AS probation,
-                COUNT(*) FILTER (WHERE sr.restriction_type = 'warning')::int               AS warning,
-                COUNT(*) FILTER (WHERE sr.restriction_type = 'temporary_suspension')::int  AS temporary_suspension,
+                COUNT(*) FILTER (WHERE sr.restriction_type = '${STATUS.RESTRICTION.BAR_FROM_PLACEMENTS}')::int   AS bar_from_placements,
+                COUNT(*) FILTER (WHERE sr.restriction_type = '${STATUS.RESTRICTION.BAR_FROM_COMPANY}')::int      AS bar_from_company,
+                COUNT(*) FILTER (WHERE sr.restriction_type = '${STATUS.RESTRICTION.PROBATION}')::int             AS probation,
+                COUNT(*) FILTER (WHERE sr.restriction_type = '${STATUS.RESTRICTION.WARNING}')::int               AS warning,
+                COUNT(*) FILTER (WHERE sr.restriction_type = '${STATUS.RESTRICTION.TEMPORARY_SUSPENSION}')::int  AS temporary_suspension,
                 COUNT(DISTINCT sr.student_id)::int AS restricted_students
             FROM student_restrictions sr
             JOIN students s ON s.student_id = sr.student_id
@@ -260,7 +261,7 @@ async function getDiversityStats(collegeId, passoutYear) {
     const [genderResult, categoryResult] = await Promise.all([
         query(`
             SELECT
-                COALESCE(spi.gender, 'Not specified') AS gender,
+                COALESCE(spi.gender, '${ERROR_MESSAGES.DASHBOARD_NOT_SPECIFIED}') AS gender,
                 COUNT(DISTINCT s.student_id)::int     AS total,
                 COUNT(DISTINCT pr.student_id)::int    AS placed,
                 CASE WHEN COUNT(DISTINCT s.student_id) > 0
@@ -271,14 +272,14 @@ async function getDiversityStats(collegeId, passoutYear) {
             LEFT JOIN student_personal_information spi ON spi.student_id = s.student_id
             LEFT JOIN placement_results pr ON pr.student_id = s.student_id
                 AND pr.college_id = $1 AND pr.passout_year = $2 AND pr.${VALID_PLACEMENT}
-            WHERE s.college_id = $1 AND s.student_passout_year = $2 AND s.student_status != 'dropout'
+            WHERE s.college_id = $1 AND s.student_passout_year = $2 AND s.${NOT_DROPOUT}
             GROUP BY spi.gender
             ORDER BY total DESC
         `, params),
 
         query(`
             SELECT
-                COALESCE(spi.category, 'Not specified') AS category,
+                COALESCE(spi.category, '${ERROR_MESSAGES.DASHBOARD_NOT_SPECIFIED}') AS category,
                 COUNT(DISTINCT s.student_id)::int       AS total,
                 COUNT(DISTINCT pr.student_id)::int      AS placed,
                 CASE WHEN COUNT(DISTINCT s.student_id) > 0
@@ -289,7 +290,7 @@ async function getDiversityStats(collegeId, passoutYear) {
             LEFT JOIN student_personal_information spi ON spi.student_id = s.student_id
             LEFT JOIN placement_results pr ON pr.student_id = s.student_id
                 AND pr.college_id = $1 AND pr.passout_year = $2 AND pr.${VALID_PLACEMENT}
-            WHERE s.college_id = $1 AND s.student_passout_year = $2 AND s.student_status != 'dropout'
+            WHERE s.college_id = $1 AND s.student_passout_year = $2 AND s.${NOT_DROPOUT}
             GROUP BY spi.category
             ORDER BY total DESC
         `, params),
@@ -312,11 +313,11 @@ async function getTrainingStats(collegeId, passoutYear) {
         query(`
             SELECT
                 COUNT(*)::int AS total_programs,
-                COUNT(*) FILTER (WHERE tp.program_status = 'upcoming')::int         AS upcoming,
-                COUNT(*) FILTER (WHERE tp.program_status = 'enrollment_open')::int  AS enrollment_open,
-                COUNT(*) FILTER (WHERE tp.program_status = 'in_progress')::int      AS in_progress,
-                COUNT(*) FILTER (WHERE tp.program_status = 'completed')::int        AS completed,
-                COUNT(*) FILTER (WHERE tp.program_status = 'cancelled')::int        AS cancelled,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.UPCOMING}')::int         AS upcoming,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.ENROLLMENT_OPEN}')::int  AS enrollment_open,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.IN_PROGRESS}')::int      AS in_progress,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.COMPLETED}')::int        AS completed,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.CANCELLED}')::int        AS cancelled,
                 COALESCE(SUM(te.enrolled_count), 0)::int                            AS total_enrolled,
                 COALESCE(SUM(te.completed_count), 0)::int                           AS total_completed_enrollment,
                 COALESCE(SUM(te.dropped_count), 0)::int                             AS total_dropped,
@@ -326,8 +327,8 @@ async function getTrainingStats(collegeId, passoutYear) {
                 SELECT
                     program_id,
                     COUNT(*)::int AS enrolled_count,
-                    COUNT(*) FILTER (WHERE completion_status = 'completed')::int AS completed_count,
-                    COUNT(*) FILTER (WHERE completion_status = 'dropped')::int   AS dropped_count,
+                    COUNT(*) FILTER (WHERE completion_status = '${STATUS.ENROLLMENT.COMPLETED}')::int AS completed_count,
+                    COUNT(*) FILTER (WHERE completion_status = '${STATUS.ENROLLMENT.DROPPED}')::int   AS dropped_count,
                     AVG(student_rating) FILTER (WHERE student_rating IS NOT NULL) AS avg_rating
                 FROM training_enrollments
                 WHERE college_id = $1
@@ -393,7 +394,7 @@ async function getDepartmentWise(collegeId, passoutYear, deptId) {
                 COUNT(*) FILTER (WHERE s.profile_complete = true)::int AS profile_complete_count
             FROM students s
             LEFT JOIN student_academic_information sai ON sai.student_id = s.student_id
-            WHERE s.college_id = $1 AND s.student_passout_year = $2 AND s.student_status != 'dropout'
+            WHERE s.college_id = $1 AND s.student_passout_year = $2 AND s.${NOT_DROPOUT}
             GROUP BY s.dept_id
         ) ss ON ss.dept_id = d.dept_id
         LEFT JOIN (
@@ -464,9 +465,9 @@ async function getCompanyWise(collegeId, passoutYear, companyId) {
             SELECT
                 jp.company_id,
                 COUNT(*)::int AS total_applications,
-                COUNT(*) FILTER (WHERE sa.application_status = 'shortlisted')::int             AS shortlisted,
-                COUNT(*) FILTER (WHERE sa.application_status IN ('selected', 'offered'))::int   AS selected,
-                COUNT(*) FILTER (WHERE sa.application_status = 'rejected')::int                 AS rejected
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.SHORTLISTED}')::int             AS shortlisted,
+                COUNT(*) FILTER (WHERE sa.application_status IN ('${STATUS.APPLICATION.SELECTED}', '${STATUS.APPLICATION.OFFERED}'))::int   AS selected,
+                COUNT(*) FILTER (WHERE sa.application_status = '${STATUS.APPLICATION.REJECTED}')::int                 AS rejected
             FROM student_applications sa
             JOIN job_postings jp ON jp.job_id = sa.job_id
             WHERE sa.college_id = $1 AND $2 = ANY(jp.passout_years)
@@ -492,7 +493,7 @@ async function getCompanyWise(collegeId, passoutYear, companyId) {
             WHERE pf.college_id = $1 AND $2 = ANY(jp.passout_years)
             GROUP BY pf.company_id
         ) fb ON fb.company_id = c.company_id
-        WHERE c.college_id = $1 AND c.company_status = 'active'
+        WHERE c.college_id = $1 AND c.company_status = '${STATUS.COMPANY.ACTIVE}'
           AND (js.total_jobs > 0 OR ps.offers_made > 0)${companyFilter}
         ORDER BY COALESCE(ps.offers_made, 0) DESC, c.company_name
     `;
@@ -514,7 +515,7 @@ async function getYearComparison(collegeId, passoutYears) {
                 COUNT(*)::int AS total_students
             FROM students s
             WHERE s.college_id = $1 AND s.student_passout_year = ANY($2::int[])
-              AND s.student_status != 'dropout'
+              AND s.student_status != '${STATUS.STUDENT.DROPOUT}'
             GROUP BY s.student_passout_year
         ),
         placement_stats AS (
@@ -522,8 +523,8 @@ async function getYearComparison(collegeId, passoutYears) {
                 pr.passout_year AS yr,
                 COUNT(DISTINCT pr.student_id)::int AS placed_count,
                 COUNT(*)::int AS total_offers,
-                COUNT(*) FILTER (WHERE pr.placement_type IN ('full-time', 'both'))::int  AS fulltime_count,
-                COUNT(*) FILTER (WHERE pr.placement_type IN ('internship', 'both'))::int AS internship_count,
+                COUNT(*) FILTER (WHERE pr.placement_type IN ('${PLACEMENT_TYPES[0]}', '${PLACEMENT_TYPES[2]}'))::int  AS fulltime_count,
+                COUNT(*) FILTER (WHERE pr.placement_type IN ('${PLACEMENT_TYPES[1]}', '${PLACEMENT_TYPES[2]}'))::int AS internship_count,
                 COALESCE(MAX(pr.fulltime_package), 0)                                                     AS highest_package,
                 COALESCE(ROUND(AVG(pr.fulltime_package) FILTER (WHERE pr.fulltime_package > 0), 2), 0)    AS average_package
             FROM placement_results pr
@@ -546,7 +547,7 @@ async function getYearComparison(collegeId, passoutYears) {
                 COUNT(*)::int AS total_applications,
                 CASE WHEN COUNT(*) > 0
                     THEN ROUND(
-                        (COUNT(*) FILTER (WHERE sa.application_status IN ('selected', 'offered'))::numeric / COUNT(*)) * 100, 2
+                        (COUNT(*) FILTER (WHERE sa.application_status IN ('${STATUS.APPLICATION.SELECTED}', '${STATUS.APPLICATION.OFFERED}'))::numeric / COUNT(*)) * 100, 2
                     )
                     ELSE 0
                 END AS selection_rate

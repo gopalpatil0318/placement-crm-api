@@ -20,7 +20,7 @@
 
 const verificationService = require('../../services/college/verification.service');
 const { sendSuccess, sendPaginated } = require('../../utils/responseHelper');
-const { SUCCESS_MESSAGES } = require('../../config/constants');
+const { SUCCESS_MESSAGES, STATUS } = require('../../config/constants');
 
 // ============================================================================
 // 1. GET PENDING VERIFICATION COUNTS
@@ -44,7 +44,7 @@ async function getPendingProfiles(req, res) {
         req.validated
     );
 
-    return sendPaginated(res, students, total, { page, limit }, 'Pending profiles retrieved successfully');
+    return sendPaginated(res, students, total, { page, limit }, SUCCESS_MESSAGES.PENDING_PROFILES_RETRIEVED);
 }
 
 // ============================================================================
@@ -57,7 +57,7 @@ async function getPendingExperiences(req, res) {
         req.validated
     );
 
-    return sendPaginated(res, experiences, total, { page, limit }, 'Pending experiences retrieved successfully');
+    return sendPaginated(res, experiences, total, { page, limit }, SUCCESS_MESSAGES.PENDING_EXPERIENCES_RETRIEVED);
 }
 
 // ============================================================================
@@ -70,7 +70,7 @@ async function getPendingAchievements(req, res) {
         req.validated
     );
 
-    return sendPaginated(res, achievements, total, { page, limit }, 'Pending achievements retrieved successfully');
+    return sendPaginated(res, achievements, total, { page, limit }, SUCCESS_MESSAGES.PENDING_ACHIEVEMENTS_RETRIEVED);
 }
 
 // ============================================================================
@@ -83,7 +83,7 @@ async function getPendingCertificates(req, res) {
         req.validated
     );
 
-    return sendPaginated(res, certificates, total, { page, limit }, 'Pending certificates retrieved successfully');
+    return sendPaginated(res, certificates, total, { page, limit }, SUCCESS_MESSAGES.PENDING_CERTIFICATES_RETRIEVED);
 }
 
 // ============================================================================
@@ -101,7 +101,7 @@ async function verifyStudentProfile(req, res) {
         rejection_reason
     );
 
-    const message = action === 'approved'
+    const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.STUDENT_PROFILE_APPROVED
         : SUCCESS_MESSAGES.STUDENT_PROFILE_REJECTED;
 
@@ -123,7 +123,7 @@ async function verifyExperience(req, res) {
         rejection_reason
     );
 
-    const message = action === 'approved'
+    const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.VERIFICATION_APPROVED
         : SUCCESS_MESSAGES.VERIFICATION_REJECTED;
 
@@ -145,7 +145,7 @@ async function verifyAchievement(req, res) {
         rejection_reason
     );
 
-    const message = action === 'approved'
+    const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.VERIFICATION_APPROVED
         : SUCCESS_MESSAGES.VERIFICATION_REJECTED;
 
@@ -167,7 +167,7 @@ async function verifyCertificate(req, res) {
         rejection_reason
     );
 
-    const message = action === 'approved'
+    const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.VERIFICATION_APPROVED
         : SUCCESS_MESSAGES.VERIFICATION_REJECTED;
 

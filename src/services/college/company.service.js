@@ -27,6 +27,11 @@ const FIELDS = [
     'company_logo',
 ];
 
+// Explicit column lists for RETURNING / SELECT (no SELECT *)
+const RETURNING_COLUMNS = 'company_id, college_id, company_name, company_description, company_website, industry, company_logo, company_status, created_at, updated_at';
+
+const CONTACT_COLUMNS = 'contact_id, company_id, contact_name, contact_designation, contact_email, contact_phone, is_primary, is_active, notes, created_at, updated_at';
+
 // ============================================================================
 // HELPER — Format company for API response
 // ============================================================================
@@ -44,8 +49,8 @@ function formatCompany(record) {
         created_at: record.created_at,
         updated_at: record.updated_at,
         // Aggregated fields (when available)
-        ...(record.contacts_count !== undefined && { contacts_count: parseInt(record.contacts_count, 10) }),
-        ...(record.jobs_count !== undefined && { jobs_count: parseInt(record.jobs_count, 10) }),
+        ...(record.contacts_count !== undefined && { contacts_count: Number.parseInt(record.contacts_count, 10) }),
+        ...(record.jobs_count !== undefined && { jobs_count: Number.parseInt(record.jobs_count, 10) }),
     };
 }
 
@@ -101,7 +106,7 @@ async function createCompany(collegeId, data) {
     const result = await query(
         `INSERT INTO companies (${columns.join(', ')})
          VALUES (${placeholders.join(', ')})
-         RETURNING *`,
+         RETURNING ${RETURNING_COLUMNS}`,
         values
     );
 
@@ -174,7 +179,7 @@ async function getAllCompanies(collegeId, filters = {}) {
             params
         ),
         query(
-            `SELECT c.*,
+            `SELECT c.${RETURNING_COLUMNS.split(', ').join(', c.')},
                     COALESCE(cc.cnt, 0) AS contacts_count,
                     COALESCE(jp.cnt, 0) AS jobs_count
              FROM companies c
@@ -195,7 +200,7 @@ async function getAllCompanies(collegeId, filters = {}) {
             [...params, limit, offset]
         ),
     ]);
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = Number.parseInt(countResult.rows[0].total, 10);
 
     return {
         companies: companyResult.rows.map(formatCompany),
@@ -220,14 +225,15 @@ async function getCompanyById(companyId, collegeId) {
     // Parallel fetch: company (with jobs count) + contacts
     const [companyResult, contactsResult] = await Promise.all([
         query(
-            `SELECT c.*,
+            `SELECT c.${RETURNING_COLUMNS.split(', ').join(', c.')},
                     (SELECT COUNT(*) FROM job_postings WHERE company_id = c.company_id) AS jobs_count
              FROM companies c
              WHERE c.company_id = $1 AND c.college_id = $2`,
             [companyId, collegeId]
         ),
         query(
-            `SELECT * FROM company_contacts
+            `SELECT ${CONTACT_COLUMNS}
+             FROM company_contacts
              WHERE company_id = $1 AND college_id = $2
              ORDER BY is_primary DESC, is_active DESC, created_at ASC`,
             [companyId, collegeId]
@@ -306,7 +312,7 @@ async function updateCompany(companyId, collegeId, data) {
         `UPDATE companies
          SET ${setClauses.join(', ')}
          WHERE company_id = $1 AND college_id = $2
-         RETURNING *`,
+         RETURNING ${RETURNING_COLUMNS}`,
         values
     );
 
@@ -347,7 +353,7 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
     // 2. Already same status?
     if (existing.rows[0].company_status === newStatus) {
         throw Object.assign(
-            new Error(`Company is already ${newStatus}`),
+            new Error(ERROR_MESSAGES.COMPANY_ALREADY_STATUS),
             { status: 400 }
         );
     }
@@ -362,7 +368,7 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
                 `UPDATE companies
                  SET company_status = $1, updated_at = NOW()
                  WHERE company_id = $2 AND college_id = $3
-                 RETURNING *`,
+                 RETURNING ${RETURNING_COLUMNS}`,
                 [newStatus, companyId, collegeId]
             );
 
@@ -402,7 +408,7 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
         `UPDATE companies
          SET company_status = $1, updated_at = NOW()
          WHERE company_id = $2 AND college_id = $3
-         RETURNING *`,
+         RETURNING ${RETURNING_COLUMNS}`,
         [newStatus, companyId, collegeId]
     );
 

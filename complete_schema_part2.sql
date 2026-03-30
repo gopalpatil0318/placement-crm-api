@@ -24,6 +24,7 @@ CREATE TABLE public.companies (
 
 CREATE INDEX idx_companies_college ON public.companies(college_id);
 CREATE INDEX idx_companies_status ON public.companies(company_status);
+CREATE INDEX idx_companies_college_status ON public.companies(college_id, company_status);
 
 -- 18. COMPANY CONTACTS (NEW)
 CREATE TABLE public.company_contacts (
@@ -45,6 +46,8 @@ CREATE TABLE public.company_contacts (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_company_contacts_company ON public.company_contacts(company_id);
+CREATE INDEX idx_company_contacts_company_college ON public.company_contacts(company_id, college_id);
+CREATE INDEX idx_company_contacts_email_lower ON public.company_contacts(company_id, LOWER(contact_email)) WHERE is_active = true;
 
 -- 19. JOB POSTINGS
 CREATE TABLE public.job_postings (
@@ -82,6 +85,8 @@ CREATE INDEX idx_job_postings_company ON public.job_postings(company_id);
 CREATE INDEX idx_job_postings_year ON public.job_postings USING GIN(passout_years);
 CREATE INDEX idx_job_postings_status ON public.job_postings(job_status);
 CREATE INDEX idx_job_postings_deadline ON public.job_postings(application_deadline);
+CREATE INDEX idx_job_postings_college_status ON public.job_postings(college_id, job_status);
+CREATE INDEX idx_job_postings_college_company ON public.job_postings(college_id, company_id);
 
 -- 20. JOB POSITIONS
 CREATE TABLE public.job_positions (
@@ -98,6 +103,8 @@ CREATE TABLE public.job_positions (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_job_positions_job ON public.job_positions(job_id);
+CREATE INDEX idx_job_positions_job_status ON public.job_positions(job_id, position_status);
+CREATE INDEX idx_job_positions_job_lower_name ON public.job_positions(job_id, LOWER(position_name));
 
 -- 21. JOB ELIGIBILITY CRITERIA
 CREATE TABLE public.job_eligibility_criteria (
@@ -142,6 +149,8 @@ CREATE TABLE public.job_rounds (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_job_rounds_job ON public.job_rounds(job_id);
+CREATE INDEX idx_job_rounds_job_status ON public.job_rounds(job_id, round_status);
+CREATE INDEX idx_job_rounds_job_lower_name ON public.job_rounds(job_id, LOWER(round_name));
 
 -- 23. APPLICATION QUESTIONS
 CREATE TABLE public.application_questions (
@@ -159,6 +168,8 @@ CREATE TABLE public.application_questions (
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_application_questions_job ON public.application_questions(job_id);
+CREATE INDEX idx_application_questions_job_order ON public.application_questions(job_id, question_order, created_at);
+CREATE INDEX idx_application_questions_job_lower_text ON public.application_questions(job_id, LOWER(TRIM(question_text)));
 
 -- 24. JOB ELIGIBILITY OVERRIDE REQUESTS
 CREATE TABLE public.job_eligibility_override_requests (
@@ -187,6 +198,10 @@ CREATE INDEX idx_job_override_student ON public.job_eligibility_override_request
 CREATE INDEX idx_job_override_job ON public.job_eligibility_override_requests(job_id);
 CREATE INDEX idx_job_override_college ON public.job_eligibility_override_requests(college_id);
 CREATE INDEX idx_job_override_status ON public.job_eligibility_override_requests(override_status);
+CREATE INDEX idx_override_college_job_status ON public.job_eligibility_override_requests(college_id, job_id, override_status);
+CREATE INDEX idx_override_college_status_requested ON public.job_eligibility_override_requests(college_id, override_status, requested_at DESC);
+CREATE INDEX idx_override_student_job ON public.job_eligibility_override_requests(student_id, job_id);
+CREATE INDEX idx_override_student_college ON public.job_eligibility_override_requests(student_id, college_id, requested_at DESC);
 
 -- 25. STUDENT APPLICATIONS
 CREATE TABLE public.student_applications (
@@ -217,6 +232,7 @@ CREATE INDEX idx_student_applications_student ON public.student_applications(stu
 CREATE INDEX idx_student_applications_job ON public.student_applications(job_id);
 CREATE INDEX idx_student_applications_status ON public.student_applications(application_status);
 CREATE INDEX idx_student_applications_college ON public.student_applications(college_id);
+CREATE INDEX idx_student_apps_student_college_status ON public.student_applications(student_id, college_id, application_status);
 
 -- 25. APPLICATION ANSWERS
 CREATE TABLE public.application_answers (
@@ -253,6 +269,7 @@ CREATE TABLE public.application_denials (
 
 CREATE INDEX idx_application_denials_student ON public.application_denials(student_id);
 CREATE INDEX idx_application_denials_job ON public.application_denials(job_id);
+CREATE INDEX idx_application_denials_job_college ON public.application_denials(job_id, college_id);
 
 -- 27. STUDENT ROUND RESULTS
 CREATE TABLE public.student_round_results (
@@ -278,6 +295,10 @@ CREATE TABLE public.student_round_results (
 CREATE INDEX idx_student_round_results_application ON public.student_round_results(application_id);
 CREATE INDEX idx_student_round_results_round ON public.student_round_results(round_id);
 CREATE INDEX idx_student_round_results_status ON public.student_round_results(result_status);
+CREATE INDEX idx_round_results_round_status ON public.student_round_results(round_id, result_status);
+CREATE INDEX idx_round_results_round_created ON public.student_round_results(round_id, created_at);
+CREATE INDEX idx_round_results_student ON public.student_round_results(student_id);
+CREATE INDEX idx_student_round_results_app_student ON public.student_round_results(application_id, student_id);
 
 -- 28. PLACEMENT RESULTS
 CREATE TABLE public.placement_results (
@@ -322,6 +343,9 @@ CREATE INDEX idx_placement_results_college ON public.placement_results(college_i
 CREATE INDEX idx_placement_results_company ON public.placement_results(company_id);
 CREATE INDEX idx_placement_results_year ON public.placement_results(passout_year);
 CREATE INDEX idx_placement_results_status ON public.placement_results(placement_status);
+CREATE INDEX idx_placement_results_app_student ON public.placement_results(application_id, student_id);
+CREATE INDEX idx_placement_results_college_year_status ON public.placement_results(college_id, passout_year, placement_status);
+CREATE INDEX idx_placement_results_student_college ON public.placement_results(student_id, college_id);
 
 -- 29. ELIGIBLE BUT NOT APPLIED
 CREATE TABLE public.eligible_not_applied (
@@ -360,6 +384,8 @@ CREATE TABLE public.placement_policies (
 
 CREATE INDEX idx_placement_policies_college ON public.placement_policies(college_id);
 CREATE INDEX idx_placement_policies_year ON public.placement_policies(passout_year);
+CREATE INDEX idx_placement_policies_college_year_lower_title ON public.placement_policies(college_id, passout_year, LOWER(TRIM(policy_title)));
+CREATE INDEX idx_placement_policies_college_active ON public.placement_policies(college_id, is_active);
 
 -- =====================================================
 -- NEW TABLES
@@ -498,6 +524,10 @@ CREATE INDEX idx_notifications_college ON public.notifications(college_id);
 CREATE INDEX idx_notifications_read ON public.notifications(is_read);
 CREATE INDEX idx_notifications_type ON public.notifications(notification_type);
 CREATE INDEX idx_notifications_created ON public.notifications(created_at DESC);
+CREATE INDEX idx_notifications_dedup_check ON public.notifications(college_id, recipient_id, related_entity_type, related_entity_id, notification_type);
+CREATE INDEX idx_notifications_college_type_created ON public.notifications(college_id, notification_type, created_at DESC);
+CREATE INDEX idx_notifications_college_recipient_created ON public.notifications(college_id, recipient_type, created_at DESC);
+CREATE INDEX idx_notifications_recipient_read ON public.notifications(recipient_id, college_id, is_read, created_at DESC) WHERE recipient_type = 'student';
 
 -- 35. PLACEMENT FEEDBACK (NEW - Simple)
 CREATE TABLE public.placement_feedback (
@@ -523,6 +553,8 @@ CREATE TABLE public.placement_feedback (
 
 CREATE INDEX idx_feedback_job ON public.placement_feedback(job_id);
 CREATE INDEX idx_feedback_company ON public.placement_feedback(company_id);
+CREATE INDEX idx_feedback_college_approved ON public.placement_feedback(college_id, is_approved);
+CREATE INDEX idx_feedback_student_job ON public.placement_feedback(student_id, job_id);
 
 -- 36. INTERVIEW QUESTIONS (NEW - Students share questions for next batch)
 CREATE TABLE public.interview_questions (
@@ -547,6 +579,10 @@ CREATE TABLE public.interview_questions (
 CREATE INDEX idx_interview_questions_company ON public.interview_questions(company_id);
 CREATE INDEX idx_interview_questions_job ON public.interview_questions(job_id);
 CREATE INDEX idx_interview_questions_approved ON public.interview_questions(is_approved);
+CREATE INDEX idx_interview_questions_college_approved ON public.interview_questions(college_id, is_approved);
+CREATE INDEX idx_feedback_college_created ON public.placement_feedback(college_id, created_at DESC);
+CREATE INDEX idx_iq_college_created ON public.interview_questions(college_id, created_at DESC);
+CREATE INDEX idx_iq_college_topic ON public.interview_questions(college_id, LOWER(topic));\nCREATE INDEX idx_feedback_student_college ON public.placement_feedback(student_id, college_id);
 
 -- =====================================================
 -- VIEWS
@@ -682,3 +718,40 @@ COMMENT ON TABLE training_enrollments IS 'Student enrollment and progress in tra
 COMMENT ON TABLE notifications IS 'In-app notifications for students and users';
 COMMENT ON TABLE placement_feedback IS 'Student feedback and ratings after placement drives';
 COMMENT ON TABLE interview_questions IS 'Interview questions shared by students for future batches';
+
+-- =====================================================
+-- Phase 14: Student Job Browsing Indexes (1M+ scale)
+-- =====================================================
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_job_postings_title_trgm ON job_postings USING GIN (job_title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_job_postings_desc_trgm ON job_postings USING GIN (job_description gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_job_postings_college_published_deadline ON job_postings (college_id, job_status, application_deadline DESC) WHERE job_status = 'published';
+CREATE INDEX IF NOT EXISTS idx_job_postings_passout_years_gin ON job_postings USING GIN (passout_years);
+CREATE INDEX IF NOT EXISTS idx_student_apps_student_job ON student_applications (student_id, job_id);
+CREATE INDEX IF NOT EXISTS idx_app_denials_student_job ON application_denials (student_id, job_id);
+CREATE INDEX IF NOT EXISTS idx_student_apps_student_college ON student_applications (student_id, college_id, applied_at DESC);
+CREATE INDEX IF NOT EXISTS idx_student_restrictions_active ON student_restrictions (student_id, restriction_type) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_student_restrictions_college ON student_restrictions (college_id);
+CREATE INDEX IF NOT EXISTS idx_companies_name_trgm ON companies USING GIN (company_name gin_trgm_ops);
+
+-- =====================================================
+-- Phase 15: College Application Review Indexes
+-- =====================================================
+CREATE INDEX IF NOT EXISTS idx_student_apps_job_college_status ON student_applications (job_id, college_id, application_status);
+CREATE INDEX IF NOT EXISTS idx_application_answers_application ON application_answers (application_id);
+
+-- =====================================================
+-- Phase 8.2: Training Programs Indexes
+-- =====================================================
+CREATE INDEX IF NOT EXISTS idx_training_programs_college_status ON training_programs (college_id, program_status);
+CREATE INDEX IF NOT EXISTS idx_training_programs_college_lower_name ON training_programs (college_id, LOWER(program_name));
+CREATE INDEX IF NOT EXISTS idx_training_enrollments_program_college ON training_enrollments (program_id, college_id);
+CREATE INDEX IF NOT EXISTS idx_training_enrollments_student ON training_enrollments (student_id);
+
+-- =====================================================
+-- Phase 10.1: College Dashboard Indexes
+-- =====================================================
+CREATE INDEX IF NOT EXISTS idx_personal_info_student ON student_personal_information (student_id);
+CREATE INDEX IF NOT EXISTS idx_students_college_passout_dept ON students (college_id, student_passout_year, dept_id) WHERE student_status != 'dropout';
+CREATE INDEX IF NOT EXISTS idx_placement_results_college_company_year ON placement_results (college_id, company_id, passout_year);
+CREATE INDEX IF NOT EXISTS idx_feedback_college_job ON placement_feedback (college_id, job_id);

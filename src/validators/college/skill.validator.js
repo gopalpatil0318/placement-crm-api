@@ -59,7 +59,22 @@ const listSkillsSchema = Joi.object({
         .default('asc'),
 });
 
+// ============================================================================
+// #105 — Delete Skill (param)
+// ============================================================================
+
+const skillIdParamSchema = Joi.object({
+    skillId: Joi.string()
+        .uuid()
+        .required()
+        .messages({
+            'string.guid': 'Invalid skill ID format',
+            'any.required': 'Skill ID is required',
+        }),
+});
+
 module.exports = {
     createSkillSchema,
     listSkillsSchema,
+    skillIdParamSchema,
 };

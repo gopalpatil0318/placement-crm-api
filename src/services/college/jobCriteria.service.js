@@ -25,6 +25,16 @@ const CRITERIA_FIELDS = [
     'min_existing_package', 'max_existing_package', 'exclude_already_placed',
 ];
 
+// Columns returned by INSERT/UPDATE on job_eligibility_criteria
+const CRITERIA_RETURNING_COLUMNS = [
+    'criteria_id', 'job_id', 'passout_years',
+    'min_overall_cgpa', 'max_live_kts',
+    'min_tenth_percentage', 'min_twelfth_percentage', 'min_diploma_percentage',
+    'allowed_genders', 'allowed_departments', 'allowed_gap_statuses',
+    'min_existing_package', 'max_existing_package', 'exclude_already_placed',
+    'created_at',
+].join(', ');
+
 // ============================================================================
 // HELPER — Verify job exists and belongs to college
 // ============================================================================
@@ -73,7 +83,7 @@ async function setCriteria(jobId, collegeId, data) {
 
     if (existingCheck.rows.length) {
         throw Object.assign(
-            new Error('Eligibility criteria already exists for this job. Use update instead'),
+            new Error(ERROR_MESSAGES.CRITERIA_ALREADY_EXISTS),
             { status: 409 }
         );
     }
@@ -91,7 +101,7 @@ async function setCriteria(jobId, collegeId, data) {
     const result = await query(
         `INSERT INTO job_eligibility_criteria (${columns.join(', ')})
          VALUES (${placeholders.join(', ')})
-         RETURNING *`,
+         RETURNING ${CRITERIA_RETURNING_COLUMNS}`,
         values
     );
 
@@ -128,14 +138,14 @@ async function updateCriteria(jobId, collegeId, data) {
 
     // 2. Check criteria exists
     const existing = await query(
-        `SELECT * FROM job_eligibility_criteria
+        `SELECT criteria_id FROM job_eligibility_criteria
          WHERE job_id = $1 LIMIT 1`,
         [jobId]
     );
 
     if (!existing.rows.length) {
         throw Object.assign(
-            new Error('No eligibility criteria found for this job. Use set criteria first'),
+            new Error(ERROR_MESSAGES.CRITERIA_NOT_FOUND),
             { status: 404 }
         );
     }
@@ -144,7 +154,7 @@ async function updateCriteria(jobId, collegeId, data) {
     const fieldsToUpdate = CRITERIA_FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {
-        throw Object.assign(new Error('No valid fields provided for update'), { status: 400 });
+        throw Object.assign(new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
     const setClauses = fieldsToUpdate
@@ -156,7 +166,7 @@ async function updateCriteria(jobId, collegeId, data) {
         `UPDATE job_eligibility_criteria
          SET ${setClauses}
          WHERE job_id = $1
-         RETURNING *`,
+         RETURNING ${CRITERIA_RETURNING_COLUMNS}`,
         values
     );
 
@@ -193,7 +203,7 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
 
     // 2. Get criteria for this job
     const criteriaResult = await query(
-        `SELECT * FROM job_eligibility_criteria
+        `SELECT ${CRITERIA_RETURNING_COLUMNS} FROM job_eligibility_criteria
          WHERE job_id = $1 LIMIT 1`,
         [jobId]
     );
@@ -360,8 +370,8 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
             [...params, limit, offset]
         ),
     ]);
-    const eligibleCount = parseInt(countResult.rows[0].total, 10);
-    const totalStudents = parseInt(totalStudentsResult.rows[0].total, 10);
+    const eligibleCount = Number.parseInt(countResult.rows[0].total, 10);
+    const totalStudents = Number.parseInt(totalStudentsResult.rows[0].total, 10);
 
     return {
         job: {

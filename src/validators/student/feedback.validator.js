@@ -44,7 +44,7 @@ const getMyFeedbackSchema = Joi.object({
     .messages({ 'any.only': 'Sort order must be asc or desc' }),
 
   page: Joi.number().integer().min(1).default(1),
-  limit: Joi.number().integer().min(1).max(100).default(20),
+  limit: Joi.number().integer().min(1).max(200).default(20),
 });
 
 // ── POST /submit_interview_question ───────────────────────────────────────
