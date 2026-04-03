@@ -80,14 +80,18 @@ async function createCollege(data) {
         college_name, college_subdomain, college_type,
         college_address, college_city, college_taluka,
         college_district, college_state, college_pincode,
-        default_academic_year, college_status, enabled_features
+        default_academic_year, college_status, enabled_features,
+        college_logo_url, college_website, college_affiliation,
+        college_established_year, college_description
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING
         college_id, college_name, college_subdomain, college_type,
         college_address, college_city, college_taluka, college_district,
         college_state, college_pincode, college_status,
         enabled_features, default_academic_year,
+        college_logo_url, college_website, college_affiliation,
+        college_established_year, college_description,
         created_at, updated_at`,
             [
                 data.college_name,
@@ -102,6 +106,11 @@ async function createCollege(data) {
                 data.default_academic_year,
                 STATUS.ACTIVE,
                 JSON.stringify(['core']),
+                data.college_logo_url || null,
+                data.college_website || null,
+                data.college_affiliation || null,
+                data.college_established_year || null,
+                data.college_description || null,
             ]
         );
 
@@ -210,7 +219,7 @@ async function getAllColleges({ page, limit, offset, status, type, search }) {
             `SELECT
        college_id, college_name, college_subdomain, college_type,
        college_status, enabled_features, default_academic_year,
-       college_city, college_state,
+       college_city, college_state, college_logo_url,
        created_at, updated_at
      FROM colleges
      ${whereClause}
@@ -236,6 +245,8 @@ async function getCollegeById(collegeId) {
        c.college_address, c.college_city, c.college_taluka, c.college_district,
        c.college_state, c.college_pincode, c.college_status,
        c.enabled_features, c.default_academic_year,
+       c.college_logo_url, c.college_website, c.college_affiliation,
+       c.college_established_year, c.college_description,
        c.created_at, c.updated_at,
        a.user_name AS admin_name,
        a.user_email AS admin_email
@@ -268,6 +279,8 @@ async function updateCollege(collegeId, data) {
         'college_name', 'college_subdomain', 'college_type',
         'college_address', 'college_city', 'college_taluka',
         'college_district', 'college_state', 'college_pincode',
+        'college_logo_url', 'college_website', 'college_affiliation',
+        'college_established_year', 'college_description',
     ];
 
     const setClauses = [];
@@ -298,6 +311,8 @@ async function updateCollege(collegeId, data) {
        college_address, college_city, college_taluka, college_district,
        college_state, college_pincode, college_status,
        enabled_features, default_academic_year,
+       college_logo_url, college_website, college_affiliation,
+       college_established_year, college_description,
        created_at, updated_at`,
             values
         );

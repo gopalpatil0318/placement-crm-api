@@ -47,8 +47,16 @@ const logLevel = VALID_LEVELS.includes(process.env.LOG_LEVEL)
 // FORMAT: Console (Human-Readable, Colorized)
 // ============================================================================
 
-const consoleFormat = format.printf(({ level, message, timestamp, requestId, ...meta }) => {
-  const reqId = requestId ? ` [${requestId}]` : '';
+const consoleFormat = format.printf((info) => {
+  const { level, message, timestamp, requestId, ...meta } = info;
+  const ts = typeof timestamp === 'string' ? timestamp : JSON.stringify(timestamp);
+  const msg = typeof message === 'string' ? message : JSON.stringify(message);
+
+  let reqId = '';
+  if (requestId) {
+    const idStr = typeof requestId === 'string' ? requestId : JSON.stringify(requestId);
+    reqId = ` [${idStr}]`;
+  }
 
   // Build metadata string from remaining keys (exclude 'service', 'environment' defaults)
   const filteredMeta = { ...meta };
@@ -61,7 +69,7 @@ const consoleFormat = format.printf(({ level, message, timestamp, requestId, ...
       .join(' ')
     : '';
 
-  return `${timestamp} [${level}]${reqId}: ${message}${metaStr}`;
+  return `${ts} [${level}]${reqId}: ${msg}${metaStr}`;
 });
 
 // ============================================================================

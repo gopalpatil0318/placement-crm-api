@@ -88,7 +88,6 @@ async function registerStudent(data, collegeId) {
         student_password,
         dept_name,
         student_passout_year,
-        current_year,
     } = data;
 
     // 1. Resolve dept_name → dept_id
@@ -118,14 +117,14 @@ async function registerStudent(data, collegeId) {
     const result = await query(
         `INSERT INTO students
            (college_id, first_name, middle_name, last_name, student_email, student_password,
-            dept_id, student_passout_year, current_year, student_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            dept_id, student_passout_year, student_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING student_id, first_name, middle_name, last_name, student_email,
-                   dept_id, student_passout_year, current_year, student_status,
+                   dept_id, student_passout_year, student_status,
                    profile_complete, profile_is_approved, created_at`,
         [
             collegeId, first_name, middle_name, last_name, student_email,
-            hashedPassword, dept_id, student_passout_year, current_year,
+            hashedPassword, dept_id, student_passout_year,
             STATUS.STUDENT.ACTIVE,
         ]
     );
@@ -250,14 +249,14 @@ async function bulkRegisterStudents(students, collegeId) {
                     const result = await client.query(
                         `INSERT INTO students
                            (college_id, first_name, middle_name, last_name, student_email, student_password,
-                            dept_id, student_passout_year, current_year, student_status)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                            dept_id, student_passout_year, student_status)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                          RETURNING student_id, first_name, last_name, student_email, dept_id,
-                                   student_passout_year, current_year, student_status, created_at`,
+                                   student_passout_year, student_status, created_at`,
                         [
                             collegeId, v.first_name, v.middle_name || null, v.last_name,
                             v.student_email, hashedPasswords[i], v.deptId,
-                            v.student_passout_year, v.current_year, STATUS.STUDENT.ACTIVE,
+                            v.student_passout_year, STATUS.STUDENT.ACTIVE,
                         ]
                     );
 
@@ -369,7 +368,7 @@ async function getAllStudents(collegeId, filters = {}) {
         ),
         query(
             `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
-                s.student_email, s.dept_id, s.student_passout_year, s.current_year,
+                s.student_email, s.dept_id, s.student_passout_year,
                 s.student_status, s.profile_complete, s.profile_is_approved,
                 s.created_at, s.updated_at,
                 d.dept_name
@@ -406,7 +405,7 @@ async function getAllStudents(collegeId, filters = {}) {
 async function getStudentById(studentId, collegeId) {
     const result = await query(
         `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
-                s.student_email, s.dept_id, s.student_passout_year, s.current_year,
+                s.student_email, s.dept_id, s.student_passout_year,
                 s.student_status, s.profile_complete, s.profile_is_approved,
                 s.created_at, s.updated_at,
                 d.dept_name
@@ -440,7 +439,7 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
     // 1. Basic student info
     const studentResult = await query(
         `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
-                s.student_email, s.dept_id, s.student_passout_year, s.current_year,
+                s.student_email, s.dept_id, s.student_passout_year,
                 s.student_status, s.profile_complete, s.profile_is_approved,
                 s.profile_approval_status, s.approved_by, s.approved_at,
                 s.profile_rejection_reason, s.rejected_at,
@@ -739,7 +738,7 @@ async function updateStudent(studentId, collegeId, data) {
          SET ${fields.join(', ')}
          WHERE student_id = $${paramIndex} AND college_id = $${paramIndex + 1}
          RETURNING student_id, first_name, middle_name, last_name, student_email,
-                   dept_id, student_passout_year, current_year, student_status,
+                   dept_id, student_passout_year, student_status,
                    profile_complete, profile_is_approved, updated_at`,
         values
     );

@@ -71,17 +71,6 @@ const studentFields = {
             'number.max': 'Passout year cannot exceed 2040',
             'any.required': 'Passout year is required',
         }),
-
-    current_year: Joi.number()
-        .integer()
-        .min(1)
-        .max(6)
-        .required()
-        .messages({
-            'number.min': 'Current year must be at least 1',
-            'number.max': 'Current year cannot exceed 6',
-            'any.required': 'Current year is required',
-        }),
 };
 
 // ============================================================================
@@ -208,12 +197,6 @@ const updateStudentSchema = Joi.object({
         .integer()
         .min(2020)
         .max(2040)
-        .optional(),
-
-    current_year: Joi.number()
-        .integer()
-        .min(1)
-        .max(6)
         .optional(),
 }).min(1).messages({
     'object.min': 'At least one field must be provided for update',

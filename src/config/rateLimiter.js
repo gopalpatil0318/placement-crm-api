@@ -112,10 +112,40 @@ const apiLimiter = rateLimit({
 });
 
 // ============================================================================
+// RESOLVE LIMITER (Public endpoint — subdomain college lookup)
+// ============================================================================
+
+const resolveLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,             // 10 requests per minute per IP
+  skip: () => false,   // Never skip — public endpoint
+  handler: (req, res) => {
+    const resetMs = req.rateLimit?.resetTime
+      ? req.rateLimit.resetTime.getTime() - Date.now()
+      : 60 * 1000;
+    const retryAfterSec = Math.ceil(resetMs / 1000);
+
+    logger.warn(`${LOG.SECURITY} Resolve rate limit exceeded`, {
+      ip: req.ip,
+      path: req.path,
+    });
+
+    return res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json({
+      success: false,
+      message: `Too many requests. Please try again in ${formatRetryTime(resetMs)}`,
+      retryAfter: retryAfterSec,
+    });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
   authLimiter,
   apiLimiter,
+  resolveLimiter,
 };

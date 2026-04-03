@@ -29,7 +29,7 @@ async function getBasicInfo(studentId, collegeId) {
         `SELECT
            s.student_id, s.first_name, s.middle_name, s.last_name,
            s.student_email, s.dept_id,
-           s.student_passout_year, s.current_year,
+           s.student_passout_year,
            s.student_status, s.profile_complete, s.profile_is_approved,
            s.created_at, s.updated_at,
            d.dept_name
@@ -73,7 +73,7 @@ async function getFullProfile(studentId, collegeId) {
             text: `SELECT
                s.student_id, s.first_name, s.middle_name, s.last_name,
                s.student_email, s.dept_id, s.college_id,
-               s.student_passout_year, s.current_year,
+               s.student_passout_year,
                s.student_status, s.profile_complete, s.profile_is_approved,
                s.created_at, s.updated_at,
                d.dept_name, c.college_name

@@ -22,14 +22,7 @@ const userService = require('../../services/college/user.service');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
 const { SUCCESS_MESSAGES, LOG } = require('../../config/constants');
-
-// Cookie options for JWT
-const COOKIE_OPTIONS = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-};
+const { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS } = require('../../config/cookie');
 
 // ============================================================================
 // AUTH — 1. LOGIN
@@ -57,11 +50,7 @@ async function login(req, res) {
 // ============================================================================
 
 async function logout(req, res) {
-    res.clearCookie('token', {
-        httpOnly: COOKIE_OPTIONS.httpOnly,
-        secure: COOKIE_OPTIONS.secure,
-        sameSite: COOKIE_OPTIONS.sameSite,
-    });
+    res.clearCookie('token', CLEAR_COOKIE_OPTIONS);
 
     logger.info(`${LOG.AUTH} College user logged out`, {
         userId: req.user?.id,

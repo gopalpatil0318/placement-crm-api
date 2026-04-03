@@ -15,14 +15,7 @@ const authService = require('../../services/student/auth.service');
 const { sendSuccess } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
 const { SUCCESS_MESSAGES, LOG } = require('../../config/constants');
-
-// Cookie options for JWT (same as college auth)
-const COOKIE_OPTIONS = {
-    httpOnly: true,
-    secure: false,          // set true in production behind HTTPS
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-};
+const { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS } = require('../../config/cookie');
 
 // ============================================================================
 // 1. LOGIN
@@ -50,11 +43,7 @@ async function login(req, res) {
 // ============================================================================
 
 async function logout(req, res) {
-    res.clearCookie('token', {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
-    });
+    res.clearCookie('token', CLEAR_COOKIE_OPTIONS);
 
     logger.info(`${LOG.AUTH} Student logged out`, {
         studentId: req.user?.id,

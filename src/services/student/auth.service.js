@@ -37,7 +37,7 @@ async function loginStudent(email, password) {
         `SELECT
            s.student_id, s.first_name, s.middle_name, s.last_name,
            s.student_email, s.student_password, s.student_status,
-           s.college_id, s.dept_id, s.student_passout_year, s.current_year,
+           s.college_id, s.dept_id, s.student_passout_year,
            s.profile_complete, s.profile_is_approved,
            c.college_name, c.college_status, c.default_academic_year,
            d.dept_name
@@ -119,7 +119,6 @@ async function loginStudent(email, password) {
             dept_id: student.dept_id,
             dept_name: student.dept_name,
             student_passout_year: student.student_passout_year,
-            current_year: student.current_year,
             student_status: student.student_status,
             profile_complete: student.profile_complete,
             profile_is_approved: student.profile_is_approved,
@@ -260,7 +259,7 @@ async function changePassword(studentId, collegeId, currentPassword, newPassword
 
 async function resetPassword(token, newPassword) {
     const payload = verifyToken(token);
-    if (!payload || payload.purpose !== 'password_reset' || payload.type !== STUDENT_ROLE) {
+    if (!payload?.purpose || payload.purpose !== 'password_reset' || payload.type !== STUDENT_ROLE) {
         throw Object.assign(
             new Error('Password reset link is invalid or has expired'),
             { status: 400 }

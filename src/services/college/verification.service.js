@@ -130,7 +130,7 @@ async function getPendingProfiles(collegeId, filters = {}) {
         query(`SELECT COUNT(*) AS total FROM students s WHERE ${whereClause}`, params),
         query(
             `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
-                    s.student_email, s.dept_id, s.student_passout_year, s.current_year,
+                    s.student_email, s.dept_id, s.student_passout_year,
                     s.profile_complete, s.profile_is_approved, s.profile_approval_status,
                     s.profile_rejection_reason, s.rejected_at,
                     s.created_at, s.updated_at,

@@ -21,14 +21,7 @@ const { getPagination } = require('../../utils/pagination');
 const { SUCCESS_MESSAGES } = require('../../config/constants');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
-
-// Cookie options for JWT — HttpOnly, no JS access
-const COOKIE_OPTIONS = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-};
+const { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS } = require('../../config/cookie');
 
 // ============================================================================
 // 1. POST /api/sysadmin/login
@@ -54,11 +47,7 @@ async function login(req, res) {
 // ============================================================================
 
 async function logout(req, res) {
-    res.clearCookie('token', {
-        httpOnly: COOKIE_OPTIONS.httpOnly,
-        secure: COOKIE_OPTIONS.secure,
-        sameSite: COOKIE_OPTIONS.sameSite,
-    });
+    res.clearCookie('token', CLEAR_COOKIE_OPTIONS);
 
     logger.info(`${LOG.AUTH} Sysadmin logged out`);
 

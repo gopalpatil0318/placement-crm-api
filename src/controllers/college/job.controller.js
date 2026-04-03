@@ -11,6 +11,7 @@
  */
 
 const jobService = require('../../services/college/job.service');
+const logger = require('../../config/logger');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
 const {
     SUCCESS_MESSAGES,
@@ -52,6 +53,7 @@ async function getAllJobs(req, res) {
 
         return sendPaginated(res, jobs, total, { page, limit }, SUCCESS_MESSAGES.JOBS_RETRIEVED);
     } catch (err) {
+        logger.error('Failed to retrieve jobs', { error: err.message, stack: err.stack });
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
     }
 }

@@ -20,6 +20,11 @@ CREATE TABLE public.colleges (
   college_status TEXT NOT NULL DEFAULT 'active',
   enabled_features JSONB NOT NULL DEFAULT '["core"]'::jsonb,
   default_academic_year INTEGER NOT NULL,
+  college_logo_url TEXT,
+  college_website TEXT,
+  college_affiliation TEXT,
+  college_established_year INTEGER,
+  college_description TEXT,
   created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   CONSTRAINT colleges_pkey PRIMARY KEY (college_id),
@@ -65,7 +70,6 @@ CREATE TABLE public.students (
   student_password TEXT NOT NULL,
   dept_id UUID NOT NULL,
   student_passout_year INTEGER NOT NULL,
-  current_year INTEGER NOT NULL,
   student_status TEXT NOT NULL DEFAULT 'active',
   profile_complete BOOLEAN DEFAULT FALSE,
   profile_is_approved BOOLEAN DEFAULT FALSE,
@@ -81,7 +85,6 @@ CREATE TABLE public.students (
   CONSTRAINT students_college_fkey FOREIGN KEY (college_id) REFERENCES colleges(college_id) ON DELETE CASCADE,
   CONSTRAINT students_dept_fkey FOREIGN KEY (dept_id) REFERENCES departments(dept_id) ON DELETE RESTRICT,
   CONSTRAINT students_status_check CHECK (student_status IN ('active', 'inactive', 'suspended', 'graduated', 'dropout')),
-  CONSTRAINT students_year_check CHECK (current_year >= 1 AND current_year <= 6),
   CONSTRAINT profile_approval_status_check CHECK (profile_approval_status IN ('pending', 'approved', 'rejected')),
   CONSTRAINT students_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) TABLESPACE pg_default;

@@ -22,7 +22,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const compression = require('compression');
 const morgan = require('morgan');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 
 const config = require('./config/env');
 const logger = require('./config/logger');
@@ -45,8 +45,50 @@ app.use(helmet());
 // 2. CORS
 // ============================================================================
 
+/**
+ * Build the CORS origin option.
+ * - Production: accepts any *.placenex.in subdomain + explicit FRONTEND_URL list.
+ * - Development: additionally allows any *.lvh.me subdomain and localhost
+ *   so local multi-tenant testing works out of the box.
+ *
+ * Always returns a callback function for consistent typing.
+ */
+
+/** Matches any subdomain (or bare) placenex.in origin */
+const PLACENEX_ORIGIN_RE = /^https?:\/\/([\w-]+\.)?placenex\.in$/;
+/** Matches any *.lvh.me origin (with optional port) */
+const LVH_ORIGIN_RE = /^https?:\/\/[\w-]+\.lvh\.me(:\d+)?$/;
+/** Matches http(s)://localhost with optional port */
+const LOCALHOST_ORIGIN_RE = /^https?:\/\/localhost(:\d+)?$/;
+
+function buildCorsOrigin() {
+  const isWildcard = config.frontendUrl === '*';
+
+  // Never allow wildcard CORS in production — must set FRONTEND_URL
+  if (isWildcard && config.isProd) {
+    logger.warn('CORS: FRONTEND_URL=* is not safe for production. Falling back to placenex.in only.');
+  }
+
+  const origins = isWildcard ? [] : config.frontendUrl.split(',').map(s => s.trim());
+
+  return function corsOriginCheck(origin, callback) {
+    // Allow non-browser (server-to-server, curl) requests
+    if (!origin) return callback(null, true);
+    // Wildcard — allow everything (development only)
+    if (isWildcard && config.isDev) return callback(null, true);
+    // Explicit whitelist from FRONTEND_URL env
+    if (origins.includes(origin)) return callback(null, true);
+    // Production + Dev: accept any *.placenex.in subdomain
+    if (PLACENEX_ORIGIN_RE.test(origin)) return callback(null, true);
+    // Dev-only: accept any *.lvh.me or localhost origin
+    if (config.isDev && LVH_ORIGIN_RE.test(origin)) return callback(null, true);
+    if (config.isDev && LOCALHOST_ORIGIN_RE.test(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  };
+}
+
 app.use(cors({
-  origin: config.frontendUrl === '*' ? '*' : config.frontendUrl.split(',').map(s => s.trim()),
+  origin: buildCorsOrigin(),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -57,7 +99,7 @@ app.use(cors({
 // ============================================================================
 
 app.use(cookieParser());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ============================================================================
@@ -71,8 +113,8 @@ app.use(compression());
 // ============================================================================
 
 app.use((req, res, next) => {
-  // Unique request ID for log correlation
-  req.id = req.headers['x-request-id'] || crypto.randomUUID();
+  // Always generate a fresh request ID — never trust client headers
+  req.id = crypto.randomUUID();
   res.setHeader('X-Request-Id', req.id);
 
   // Track response time — set header BEFORE response is sent

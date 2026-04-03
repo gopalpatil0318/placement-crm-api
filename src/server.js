@@ -9,7 +9,7 @@
  * ============================================================================
  */
 
-const http = require('http');
+const http = require('node:http');
 const app = require('./app');
 const config = require('./config/env');
 const logger = require('./config/logger');
@@ -63,8 +63,16 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 process.on('unhandledRejection', (reason) => {
+  let errorMessage;
+  if (reason instanceof Error) {
+    errorMessage = reason.message;
+  } else if (typeof reason === 'object' && reason !== null) {
+    errorMessage = JSON.stringify(reason);
+  } else {
+    errorMessage = String(reason); // NOSONAR - reason is a primitive here (Error and object cases handled above)
+  }
   logger.error(`${LOG.STARTUP} Unhandled Promise Rejection`, {
-    error: reason instanceof Error ? reason.message : String(reason),
+    error: errorMessage,
     stack: reason instanceof Error ? reason.stack : undefined,
   });
   // In production, prefer shutting down after unhandled rejections

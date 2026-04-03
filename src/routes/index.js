@@ -40,6 +40,7 @@ const collegeSkillRoutes = require('./college/skill.routes');
 const collegeDashboardRoutes = require('./college/dashboard.routes');
 const collegeVerificationRoutes = require('./college/verification.routes');
 const collegeJobOverrideRoutes = require('./college/jobOverride.routes');
+const collegeResolveRoutes = require('./college/resolve.routes');
 
 // Route groups — Student
 const studentAuthRoutes = require('./student/auth.routes');
@@ -67,6 +68,11 @@ const studentJobOverrideRoutes = require('./student/jobOverride.routes');
 // ============================================================================
 
 router.use('/sysadmin', sysadminRoutes);
+
+// PUBLIC college routes FIRST (no auth required) — must be before authenticated routes
+router.use('/college', collegeResolveRoutes);
+
+// Authenticated college routes
 router.use('/college', collegeUserRoutes);
 router.use('/college', collegeDepartmentRoutes);
 router.use('/college', collegeStudentRoutes);

@@ -22,7 +22,7 @@ dotenv.config({
 // REQUIRED ENV VALIDATION
 // ============================================================================
 
-const REQUIRED_VARS = ['DATABASE_URL', 'JWT_SECRET'];
+const REQUIRED_VARS = ['DATABASE_URL', 'JWT_SECRET', 'SYSADMIN_EMAIL', 'SYSADMIN_PASSWORD'];
 
 const missing = REQUIRED_VARS.filter((key) => !process.env[key]);
 if (missing.length > 0) {
@@ -60,9 +60,9 @@ const config = Object.freeze({
   // Database
   databaseUrl: process.env.DATABASE_URL,
 
-  // DB Pool (defaults tuned for transaction-mode pooler + PaaS multi-instance)
-  dbPoolMin: parseIntSafe(process.env.DB_POOL_MIN, 1),
-  dbPoolMax: parseIntSafe(process.env.DB_POOL_MAX, 5),
+  // DB Pool — override via env vars for production. Use PgBouncer for extreme scale.
+  dbPoolMin: parseIntSafe(process.env.DB_POOL_MIN, 5),
+  dbPoolMax: parseIntSafe(process.env.DB_POOL_MAX, 20),
   dbIdleTimeout: parseIntSafe(process.env.DB_IDLE_TIMEOUT, 10000),
   dbConnectionTimeout: parseIntSafe(process.env.DB_CONNECTION_TIMEOUT, 10000),
   dbQueryTimeout: parseIntSafe(process.env.DB_QUERY_TIMEOUT, 30000),
@@ -83,7 +83,15 @@ const config = Object.freeze({
   smtpPort: parseIntSafe(process.env.SMTP_PORT, 587),
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
-  smtpFrom: process.env.SMTP_FROM || '"Placement CRM" <noreply@placementcrm.com>',
+  smtpFrom: process.env.SMTP_FROM || '"PlaceNex" <noreply@placenex.in>',
 });
 
 module.exports = config;
+
+// ============================================================================
+// NON-FATAL WARNINGS
+// ============================================================================
+
+if (config.isProd && !config.smtpHost) {
+  console.warn('\n⚠️  SMTP_HOST is not set. Email features (password reset) will fail in production.\n');
+}

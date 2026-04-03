@@ -230,7 +230,7 @@ async function createJob(collegeId, userId, data) {
             const qTexts = questions.map(q => q.question_text);
             const qTypes = questions.map(q => q.question_type);
             const qOptions = questions.map(q => q.question_options ? JSON.stringify(q.question_options) : null);
-            const qRequired = questions.map(q => q.is_required !== undefined ? q.is_required : true);
+            const qRequired = questions.map(q => q.is_required === undefined ? true : q.is_required);
             const qOrders = questions.map(q => q.question_order);
 
             const qResult = await client.query(
@@ -523,8 +523,8 @@ async function updateJob(jobId, collegeId, data) {
     }
 
     // 4. Validate salary range
-    const salaryMin = data.salary_min !== undefined ? data.salary_min : existing.rows[0].salary_min;
-    const salaryMax = data.salary_max !== undefined ? data.salary_max : existing.rows[0].salary_max;
+    const salaryMin = data.salary_min === undefined ? existing.rows[0].salary_min : data.salary_min;
+    const salaryMax = data.salary_max === undefined ? existing.rows[0].salary_max : data.salary_max;
     if (salaryMin !== null && salaryMax !== null &&
         Number(salaryMin) > Number(salaryMax)) {
         throw Object.assign(
