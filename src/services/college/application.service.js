@@ -22,11 +22,11 @@ const {
 // Explicit column list for student_applications table
 const APPLICATION_COLUMNS = `a.application_id, a.student_id, a.job_id, a.position_id, a.college_id,
     a.application_status, a.current_round_id, a.is_eligible,
-    a.eligibility_remarks, a.applied_at, a.last_updated_at, a.withdrawn_at`;
+    a.eligibility_remarks, a.applied_at, a.last_updated_at`;
 
 const APPLICATION_RETURNING_COLUMNS = `application_id, student_id, job_id, position_id, college_id,
     application_status, current_round_id, is_eligible,
-    eligibility_remarks, applied_at, last_updated_at, withdrawn_at`;
+    eligibility_remarks, applied_at, last_updated_at`;
 
 // Valid admin status transitions
 const ADMIN_TRANSITIONS = {
