@@ -49,6 +49,7 @@ router.use(authenticate, apiLimiter);
 
 router.get(
     '/get_pending_verification_counts',
+    validate(pendingListSchema, 'query'),
     asyncHandler(controller.getPendingVerificationCounts)
 );
 

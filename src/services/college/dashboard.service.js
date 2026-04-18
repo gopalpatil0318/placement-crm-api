@@ -22,8 +22,8 @@
 const { query } = require('../../config/db');
 const { STATUS, PLACEMENT_TYPES, ERROR_MESSAGES } = require('../../config/constants');
 
-// Shared placement filter: valid (non-cancelled, non-rejected) offers
-const VALID_PLACEMENT = `placement_status NOT IN ('${STATUS.PLACEMENT.CANCELLED}', '${STATUS.PLACEMENT.REJECTED}')`;
+// Placed = accepted or joined (not offered — that's still pending student response)
+const VALID_PLACEMENT = `placement_status IN ('${STATUS.PLACEMENT.ACCEPTED}', '${STATUS.PLACEMENT.JOINED}')`;
 const PUBLISHED_JOBS  = `job_status IN ('${STATUS.JOB.PUBLISHED}', '${STATUS.JOB.CLOSED}')`;
 const NOT_DROPOUT     = `student_status != '${STATUS.STUDENT.DROPOUT}'`;
 // ============================================================================
@@ -124,7 +124,9 @@ async function getPlacementStats(collegeId, passoutYear) {
                 COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.OFFERED}')::int  AS pending_offers,
                 COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.ACCEPTED}')::int AS accepted_offers,
                 COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.JOINED}')::int   AS joined_count,
-                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.REJECTED}')::int AS rejected_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.DECLINED}')::int AS declined_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.REVOKED}')::int  AS revoked_offers,
+                COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.EXPIRED}')::int  AS expired_offers,
                 COUNT(*) FILTER (WHERE placement_status = '${STATUS.PLACEMENT.CANCELLED}')::int AS cancelled_offers,
                 (
                     SELECT COUNT(*)::int FROM (
@@ -313,9 +315,10 @@ async function getTrainingStats(collegeId, passoutYear) {
         query(`
             SELECT
                 COUNT(*)::int AS total_programs,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.DRAFT}')::int            AS draft,
                 COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.UPCOMING}')::int         AS upcoming,
-                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.ENROLLMENT_OPEN}')::int  AS enrollment_open,
                 COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.IN_PROGRESS}')::int      AS in_progress,
+                COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.ON_HOLD}')::int          AS on_hold,
                 COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.COMPLETED}')::int        AS completed,
                 COUNT(*) FILTER (WHERE tp.program_status = '${STATUS.TRAINING.CANCELLED}')::int        AS cancelled,
                 COALESCE(SUM(te.enrolled_count), 0)::int                            AS total_enrolled,

@@ -253,7 +253,7 @@ async function changePassword(userId, collegeId, currentPassword, newPassword) {
  *
  * @param {Object} data - { user_name, user_email, user_password, user_role, dept_id? }
  * @param {string} collegeId - From JWT
- * @returns {Object} Created user (no password in response)
+ * @returns {Promise<Object>} Created user (no password in response)
  */
 async function createUser(data, collegeId) {
     const { user_name, user_email, user_password, user_role, dept_id } = data;
@@ -320,7 +320,7 @@ async function createUser(data, collegeId) {
  *
  * @param {string} collegeId - From JWT
  * @param {Object} filters   - { role?, status?, search?, page, limit }
- * @returns {{ users: Array, total: number, page, limit }}
+ * @returns {Promise<{ users: Array, total: number, page, limit }>}
  */
 async function getAllUsers(collegeId, filters = {}) {
     const { page, limit, offset } = getPagination(filters);
@@ -388,7 +388,7 @@ async function getAllUsers(collegeId, filters = {}) {
  *
  * @param {string} userId
  * @param {string} collegeId
- * @returns {Object} User record
+ * @returns {Promise<Object>} User record
  */
 async function getUserById(userId, collegeId) {
     const result = await query(
@@ -419,7 +419,7 @@ async function getUserById(userId, collegeId) {
  * @param {string} userId
  * @param {string} collegeId
  * @param {Object} data - { user_name?, user_email?, user_role?, dept_id? }
- * @returns {Object} Updated user
+ * @returns {Promise<Object>} Updated user
  */
 async function updateUser(userId, collegeId, data) {
     // 1. Verify user exists in this college
@@ -514,7 +514,7 @@ async function updateUser(userId, collegeId, data) {
  * @param {string} userId
  * @param {string} collegeId
  * @param {string} newStatus - 'active' or 'inactive'
- * @returns {Object} Updated user
+ * @returns {Promise<Object>} Updated user
  */
 async function toggleUserStatus(userId, collegeId, newStatus) {
     // 1. Verify user exists
@@ -557,7 +557,7 @@ async function toggleUserStatus(userId, collegeId, newStatus) {
     const action = newStatus === STATUS.ACTIVE ? 'activated' : 'deactivated';
     logger.info(`${LOG.AUTH} College user ${action}`, { userId, collegeId, newStatus });
 
-    return result.rows[0];
+    return { ...result.rows[0], _previousStatus: existing.rows[0].user_status };
 }
 
 // ============================================================================
@@ -566,7 +566,7 @@ async function toggleUserStatus(userId, collegeId, newStatus) {
 
 async function resetPassword(token, newPassword) {
     const payload = verifyToken(token);
-    if (!payload || payload.purpose !== 'password_reset') {
+    if (!payload || payload?.purpose !== 'password_reset') {
         throw Object.assign(
             new Error('Password reset link is invalid or has expired'),
             { status: 400 }

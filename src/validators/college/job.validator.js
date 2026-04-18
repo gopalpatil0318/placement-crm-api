@@ -10,7 +10,7 @@
  */
 
 const Joi = require('joi');
-const { STATUS, JOB_TYPES, QUESTION_TYPES } = require('../../config/constants');
+const { STATUS, JOB_TYPES, QUESTION_TYPES, DRIVE_TYPES } = require('../../config/constants');
 
 // Valid enums
 const JOB_STATUSES = Object.values(STATUS.JOB);
@@ -292,6 +292,14 @@ const createJobSchema = Joi.object({
             'any.required': 'Application deadline is required',
         }),
 
+    drive_type: Joi.string()
+        .valid(...DRIVE_TYPES)
+        .optional()
+        .default('on_campus')
+        .messages({
+            'any.only': `Drive type must be one of: ${DRIVE_TYPES.join(', ')}`,
+        }),
+
     // ---- Nested arrays ----
     positions: Joi.array()
         .items(positionSchema)
@@ -319,6 +327,12 @@ const createJobSchema = Joi.object({
         .max(30)
         .optional()
         .allow(null),
+}).custom((value, helpers) => {
+    // B25: Cross-field salary validation
+    if (value.salary_min != null && value.salary_max != null && value.salary_min > value.salary_max) {
+        return helpers.error('any.custom', { message: 'Minimum salary cannot exceed maximum salary' });
+    }
+    return value;
 });
 
 // ============================================================================
@@ -345,6 +359,10 @@ const listJobsSchema = Joi.object({
 
     job_type: Joi.string()
         .valid(...JOB_TYPES)
+        .optional(),
+
+    drive_type: Joi.string()
+        .valid(...DRIVE_TYPES)
         .optional(),
 
     search: Joi.string()
@@ -451,8 +469,21 @@ const updateJobSchema = Joi.object({
 
     allow_applications: Joi.boolean()
         .optional(),
+
+    drive_type: Joi.string()
+        .valid(...DRIVE_TYPES)
+        .optional()
+        .messages({
+            'any.only': `Drive type must be one of: ${DRIVE_TYPES.join(', ')}`,
+        }),
 }).min(1).messages({
     'object.min': 'At least one field must be provided to update',
+}).custom((value, helpers) => {
+    // B25: Cross-field salary validation
+    if (value.salary_min != null && value.salary_max != null && value.salary_min > value.salary_max) {
+        return helpers.error('any.custom', { message: 'Minimum salary cannot exceed maximum salary' });
+    }
+    return value;
 });
 
 // ============================================================================

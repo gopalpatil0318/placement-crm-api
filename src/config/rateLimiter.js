@@ -141,6 +141,37 @@ const resolveLimiter = rateLimit({
 });
 
 // ============================================================================
+// BULK LIMITER (Strict — heavy batch operations)
+// ============================================================================
+
+const bulkLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,              // 5 bulk requests per minute per IP
+  skip: skipForSysAdmin,
+  handler: (req, res) => {
+    const resetMs = req.rateLimit?.resetTime
+      ? req.rateLimit.resetTime.getTime() - Date.now()
+      : 60 * 1000;
+    const retryAfterSec = Math.ceil(resetMs / 1000);
+
+    logger.warn(`${LOG.SECURITY} Bulk operation rate limit exceeded`, {
+      ip: req.ip,
+      method: req.method,
+      path: req.path,
+      userId: req.user?.id,
+    });
+
+    return res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json({
+      success: false,
+      message: `Too many bulk operations. Please try again in ${formatRetryTime(resetMs)}`,
+      retryAfter: retryAfterSec,
+    });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -148,4 +179,5 @@ module.exports = {
   authLimiter,
   apiLimiter,
   resolveLimiter,
+  bulkLimiter,
 };

@@ -113,21 +113,33 @@ async function registerStudent(data, collegeId) {
     // 3. Hash password
     const hashedPassword = await hashPassword(student_password);
 
-    // 4. Insert student
-    const result = await query(
-        `INSERT INTO students
-           (college_id, first_name, middle_name, last_name, student_email, student_password,
-            dept_id, student_passout_year, student_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING student_id, first_name, middle_name, last_name, student_email,
-                   dept_id, student_passout_year, student_status,
-                   profile_complete, profile_is_approved, created_at`,
-        [
-            collegeId, first_name, middle_name, last_name, student_email,
-            hashedPassword, dept_id, student_passout_year,
-            STATUS.STUDENT.ACTIVE,
-        ]
-    );
+    // 4. Insert student (handle UNIQUE constraint race condition)
+    let result;
+    try {
+        result = await query(
+            `INSERT INTO students
+               (college_id, first_name, middle_name, last_name, student_email, student_password,
+                dept_id, student_passout_year, student_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING student_id, first_name, middle_name, last_name, student_email,
+                       dept_id, student_passout_year, student_status,
+                       profile_complete, profile_is_approved, created_at`,
+            [
+                collegeId, first_name, middle_name, last_name, student_email,
+                hashedPassword, dept_id, student_passout_year,
+                STATUS.STUDENT.ACTIVE,
+            ]
+        );
+    } catch (err) {
+        // Handle concurrent duplicate email (UNIQUE constraint violation)
+        if (err.code === '23505') {
+            throw Object.assign(
+                new Error('A student with this email already exists in your college'),
+                { status: 409 }
+            );
+        }
+        throw err;
+    }
 
     const student = result.rows[0];
 
@@ -142,6 +154,107 @@ async function registerStudent(data, collegeId) {
         ...student,
         dept_name,
     };
+}
+
+// ============================================================================
+// HELPER — Validate a single student row for bulk registration
+// ============================================================================
+
+/**
+ * Validate one student row: check department + email uniqueness.
+ * Mutates results (increments failed, pushes errors) and existingEmails (adds email).
+ *
+ * @returns {Object|null} Valid student object or null if validation failed
+ */
+function validateBulkRow(s, rowIndex, deptMap, existingEmails, results) {
+    const deptId = deptMap.get(s.dept_name.toLowerCase());
+    if (!deptId) {
+        results.failed++;
+        results.errors.push({
+            row: rowIndex, first_name: s.first_name, last_name: s.last_name,
+            student_email: s.student_email, error: `Department "${s.dept_name}" not found or inactive`,
+        });
+        return null;
+    }
+
+    if (existingEmails.has(s.student_email.toLowerCase())) {
+        results.failed++;
+        results.errors.push({
+            row: rowIndex, first_name: s.first_name, last_name: s.last_name,
+            student_email: s.student_email, error: `Email "${s.student_email}" already exists`,
+        });
+        return null;
+    }
+
+    // Track within-batch duplicates
+    existingEmails.add(s.student_email.toLowerCase());
+
+    const rawPassword = generateDefaultPassword(s.first_name, s.student_passout_year);
+    return { ...s, deptId, rawPassword, rowIndex };
+}
+
+/**
+ * Hash passwords in batches of 5 to avoid event loop starvation.
+ */
+async function hashPasswordsBatch(validStudents) {
+    const CONCURRENCY = 5;
+    const hashed = new Array(validStudents.length);
+    for (let i = 0; i < validStudents.length; i += CONCURRENCY) {
+        const chunk = validStudents.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(chunk.map((v) => hashPassword(v.rawPassword)));
+        for (let j = 0; j < batchResults.length; j++) {
+            hashed[i + j] = batchResults[j];
+        }
+    }
+    return hashed;
+}
+
+/**
+ * Insert a single student row within a transaction savepoint.
+ * On failure: rolls back to savepoint and records the error.
+ */
+async function insertBulkRow(client, collegeId, v, hashedPassword, savepointName, results) {
+    try {
+        await client.query(`SAVEPOINT ${savepointName}`);
+        const result = await client.query(
+            `INSERT INTO students
+               (college_id, first_name, middle_name, last_name, student_email, student_password,
+                dept_id, student_passout_year, student_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING student_id, first_name, last_name, student_email, dept_id,
+                       student_passout_year, student_status, created_at`,
+            [
+                collegeId, v.first_name, v.middle_name || null, v.last_name,
+                v.student_email, hashedPassword, v.deptId,
+                v.student_passout_year, STATUS.STUDENT.ACTIVE,
+            ]
+        );
+
+        results.successful++;
+        results.registered.push({
+            row: v.rowIndex,
+            student_id: result.rows[0].student_id,
+            first_name: v.first_name,
+            last_name: v.last_name,
+            student_email: v.student_email,
+            dept_name: v.dept_name,
+            default_password: v.rawPassword,
+        });
+    } catch (err) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+        results.failed++;
+        // Friendly message for duplicate email (concurrent batch race condition)
+        const errorMsg = err.code === '23505'
+            ? `Email "${v.student_email}" already exists`
+            : err.message;
+        results.errors.push({
+            row: v.rowIndex, first_name: v.first_name, last_name: v.last_name,
+            student_email: v.student_email, error: errorMsg,
+        });
+        logger.warn(`${LOG.AUTH} Bulk register row ${v.rowIndex} failed`, {
+            email: v.student_email, error: err.message,
+        });
+    }
 }
 
 // ============================================================================
@@ -197,43 +310,12 @@ async function bulkRegisterStudents(students, collegeId) {
     // Phase 1: Pre-validate all rows and collect valid students
     const validStudents = [];
     for (let i = 0; i < students.length; i++) {
-        const s = students[i];
-        const rowIndex = i + 1;
-
-        const deptId = deptMap.get(s.dept_name.toLowerCase());
-        if (!deptId) {
-            results.failed++;
-            results.errors.push({
-                row: rowIndex, first_name: s.first_name, last_name: s.last_name,
-                student_email: s.student_email, error: `Department "${s.dept_name}" not found or inactive`,
-            });
-            continue;
-        }
-
-        if (existingEmails.has(s.student_email.toLowerCase())) {
-            results.failed++;
-            results.errors.push({
-                row: rowIndex, first_name: s.first_name, last_name: s.last_name,
-                student_email: s.student_email, error: `Email "${s.student_email}" already exists`,
-            });
-            continue;
-        }
-
-        // Track within-batch duplicates
-        existingEmails.add(s.student_email.toLowerCase());
-
-        const rawPassword = generateDefaultPassword(s.first_name, s.student_passout_year);
-        validStudents.push({ ...s, deptId, rawPassword, rowIndex });
+        const valid = validateBulkRow(students[i], i + 1, deptMap, existingEmails, results);
+        if (valid) validStudents.push(valid);
     }
 
     // Phase 2: Batch hash passwords (5 concurrent to avoid event loop starvation)
-    const HASH_CONCURRENCY = 5;
-    const hashedPasswords = new Array(validStudents.length);
-    for (let i = 0; i < validStudents.length; i += HASH_CONCURRENCY) {
-        const chunk = validStudents.slice(i, i + HASH_CONCURRENCY);
-        const hashes = await Promise.all(chunk.map((v) => hashPassword(v.rawPassword)));
-        hashes.forEach((h, j) => { hashedPasswords[i + j] = h; });
-    }
+    const hashedPasswords = await hashPasswordsBatch(validStudents);
 
     // Phase 3: Insert using a single connection + transaction with savepoints
     if (validStudents.length > 0) {
@@ -242,45 +324,7 @@ async function bulkRegisterStudents(students, collegeId) {
             await client.query('BEGIN');
 
             for (let i = 0; i < validStudents.length; i++) {
-                const v = validStudents[i];
-                const savepointName = `sp_${i}`;
-                try {
-                    await client.query(`SAVEPOINT ${savepointName}`);
-                    const result = await client.query(
-                        `INSERT INTO students
-                           (college_id, first_name, middle_name, last_name, student_email, student_password,
-                            dept_id, student_passout_year, student_status)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                         RETURNING student_id, first_name, last_name, student_email, dept_id,
-                                   student_passout_year, student_status, created_at`,
-                        [
-                            collegeId, v.first_name, v.middle_name || null, v.last_name,
-                            v.student_email, hashedPasswords[i], v.deptId,
-                            v.student_passout_year, STATUS.STUDENT.ACTIVE,
-                        ]
-                    );
-
-                    results.successful++;
-                    results.registered.push({
-                        row: v.rowIndex,
-                        student_id: result.rows[0].student_id,
-                        first_name: v.first_name,
-                        last_name: v.last_name,
-                        student_email: v.student_email,
-                        dept_name: v.dept_name,
-                        default_password: v.rawPassword,
-                    });
-                } catch (err) {
-                    await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-                    results.failed++;
-                    results.errors.push({
-                        row: v.rowIndex, first_name: v.first_name, last_name: v.last_name,
-                        student_email: v.student_email, error: err.message,
-                    });
-                    logger.warn(`${LOG.AUTH} Bulk register row ${v.rowIndex} failed`, {
-                        email: v.student_email, error: err.message,
-                    });
-                }
+                await insertBulkRow(client, collegeId, validStudents[i], hashedPasswords[i], `sp_${i}`, results);
             }
 
             await client.query('COMMIT');
@@ -798,7 +842,7 @@ async function toggleStudentStatus(studentId, collegeId, newStatus) {
         newStatus,
     });
 
-    return result.rows[0];
+    return { ...result.rows[0], _previousStatus: existing.rows[0].student_status };
 }
 
 // ============================================================================
@@ -816,34 +860,35 @@ async function toggleStudentStatus(studentId, collegeId, newStatus) {
  * @returns {Object} Updated student
  */
 async function approveStudentProfile(studentId, collegeId, userId, action, rejectionReason) {
-    // 1. Verify exists
-    const existing = await query(
-        `SELECT student_id, profile_is_approved, profile_complete FROM students
-         WHERE student_id = $1 AND college_id = $2
-         LIMIT 1`,
-        [studentId, collegeId]
-    );
-
-    if (!existing.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
-    }
-
-    // 2. If approving, check profile is complete first
-    if (action === STATUS.VERIFICATION.APPROVED && !existing.rows[0].profile_complete) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.PROFILE_INCOMPLETE_CANNOT_APPROVE),
-            { status: 400 }
-        );
-    }
-
     const isApproved = action === STATUS.VERIFICATION.APPROVED;
 
-    // 3. Use transaction when approving (need to auto-approve pending items)
-    if (isApproved) {
-        const client = await getClient();
-        try {
-            await client.query('BEGIN');
+    // Use transaction for all operations (approval + rejection)
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
+        // 1. Verify exists with row-level lock to prevent concurrent TPO race
+        const existing = await client.query(
+            `SELECT student_id, profile_is_approved, profile_approval_status, profile_complete FROM students
+             WHERE student_id = $1 AND college_id = $2
+             LIMIT 1 FOR UPDATE`,
+            [studentId, collegeId]
+        );
+
+        if (!existing.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
+        }
+
+        // 2. If approving, check profile is complete first
+        if (isApproved && !existing.rows[0].profile_complete) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.PROFILE_INCOMPLETE_CANNOT_APPROVE),
+                { status: 400 }
+            );
+        }
+
+    // 3. Approval path
+    if (isApproved) {
             // 3a. Update student profile
             const result = await client.query(
                 `UPDATE students
@@ -904,35 +949,38 @@ async function approveStudentProfile(studentId, collegeId, userId, action, rejec
             return {
                 ...result.rows[0],
                 auto_approved: autoApproved,
+                _previousApprovalStatus: existing.rows[0].profile_approval_status || 'pending',
             };
+    } else {
+            // 4. Rejection path — within same transaction (row already locked)
+            const result = await client.query(
+                `UPDATE students
+                 SET profile_is_approved = $1,
+                     profile_approval_status = $2,
+                     approved_by = $3,
+                     approved_at = approved_at,
+                     profile_rejection_reason = $4,
+                     rejected_at = NOW(),
+                     updated_at = NOW()
+                 WHERE student_id = $5 AND college_id = $6
+                 RETURNING student_id, first_name, last_name, student_email,
+                           profile_complete, profile_is_approved, profile_approval_status,
+                           approved_by, approved_at, profile_rejection_reason, rejected_at, updated_at`,
+                [false, STATUS.VERIFICATION.REJECTED, userId, rejectionReason || null, studentId, collegeId]
+            );
+
+            await client.query('COMMIT');
+
+            logger.info(`${LOG.AUTH} Student profile rejected`, { studentId, collegeId, userId });
+
+            return { ...result.rows[0], _previousApprovalStatus: existing.rows[0].profile_approval_status || 'pending' };
+    }
         } catch (err) {
             await client.query('ROLLBACK');
             throw err;
         } finally {
             client.release();
         }
-    }
-
-    // 4. Rejection — no transaction needed, only update student table
-    const result = await query(
-        `UPDATE students
-         SET profile_is_approved = $1,
-             profile_approval_status = $2,
-             approved_by = $3,
-             approved_at = approved_at,
-             profile_rejection_reason = $4,
-             rejected_at = NOW(),
-             updated_at = NOW()
-         WHERE student_id = $5 AND college_id = $6
-         RETURNING student_id, first_name, last_name, student_email,
-                   profile_complete, profile_is_approved, profile_approval_status,
-                   approved_by, approved_at, profile_rejection_reason, rejected_at, updated_at`,
-        [false, STATUS.VERIFICATION.REJECTED, userId, rejectionReason || null, studentId, collegeId]
-    );
-
-    logger.info(`${LOG.AUTH} Student profile rejected`, { studentId, collegeId, userId });
-
-    return result.rows[0];
 }
 
 // ============================================================================

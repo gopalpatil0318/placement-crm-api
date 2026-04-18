@@ -14,7 +14,16 @@
 const skillService = require('../../services/student/skill.service');
 const { sendSuccess } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
-const { SUCCESS_MESSAGES, LOG, HTTP_STATUS } = require('../../config/constants');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
+const {
+    SUCCESS_MESSAGES,
+    LOG,
+    HTTP_STATUS,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
+    SKILL_CATEGORY_LABELS,
+} = require('../../config/constants');
 
 // ============================================================================
 // 1. ADD SKILL (to master catalog — student or college user)
@@ -39,6 +48,26 @@ async function addSkill(req, res) {
     logger.info(`${LOG.API_END} POST /api/student/add_skill`, {
         skill_id: result.skill_id,
         duration_ms: duration,
+    });
+
+    // Audit: skill added to catalog
+    const categoryLabel = SKILL_CATEGORY_LABELS[result.skill_category] || result.skill_category;
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.CREATE,
+        resourceType: AUDIT_RESOURCE_TYPES.SKILL,
+        resourceId: result.skill_id,
+        summary: `Added skill "${result.skill_name}" in category "${categoryLabel}" (via student portal)`,
+        newValue: {
+            skill_name: result.skill_name,
+            skill_category: result.skill_category,
+            category_label: categoryLabel,
+        },
+        metadata: { skill_name: result.skill_name, added_by: req.user.role },
+        ipAddress: getClientIp(req),
     });
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.SKILL_CREATED, HTTP_STATUS.CREATED);

@@ -39,7 +39,7 @@ async function loginStudent(email, password) {
            s.student_email, s.student_password, s.student_status,
            s.college_id, s.dept_id, s.student_passout_year,
            s.profile_complete, s.profile_is_approved,
-           c.college_name, c.college_status, c.default_academic_year,
+           c.college_name, c.college_status,
            d.dept_name
          FROM students s
          JOIN colleges c ON s.college_id = c.college_id
@@ -122,7 +122,6 @@ async function loginStudent(email, password) {
             student_status: student.student_status,
             profile_complete: student.profile_complete,
             profile_is_approved: student.profile_is_approved,
-            default_academic_year: student.default_academic_year,
         },
     };
 }

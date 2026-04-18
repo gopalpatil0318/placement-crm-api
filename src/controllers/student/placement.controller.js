@@ -5,7 +5,8 @@
  * Endpoints:
  *   GET   /api/student/get_my_placements                  — List own placement offers
  *   PATCH /api/student/accept_placement/:placementId      — Accept offer
- *   PATCH /api/student/reject_placement/:placementId      — Reject offer
+ *   PATCH /api/student/decline_placement/:placementId     — Decline offer
+ *   PATCH /api/student/reject_placement/:placementId      — (alias for decline)
  * ============================================================================
  */
 
@@ -69,19 +70,19 @@ async function acceptPlacement(req, res) {
 }
 
 // ============================================================================
-// 3. REJECT PLACEMENT
+// 3. DECLINE PLACEMENT
 // ============================================================================
 
-async function rejectPlacement(req, res) {
+async function declinePlacement(req, res) {
     const startTime = Date.now();
     const { placementId } = req.params;
 
-    logger.info(`${LOG.API_START} PATCH /api/student/reject_placement/${placementId}`, {
+    logger.info(`${LOG.API_START} PATCH /api/student/decline_placement/${placementId}`, {
         student_id: req.user.id,
         college_id: req.user.college_id,
     });
 
-    const result = await placementService.rejectPlacement(
+    const result = await placementService.declinePlacement(
         placementId,
         req.user.id,
         req.user.college_id,
@@ -90,12 +91,29 @@ async function rejectPlacement(req, res) {
 
     const duration = Date.now() - startTime;
 
-    logger.info(`${LOG.API_END} PATCH /api/student/reject_placement/${placementId}`, {
+    logger.info(`${LOG.API_END} PATCH /api/student/decline_placement/${placementId}`, {
         student_id: req.user.id,
         duration_ms: duration,
     });
 
-    return sendSuccess(res, result, SUCCESS_MESSAGES.OFFER_REJECTED);
+    return sendSuccess(res, result, SUCCESS_MESSAGES.OFFER_DECLINED_SUCCESS);
+}
+
+// ============================================================================
+// 4. UPLOAD PLACEMENT DOCUMENTS
+// ============================================================================
+
+async function uploadDocuments(req, res) {
+    const { placementId } = req.params;
+
+    const result = await placementService.uploadDocuments(
+        placementId,
+        req.user.id,
+        req.user.college_id,
+        req.validated
+    );
+
+    return sendSuccess(res, result, SUCCESS_MESSAGES.DOCUMENTS_UPLOADED);
 }
 
 // ============================================================================
@@ -105,5 +123,8 @@ async function rejectPlacement(req, res) {
 module.exports = {
     getMyPlacements,
     acceptPlacement,
-    rejectPlacement,
+    declinePlacement,
+    uploadDocuments,
+    // Backward-compatible alias
+    rejectPlacement: declinePlacement,
 };

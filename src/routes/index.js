@@ -32,6 +32,8 @@ const collegeApplicationRoutes = require('./college/application.routes');
 const collegeRoundResultRoutes = require('./college/roundResult.routes');
 const collegePlacementRoutes = require('./college/placement.routes');
 const collegePlacementPolicyRoutes = require('./college/placementPolicy.routes');
+const collegeCompanyTierRoutes = require('./college/companyTier.routes');
+const collegePlacementSettingsRoutes = require('./college/placementSettings.routes');
 const collegeEligibleDenialRoutes = require('./college/eligibleDenial.routes');
 const collegeTrainingRoutes = require('./college/training.routes');
 const collegeNotificationRoutes = require('./college/notification.routes');
@@ -39,8 +41,11 @@ const collegeFeedbackRoutes = require('./college/feedback.routes');
 const collegeSkillRoutes = require('./college/skill.routes');
 const collegeDashboardRoutes = require('./college/dashboard.routes');
 const collegeVerificationRoutes = require('./college/verification.routes');
+const collegeVerificationSettingsRoutes = require('./college/verificationSettings.routes');
 const collegeJobOverrideRoutes = require('./college/jobOverride.routes');
 const collegeResolveRoutes = require('./college/resolve.routes');
+const collegeRoundProcessingRoutes = require('./college/roundProcessing.routes');
+const collegeAuditRoutes = require('./college/audit.routes');
 
 // Route groups — Student
 const studentAuthRoutes = require('./student/auth.routes');
@@ -63,9 +68,15 @@ const studentNotificationRoutes = require('./student/notification.routes');
 const studentFeedbackRoutes = require('./student/feedback.routes');
 const studentJobOverrideRoutes = require('./student/jobOverride.routes');
 
+// Route groups — Shared Auth
+const authRoutes = require('./auth.routes');
+
 // ============================================================================
 // MOUNT ROUTES
 // ============================================================================
+
+// Shared auth (token refresh) — no role-specific prefix
+router.use('/auth', authRoutes);
 
 router.use('/sysadmin', sysadminRoutes);
 
@@ -88,6 +99,8 @@ router.use('/college', collegeApplicationRoutes);
 router.use('/college', collegeRoundResultRoutes);
 router.use('/college', collegePlacementRoutes);
 router.use('/college', collegePlacementPolicyRoutes);
+router.use('/college', collegeCompanyTierRoutes);
+router.use('/college', collegePlacementSettingsRoutes);
 router.use('/college', collegeEligibleDenialRoutes);
 router.use('/college', collegeTrainingRoutes);
 router.use('/college', collegeNotificationRoutes);
@@ -95,7 +108,10 @@ router.use('/college', collegeFeedbackRoutes);
 router.use('/college', collegeSkillRoutes);
 router.use('/college', collegeDashboardRoutes);
 router.use('/college', collegeVerificationRoutes);
+router.use('/college', collegeVerificationSettingsRoutes);
 router.use('/college', collegeJobOverrideRoutes);
+router.use('/college', collegeRoundProcessingRoutes);
+router.use('/college', collegeAuditRoutes);
 router.use('/student', studentAuthRoutes);
 router.use('/student', studentProfileRoutes);
 router.use('/student', studentPersonalRoutes);

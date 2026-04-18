@@ -20,7 +20,9 @@
 
 const verificationService = require('../../services/college/verification.service');
 const { sendSuccess, sendPaginated } = require('../../utils/responseHelper');
-const { SUCCESS_MESSAGES, STATUS } = require('../../config/constants');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
+const { SUCCESS_MESSAGES, STATUS, AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // 1. GET PENDING VERIFICATION COUNTS
@@ -28,7 +30,8 @@ const { SUCCESS_MESSAGES, STATUS } = require('../../config/constants');
 
 async function getPendingVerificationCounts(req, res) {
     const result = await verificationService.getPendingVerificationCounts(
-        req.user.college_id
+        req.user.college_id,
+        req.validated || {}
     );
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.FETCHED_SUCCESSFULLY);
@@ -101,6 +104,19 @@ async function verifyStudentProfile(req, res) {
         rejection_reason
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: req.params.studentId,
+        summary: `${action === STATUS.VERIFICATION.APPROVED ? 'Approved' : 'Rejected'} student profile verification`,
+        newValue: { action, rejection_reason: rejection_reason ?? null },
+        ipAddress: getClientIp(req),
+    });
+
     const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.STUDENT_PROFILE_APPROVED
         : SUCCESS_MESSAGES.STUDENT_PROFILE_REJECTED;
@@ -122,6 +138,20 @@ async function verifyExperience(req, res) {
         action,
         rejection_reason
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: result.student_id,
+        summary: `${action === STATUS.VERIFICATION.APPROVED ? 'Approved' : 'Rejected'} experience verification — ${result.student_first_name} ${result.student_last_name} (${result.company_name}, ${result.position_title})`,
+        newValue: { action, rejection_reason: rejection_reason ?? null },
+        metadata: { verificationType: 'experience', experienceId: req.params.experienceId },
+        ipAddress: getClientIp(req),
+    });
 
     const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.VERIFICATION_APPROVED
@@ -145,6 +175,20 @@ async function verifyAchievement(req, res) {
         rejection_reason
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: result.student_id,
+        summary: `${action === STATUS.VERIFICATION.APPROVED ? 'Approved' : 'Rejected'} achievement verification — ${result.student_first_name} ${result.student_last_name} (${result.achievement_title})`,
+        newValue: { action, rejection_reason: rejection_reason ?? null },
+        metadata: { verificationType: 'achievement', achievementId: req.params.achievementId },
+        ipAddress: getClientIp(req),
+    });
+
     const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.VERIFICATION_APPROVED
         : SUCCESS_MESSAGES.VERIFICATION_REJECTED;
@@ -167,6 +211,20 @@ async function verifyCertificate(req, res) {
         rejection_reason
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: result.student_id,
+        summary: `${action === STATUS.VERIFICATION.APPROVED ? 'Approved' : 'Rejected'} certificate verification — ${result.student_first_name} ${result.student_last_name} (${result.certificate_name})`,
+        newValue: { action, rejection_reason: rejection_reason ?? null },
+        metadata: { verificationType: 'certificate', certificateId: req.params.certificateId },
+        ipAddress: getClientIp(req),
+    });
+
     const message = action === STATUS.VERIFICATION.APPROVED
         ? SUCCESS_MESSAGES.VERIFICATION_APPROVED
         : SUCCESS_MESSAGES.VERIFICATION_REJECTED;
@@ -185,6 +243,18 @@ async function bulkVerifyProfiles(req, res) {
         ids, req.user.college_id, req.user.id, action, rejection_reason
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.BULK_UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        summary: `Bulk ${action} ${ids.length} student profiles`,
+        metadata: { count: ids.length, action, verificationType: 'profile' },
+        ipAddress: getClientIp(req),
+    });
+
     return sendSuccess(res, result, SUCCESS_MESSAGES.BULK_VERIFICATION_COMPLETED);
 }
 
@@ -198,6 +268,18 @@ async function bulkVerifyExperiences(req, res) {
     const result = await verificationService.bulkVerifyExperiences(
         ids, req.user.college_id, req.user.id, action, rejection_reason
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.BULK_UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        summary: `Bulk ${action} ${ids.length} experiences`,
+        metadata: { count: ids.length, action, verificationType: 'experience' },
+        ipAddress: getClientIp(req),
+    });
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.BULK_VERIFICATION_COMPLETED);
 }
@@ -213,6 +295,18 @@ async function bulkVerifyAchievements(req, res) {
         ids, req.user.college_id, req.user.id, action, rejection_reason
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.BULK_UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        summary: `Bulk ${action} ${ids.length} achievements`,
+        metadata: { count: ids.length, action, verificationType: 'achievement' },
+        ipAddress: getClientIp(req),
+    });
+
     return sendSuccess(res, result, SUCCESS_MESSAGES.BULK_VERIFICATION_COMPLETED);
 }
 
@@ -226,6 +320,18 @@ async function bulkVerifyCertificates(req, res) {
     const result = await verificationService.bulkVerifyCertificates(
         ids, req.user.college_id, req.user.id, action, rejection_reason
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.BULK_UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        summary: `Bulk ${action} ${ids.length} certificates`,
+        metadata: { count: ids.length, action, verificationType: 'certificate' },
+        ipAddress: getClientIp(req),
+    });
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.BULK_VERIFICATION_COMPLETED);
 }

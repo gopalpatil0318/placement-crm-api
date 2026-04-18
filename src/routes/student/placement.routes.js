@@ -7,7 +7,8 @@
  * Endpoints:
  *   GET   /get_my_placements                    authenticate + validate(query)
  *   PATCH /accept_placement/:placementId        authenticate + apiLimiter
- *   PATCH /reject_placement/:placementId        authenticate + apiLimiter + validate
+ *   PATCH /decline_placement/:placementId       authenticate + apiLimiter + validate
+ *   PATCH /reject_placement/:placementId        (alias — backward-compat)
  * ============================================================================
  */
 
@@ -24,6 +25,7 @@ const {
     listMyPlacementsSchema,
     rejectPlacementSchema,
     placementIdParamSchema,
+    uploadDocumentsSchema,
 } = require('../../validators/student/placement.validator');
 
 // ============================================================================
@@ -49,13 +51,31 @@ router.patch(
     asyncHandler(controller.acceptPlacement)
 );
 
-// Reject a placement offer
+// Decline a placement offer (primary endpoint)
+router.patch(
+    '/decline_placement/:placementId',
+    authenticate,
+    validate(placementIdParamSchema, 'params'),
+    validate(rejectPlacementSchema),
+    asyncHandler(controller.declinePlacement)
+);
+
+// Reject a placement offer (backward-compatible alias)
 router.patch(
     '/reject_placement/:placementId',
     authenticate,
     validate(placementIdParamSchema, 'params'),
     validate(rejectPlacementSchema),
     asyncHandler(controller.rejectPlacement)
+);
+
+// Upload placement documents (offer letter / joining letter URL)
+router.patch(
+    '/upload_placement_documents/:placementId',
+    authenticate,
+    validate(placementIdParamSchema, 'params'),
+    validate(uploadDocumentsSchema),
+    asyncHandler(controller.uploadDocuments)
 );
 
 module.exports = router;

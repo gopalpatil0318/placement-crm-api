@@ -48,6 +48,7 @@ async function queryUserByRole(pool, userId, role) {
       logger.debug(`${LOG.AUTH} Sysadmin token verified`, { userId });
       return {
         id: userId,
+        user_name: 'System Admin',
         user_status: STATUS.ACTIVE,
         college_id: null,
         user_role: ROLES.SYSADMIN,
@@ -62,6 +63,7 @@ async function queryUserByRole(pool, userId, role) {
       const { rows } = await pool.query(
         `SELECT
            s.student_id  AS id,
+           s.first_name || ' ' || s.last_name AS user_name,
            s.student_status AS user_status,
            s.college_id,
            s.dept_id,
@@ -82,6 +84,7 @@ async function queryUserByRole(pool, userId, role) {
     const { rows } = await pool.query(
       `SELECT
          u.user_id     AS id,
+         u.user_name,
          u.user_status,
          u.college_id,
          u.dept_id,
@@ -162,6 +165,7 @@ async function authenticate(req, res, next) {
     // 6. Attach user to request
     req.user = {
       id: dbUser.id,
+      name: dbUser.user_name || 'Unknown',
       role: dbUser.user_role || payload.role,
       college_id: dbUser.college_id,
       dept_id: dbUser.dept_id || null,

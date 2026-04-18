@@ -14,6 +14,7 @@
 const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG, ERROR_MESSAGES } = require('../../config/constants');
+const { maybeResetApproval } = require('../../utils/approvalResetHelper');
 
 // All upsertable columns
 const LINK_FIELDS = [
@@ -76,13 +77,8 @@ async function saveProfileLinks(studentId, collegeId, data) {
             is_new: isNew,
         });
 
-        // 4. Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // 4. Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'profile_links');
 
         await client.query('COMMIT');
 

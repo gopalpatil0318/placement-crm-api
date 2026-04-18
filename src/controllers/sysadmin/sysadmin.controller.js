@@ -21,7 +21,9 @@ const { getPagination } = require('../../utils/pagination');
 const { SUCCESS_MESSAGES } = require('../../config/constants');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
-const { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS } = require('../../config/cookie');
+const { CLEAR_COOKIE_OPTIONS, CLEAR_REFRESH_COOKIE_OPTIONS } = require('../../config/cookie');
+const { issueTokenPair } = require('../auth.controller');
+const { hashRefreshToken, findRefreshToken, revokeRefreshToken } = require('../../utils/jwtHelper');
 
 // ============================================================================
 // 1. POST /api/sysadmin/login
@@ -32,8 +34,13 @@ async function login(req, res) {
 
     const result = await sysadminService.loginSysadmin(email, password);
 
-    // Set token in HttpOnly cookie — NOT in JSON body
-    res.cookie('token', result.token, COOKIE_OPTIONS);
+    // B21: Issue access + refresh token pair
+    await issueTokenPair(
+        res,
+        { id: 'sysadmin', role: result.role, email: result.email },
+        'sysadmin',
+        'sysadmin'
+    );
 
     return sendSuccess(res, {
         role: result.role,
@@ -47,7 +54,18 @@ async function login(req, res) {
 // ============================================================================
 
 async function logout(req, res) {
+    // B21: Revoke refresh token if present
+    const rawRefreshToken = req.cookies?.refresh_token;
+    if (rawRefreshToken) {
+        const tokenHash = hashRefreshToken(rawRefreshToken);
+        const stored = await findRefreshToken(tokenHash);
+        if (stored) {
+            await revokeRefreshToken(stored.token_id);
+        }
+    }
+
     res.clearCookie('token', CLEAR_COOKIE_OPTIONS);
+    res.clearCookie('refresh_token', CLEAR_REFRESH_COOKIE_OPTIONS);
 
     logger.info(`${LOG.AUTH} Sysadmin logged out`);
 

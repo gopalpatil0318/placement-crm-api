@@ -31,8 +31,8 @@ const {
     jobIdParamSchema,
 } = require('../../validators/college/job.validator');
 
-// All job routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All job routes require COLLEGEADMIN, TPO, or TPC
+router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO, ROLES.TPC), apiLimiter);
 
 // ============================================================================
 // ROUTES

@@ -97,8 +97,13 @@ const addProjectSchema = Joi.object({
         .iso()
         .optional()
         .allow(null)
+        .when('start_date', {
+            is: Joi.exist(),
+            then: Joi.date().min(Joi.ref('start_date')),
+        })
         .messages({
             'date.format': 'End date must be in YYYY-MM-DD format',
+            'date.min': 'End date must be on or after start date',
         }),
 
     is_ongoing: Joi.boolean()
@@ -145,6 +150,16 @@ const addProjectSchema = Joi.object({
         .messages({
             'boolean.base': 'is_featured must be true or false',
         }),
+}).custom((value, helpers) => {
+    // B24: end_date required when project is not ongoing
+    if (value.is_ongoing === false && !value.end_date) {
+        return helpers.error('any.custom', { message: 'End date is required when project is not ongoing' });
+    }
+    // B24: end_date cannot be in the future for completed projects
+    if (value.is_ongoing === false && value.end_date && new Date(value.end_date) > new Date()) {
+        return helpers.error('any.custom', { message: 'End date cannot be in the future for completed projects' });
+    }
+    return value;
 });
 
 // ============================================================================
@@ -225,8 +240,13 @@ const updateProjectSchema = Joi.object({
         .iso()
         .optional()
         .allow(null)
+        .when('start_date', {
+            is: Joi.exist(),
+            then: Joi.date().min(Joi.ref('start_date')),
+        })
         .messages({
             'date.format': 'End date must be in YYYY-MM-DD format',
+            'date.min': 'End date must be on or after start date',
         }),
 
     is_ongoing: Joi.boolean()
@@ -270,7 +290,17 @@ const updateProjectSchema = Joi.object({
         .messages({
             'boolean.base': 'is_featured must be true or false',
         }),
-}).min(1).messages({
+}).min(1).custom((value, helpers) => {
+    // B24: end_date required when project is not ongoing (only if is_ongoing was provided)
+    if (value.is_ongoing === false && value.end_date === null) {
+        return helpers.error('any.custom', { message: 'End date is required when project is not ongoing' });
+    }
+    // B24: end_date cannot be in the future for completed projects
+    if (value.is_ongoing === false && value.end_date && new Date(value.end_date) > new Date()) {
+        return helpers.error('any.custom', { message: 'End date cannot be in the future for completed projects' });
+    }
+    return value;
+}).messages({
     'object.min': 'At least one field must be provided to update',
 });
 

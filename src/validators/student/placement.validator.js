@@ -18,7 +18,7 @@ const Joi = require('joi');
 const listMyPlacementsSchema = Joi.object({
     // Filters
     placement_status: Joi.string()
-        .valid('offered', 'accepted', 'rejected', 'joined', 'cancelled')
+        .valid('offered', 'accepted', 'declined', 'revoked', 'expired', 'joined', 'cancelled')
         .optional(),
     placement_type: Joi.string()
         .valid('full-time', 'internship', 'both')
@@ -35,7 +35,7 @@ const listMyPlacementsSchema = Joi.object({
     sort_order: Joi.string().valid('asc', 'desc').optional().default('desc'),
 
     // Pagination
-    page: Joi.number().integer().min(1).optional().default(1),
+    page: Joi.number().integer().min(1).max(10000).optional().default(1),
     limit: Joi.number().integer().min(1).max(100).optional().default(10),
 });
 
@@ -44,7 +44,9 @@ const listMyPlacementsSchema = Joi.object({
 // ============================================================================
 
 const rejectPlacementSchema = Joi.object({
-    rejection_reason: Joi.string().min(3).max(1000).required().messages({
+    rejection_reason: Joi.string().min(3).max(1000)
+        .custom((v) => typeof v === 'string' ? v.replaceAll(/<[^>]*>/g, '') : v)
+        .required().messages({
         'string.empty': 'Rejection reason is required',
         'string.min': 'Rejection reason must be at least 3 characters',
         'any.required': 'Rejection reason is required',
@@ -63,6 +65,17 @@ const placementIdParamSchema = Joi.object({
 });
 
 // ============================================================================
+// PATCH /upload_placement_documents/:placementId — Body
+// ============================================================================
+
+const uploadDocumentsSchema = Joi.object({
+    offer_letter_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).optional().allow(null, ''),
+    joining_letter_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).optional().allow(null, ''),
+}).or('offer_letter_url', 'joining_letter_url').messages({
+    'object.missing': 'Provide at least one document URL (offer_letter_url or joining_letter_url)',
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -70,4 +83,5 @@ module.exports = {
     listMyPlacementsSchema,
     rejectPlacementSchema,
     placementIdParamSchema,
+    uploadDocumentsSchema,
 };

@@ -12,7 +12,9 @@
 
 const departmentService = require('../../services/college/department.service');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
-const { SUCCESS_MESSAGES } = require('../../config/constants');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
+const { SUCCESS_MESSAGES, AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // 1. CREATE DEPARTMENT
@@ -23,6 +25,20 @@ async function createDepartment(req, res) {
         req.validated,
         req.user.college_id
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.CREATE,
+        resourceType: AUDIT_RESOURCE_TYPES.DEPARTMENT,
+        resourceId: result.dept_id,
+        summary: `Created department "${result.dept_name}"`,
+        newValue: result,
+        metadata: { entityName: result.dept_name },
+        ipAddress: getClientIp(req),
+    });
 
     return sendCreated(res, result, SUCCESS_MESSAGES.DEPARTMENT_CREATED);
 }
@@ -47,7 +63,8 @@ async function getAllDepartments(req, res) {
 async function getDepartment(req, res) {
     const result = await departmentService.getDepartmentById(
         req.params.deptId,
-        req.user.college_id
+        req.user.college_id,
+        req.validated || {}
     );
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.DEPARTMENT_RETRIEVED);
@@ -64,6 +81,20 @@ async function updateDepartment(req, res) {
         req.validated
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.DEPARTMENT,
+        resourceId: req.params.deptId,
+        summary: `Updated department "${result.dept_name}"`,
+        newValue: result,
+        metadata: { entityName: result.dept_name },
+        ipAddress: getClientIp(req),
+    });
+
     return sendSuccess(res, result, SUCCESS_MESSAGES.DEPARTMENT_UPDATED);
 }
 
@@ -79,6 +110,21 @@ async function toggleDepartmentStatus(req, res) {
         req.user.college_id,
         is_active
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.DEPARTMENT,
+        resourceId: req.params.deptId,
+        summary: `${is_active ? 'Activated' : 'Deactivated'} department "${result.dept_name}"`,
+        oldValue: { is_active: result._previousStatus },
+        newValue: { is_active },
+        metadata: { entityName: result.dept_name },
+        ipAddress: getClientIp(req),
+    });
 
     const message = is_active
         ? SUCCESS_MESSAGES.DEPARTMENT_ACTIVATED

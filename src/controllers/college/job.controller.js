@@ -13,10 +13,14 @@
 const jobService = require('../../services/college/job.service');
 const logger = require('../../config/logger');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
 const {
     SUCCESS_MESSAGES,
     ERROR_MESSAGES,
     HTTP_STATUS,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -30,6 +34,20 @@ async function createJob(req, res) {
             req.user.id,
             req.validated
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.CREATE,
+            resourceType: AUDIT_RESOURCE_TYPES.JOB,
+            resourceId: result.job_id,
+            summary: `Created job "${result.job_title}" at "${result.company_name}"`,
+            newValue: { job_id: result.job_id, job_title: result.job_title, company_name: result.company_name, job_status: result.job_status },
+            metadata: { entityName: result.job_title, companyName: result.company_name },
+            ipAddress: getClientIp(req),
+        });
 
         return sendCreated(res, result, SUCCESS_MESSAGES.JOB_CREATED);
     } catch (err) {
@@ -88,6 +106,20 @@ async function updateJob(req, res) {
             req.validated
         );
 
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.UPDATE,
+            resourceType: AUDIT_RESOURCE_TYPES.JOB,
+            resourceId: req.params.jobId,
+            summary: `Updated job "${result.job_title}"`,
+            newValue: result,
+            metadata: { entityName: result.job_title, companyName: result.company_name },
+            ipAddress: getClientIp(req),
+        });
+
         return sendSuccess(res, result, SUCCESS_MESSAGES.JOB_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
@@ -109,6 +141,21 @@ async function updateJobStatus(req, res) {
             req.user.college_id,
             job_status
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.STATUS_CHANGE,
+            resourceType: AUDIT_RESOURCE_TYPES.JOB,
+            resourceId: req.params.jobId,
+            summary: `Changed job "${result.job_title}" status to "${job_status}"`,
+            oldValue: { job_status: result._previousStatus },
+            newValue: { job_status },
+            metadata: { entityName: result.job_title, companyName: result.company_name },
+            ipAddress: getClientIp(req),
+        });
 
         const statusMessages = {
             published: SUCCESS_MESSAGES.JOB_PUBLISHED,

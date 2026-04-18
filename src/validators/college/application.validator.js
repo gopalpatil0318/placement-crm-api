@@ -10,8 +10,8 @@
 
 const Joi = require('joi');
 
-const APPLICATION_STATUSES = ['pending', 'under_review', 'shortlisted', 'rejected', 'selected', 'offered', 'withdrawn'];
-const ADMIN_SETTABLE_STATUSES = ['under_review', 'shortlisted', 'rejected', 'selected', 'offered'];
+const APPLICATION_STATUSES = ['pending', 'under_review', 'shortlisted', 'rejected', 'selected', 'offered', 'waitlisted', 'withdrawn', 'auto_withdrawn'];
+const ADMIN_SETTABLE_STATUSES = ['under_review', 'shortlisted', 'rejected', 'selected', 'offered', 'waitlisted'];
 
 // ============================================================================
 // LIST APPLICATIONS (query params for filtering, sorting, pagination)
@@ -163,6 +163,50 @@ const applicationIdParamSchema = Joi.object({
 });
 
 // ============================================================================
+// SET WAITLIST — Assign waitlist ranks to applications
+// ============================================================================
+
+const setWaitlistSchema = Joi.object({
+    rankings: Joi.array()
+        .items(
+            Joi.object({
+                application_id: Joi.string().uuid().required().messages({
+                    'string.guid': 'Each application ID must be a valid UUID',
+                    'any.required': 'application_id is required',
+                }),
+                rank: Joi.number().integer().min(1).max(100).required().messages({
+                    'number.base': 'Rank must be a number',
+                    'number.min': 'Rank must be at least 1',
+                    'number.max': 'Rank cannot exceed 100',
+                    'any.required': 'Rank is required',
+                }),
+            })
+        )
+        .min(1)
+        .max(100)
+        .required()
+        .custom((value, helpers) => {
+            // Ensure no duplicate ranks
+            const ranks = value.map(v => v.rank);
+            if (new Set(ranks).size !== ranks.length) {
+                return helpers.error('any.custom', { message: 'Duplicate ranks are not allowed' });
+            }
+            // Ensure no duplicate application IDs
+            const ids = value.map(v => v.application_id);
+            if (new Set(ids).size !== ids.length) {
+                return helpers.error('any.custom', { message: 'Duplicate application IDs are not allowed' });
+            }
+            return value;
+        })
+        .messages({
+            'array.min': 'At least one ranking is required',
+            'array.max': 'Cannot waitlist more than 100 applications at once',
+            'any.required': 'rankings is required',
+            'any.custom': '{{#message}}',
+        }),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -170,6 +214,7 @@ module.exports = {
     listApplicationsSchema,
     updateAppStatusSchema,
     bulkUpdateAppStatusSchema,
+    setWaitlistSchema,
     jobIdParamSchema,
     applicationIdParamSchema,
 };

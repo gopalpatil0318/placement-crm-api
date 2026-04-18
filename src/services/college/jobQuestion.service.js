@@ -154,20 +154,32 @@ async function addQuestion(jobId, collegeId, data) {
         : null;
     const options = rawOptions ? JSON.stringify(rawOptions) : null;
 
-    // 6. Insert the question
-    const result = await query(
-        `INSERT INTO application_questions (job_id, question_text, question_type, question_options, is_required, question_order)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING ${QUESTION_RETURNING_COLUMNS}`,
-        [
-            jobId,
-            data.question_text.trim(),
-            data.question_type,
-            options,
-            data.is_required ?? true,
-            nextOrder,
-        ]
-    );
+    // 6. Insert the question (handle concurrent order conflicts)
+    let result;
+    try {
+        result = await query(
+            `INSERT INTO application_questions (job_id, question_text, question_type, question_options, is_required, question_order)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING ${QUESTION_RETURNING_COLUMNS}`,
+            [
+                jobId,
+                data.question_text.trim(),
+                data.question_type,
+                options,
+                data.is_required ?? true,
+                nextOrder,
+            ]
+        );
+    } catch (err) {
+        // B26: Handle unique constraint violation on (job_id, question_order)
+        if (err.code === '23505') {
+            throw Object.assign(
+                new Error('Question order conflict — please try again'),
+                { status: 409 }
+            );
+        }
+        throw err;
+    }
 
     logger.info(`${LOG.AUTH} Application question added`, {
         questionId: result.rows[0].question_id,
@@ -225,6 +237,43 @@ async function getJobQuestions(jobId, collegeId) {
 // ============================================================================
 
 /**
+ * Block edits to questions in cancelled or closed jobs.
+ */
+function blockIfJobInactive(jobStatus) {
+    if (jobStatus === STATUS.JOB.CANCELLED) {
+        throw Object.assign(
+            new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_CANCELLED_JOB),
+            { status: 400 }
+        );
+    }
+    if (jobStatus === STATUS.JOB.CLOSED) {
+        throw Object.assign(
+            new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_CLOSED_JOB),
+            { status: 400 }
+        );
+    }
+}
+
+/**
+ * Handle MCQ type-change logic: require options when switching TO MCQ,
+ * auto-clear options when switching FROM MCQ.
+ */
+function handleTypeChangeOptions(data, existingType) {
+    const effectiveType = data.question_type ?? existingType;
+
+    if (MCQ_TYPES.includes(effectiveType)) {
+        if (data.question_type && !data.question_options && !MCQ_TYPES.includes(existingType)) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.MCQ_OPTIONS_REQUIRED),
+                { status: 400 }
+            );
+        }
+    } else if (data.question_type && MCQ_TYPES.includes(existingType)) {
+        data.question_options = null;
+    }
+}
+
+/**
  * Update an application question.
  * Cannot edit questions in cancelled or closed jobs.
  * Cannot edit questions in published jobs that have applications.
@@ -241,19 +290,7 @@ async function updateQuestion(questionId, collegeId, data) {
     const existing = await verifyQuestion(questionId, collegeId);
 
     // 2. Cannot edit in cancelled or closed jobs
-    if (existing.job_status === STATUS.JOB.CANCELLED) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_CANCELLED_JOB),
-            { status: 400 }
-        );
-    }
-
-    if (existing.job_status === STATUS.JOB.CLOSED) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.CANNOT_EDIT_QUESTION_CLOSED_JOB),
-            { status: 400 }
-        );
-    }
+    blockIfJobInactive(existing.job_status);
 
     // 3. If published job has applications, block edits to prevent data inconsistency
     if (existing.job_status === STATUS.JOB.PUBLISHED) {
@@ -289,22 +326,7 @@ async function updateQuestion(questionId, collegeId, data) {
     }
 
     // 5. Handle type change logic
-    const effectiveType = data.question_type ?? existing.question_type;
-
-    if (MCQ_TYPES.includes(effectiveType)) {
-        // Changing to MCQ: options must be provided
-        if (data.question_type && !data.question_options && !MCQ_TYPES.includes(existing.question_type)) {
-            throw Object.assign(
-                new Error(ERROR_MESSAGES.MCQ_OPTIONS_REQUIRED),
-                { status: 400 }
-            );
-        }
-    } else {
-        // Changing to non-MCQ: auto-clear options
-        if (data.question_type && MCQ_TYPES.includes(existing.question_type)) {
-            data.question_options = null;
-        }
-    }
+    handleTypeChangeOptions(data, existing.question_type);
 
     // 6. If reordering, validate the new order
     if (data.question_order !== undefined) {

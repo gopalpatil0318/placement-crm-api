@@ -115,8 +115,13 @@ const addExperienceSchema = Joi.object({
         .iso()
         .optional()
         .allow(null)
+        .when('start_date', {
+            is: Joi.exist(),
+            then: Joi.date().min(Joi.ref('start_date')),
+        })
         .messages({
             'date.format': 'End date must be in YYYY-MM-DD format',
+            'date.min': 'End date must be on or after start date',
         }),
 
     is_current: Joi.boolean()
@@ -166,6 +171,16 @@ const addExperienceSchema = Joi.object({
         .messages({
             'string.uri': 'Certificate URL must be a valid URL',
         }),
+}).custom((value, helpers) => {
+    // B24: end_date required when not currently working
+    if (value.is_current === false && !value.end_date) {
+        return helpers.error('any.custom', { message: 'End date is required when not currently working here' });
+    }
+    // B24: end_date cannot be in the future for past experience
+    if (value.is_current === false && value.end_date && new Date(value.end_date) > new Date()) {
+        return helpers.error('any.custom', { message: 'End date cannot be in the future for past experience' });
+    }
+    return value;
 });
 
 // ============================================================================
@@ -261,8 +276,13 @@ const updateExperienceSchema = Joi.object({
         .iso()
         .optional()
         .allow(null)
+        .when('start_date', {
+            is: Joi.exist(),
+            then: Joi.date().min(Joi.ref('start_date')),
+        })
         .messages({
             'date.format': 'End date must be in YYYY-MM-DD format',
+            'date.min': 'End date must be on or after start date',
         }),
 
     is_current: Joi.boolean()
@@ -309,7 +329,17 @@ const updateExperienceSchema = Joi.object({
         .messages({
             'string.uri': 'Certificate URL must be a valid URL',
         }),
-}).min(1).messages({
+}).min(1).custom((value, helpers) => {
+    // B24: end_date required when not currently working (only if is_current was provided)
+    if (value.is_current === false && value.end_date === null) {
+        return helpers.error('any.custom', { message: 'End date is required when not currently working here' });
+    }
+    // B24: end_date cannot be in the future for past experience
+    if (value.is_current === false && value.end_date && new Date(value.end_date) > new Date()) {
+        return helpers.error('any.custom', { message: 'End date cannot be in the future for past experience' });
+    }
+    return value;
+}).messages({
     'object.min': 'At least one field must be provided to update',
 });
 

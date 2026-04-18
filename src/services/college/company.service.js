@@ -394,6 +394,7 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
             return {
                 ...formatCompany(result.rows[0]),
                 ...(closedJobsCount > 0 && { closed_jobs_count: closedJobsCount }),
+                _previousStatus: existing.rows[0].company_status,
             };
         } catch (err) {
             await client.query('ROLLBACK');
@@ -420,7 +421,7 @@ async function toggleCompanyStatus(companyId, collegeId, newStatus) {
         collegeId,
     });
 
-    return formatCompany(result.rows[0]);
+    return { ...formatCompany(result.rows[0]), _previousStatus: existing.rows[0].company_status };
 }
 
 // ============================================================================

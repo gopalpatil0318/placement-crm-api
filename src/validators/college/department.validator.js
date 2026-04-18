@@ -155,6 +155,18 @@ const listDepartmentsSchema = Joi.object({
         .messages({
             'string.max': 'Search term cannot exceed 100 characters',
         }),
+
+    passout_year: Joi.number()
+        .integer()
+        .min(2020)
+        .max(2040)
+        .optional()
+        .messages({
+            'number.base': 'Passout year must be a number',
+            'number.integer': 'Passout year must be a whole number',
+            'number.min': 'Passout year must be at least 2020',
+            'number.max': 'Passout year cannot exceed 2040',
+        }),
 });
 
 // ============================================================================
@@ -183,6 +195,20 @@ const deptIdParamSchema = Joi.object({
         }),
 });
 
+const deptDetailQuerySchema = Joi.object({
+    passout_year: Joi.number()
+        .integer()
+        .min(2020)
+        .max(2040)
+        .optional()
+        .messages({
+            'number.base': 'Passout year must be a number',
+            'number.integer': 'Passout year must be a whole number',
+            'number.min': 'Passout year must be at least 2020',
+            'number.max': 'Passout year cannot exceed 2040',
+        }),
+});
+
 // ============================================================================
 // EXPORTS
 // ============================================================================
@@ -193,4 +219,5 @@ module.exports = {
     listDepartmentsSchema,
     toggleDepartmentSchema,
     deptIdParamSchema,
+    deptDetailQuerySchema,
 };

@@ -9,6 +9,9 @@
  *   POST /enroll_in_training/:programId                authenticate + apiLimiter
  *   GET  /get_enrolled_training                        authenticate + validate(query)
  *   POST /submit_training_feedback/:enrollmentId       authenticate + apiLimiter + validate
+ *   PATCH /withdraw_from_training/:programId             authenticate + B14.15
+ *   PUT  /update_training_feedback/:enrollmentId         authenticate + validate + B14.13
+ *   GET  /training_sessions/:programId                  authenticate + GAP-2
  * ============================================================================
  */
 
@@ -25,6 +28,7 @@ const {
     listAvailableTrainingsSchema,
     listEnrolledTrainingsSchema,
     submitFeedbackSchema,
+    updateFeedbackSchema,
     programIdParamSchema,
     enrollmentIdParamSchema,
 } = require('../../validators/student/training.validator');
@@ -66,6 +70,31 @@ router.post(
     validate(enrollmentIdParamSchema, 'params'),
     validate(submitFeedbackSchema),
     asyncHandler(controller.submitTrainingFeedback)
+);
+
+// B14.15 — Withdraw from training
+router.patch(
+    '/withdraw_from_training/:programId',
+    authenticate,
+    validate(programIdParamSchema, 'params'),
+    asyncHandler(controller.withdrawFromTraining)
+);
+
+// B14.13 — Update training feedback
+router.put(
+    '/update_training_feedback/:enrollmentId',
+    authenticate,
+    validate(enrollmentIdParamSchema, 'params'),
+    validate(updateFeedbackSchema),
+    asyncHandler(controller.updateTrainingFeedback)
+);
+
+// GAP-2 — Get my session schedule for a program
+router.get(
+    '/training_sessions/:programId',
+    authenticate,
+    validate(programIdParamSchema, 'params'),
+    asyncHandler(controller.getMySessionSchedule)
 );
 
 module.exports = router;

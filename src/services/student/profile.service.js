@@ -258,11 +258,32 @@ async function getFullProfile(studentId, collegeId) {
     const totalCertificates = certificatesResult.rows.length + vc.cert_pending + vc.cert_rejected;
 
     const completion = calculateProfileCompletion({
-        personal: personalResult.rows[0] || null,
-        academic: academicResult.rows[0] || null,
+        personal: personalResult.rows[0]
+            ? (() => {
+                const p = personalResult.rows[0];
+                const filled = [p.mobile_number, p.birth_date, p.gender, p.father_name, p.permanent_address]
+                    .filter(v => v != null && v !== "").length;
+                return filled >= 5 ? p : null;
+            })()
+            : null,
+        academic: academicResult.rows[0]
+            ? (() => {
+                const a = academicResult.rows[0];
+                const filled = [a.roll_number, a.tenth_percentage, a.overall_cgpa]
+                    .filter(v => v != null && v !== "").length;
+                return filled >= 3 ? a : null;
+            })()
+            : null,
         semesters: semesterResult.rows,
         skills: skillsResult.rows,
-        profileLinks: profileLinksResult.rows[0] || null,
+        profileLinks: profileLinksResult.rows[0]
+            ? (() => {
+                const pl = profileLinksResult.rows[0];
+                const filled = [pl.resume_url, pl.linkedin_url, pl.github_url]
+                    .filter(v => v != null && v !== "").length;
+                return filled >= 1 ? pl : null;
+            })()
+            : null,
         projects: projectsResult.rows,
         experience: totalExperiences > 0 ? [{ _total: true }] : [],
         certificates: totalCertificates > 0 ? [{ _total: true }] : [],
@@ -371,7 +392,29 @@ async function getProfileCompletion(studentId, collegeId) {
         certificates: Number.parseInt(certificatesResult.rows[0].cnt) > 0 ? [1] : [],
     });
 
-    return completion;
+    // Sync profile_complete column to match computed state (lazy update)
+    syncProfileComplete(studentId, collegeId, completion.is_complete).catch(err => {
+        logger.warn(`${LOG.DB_QUERY} Failed to sync profile_complete`, { studentId, error: err.message });
+    });
+
+    // Fetch approval status + rejection reason to include in response
+    const approvalResult = await query(
+        `SELECT profile_approval_status, profile_rejection_reason, rejected_at,
+                profile_is_approved, profile_complete
+         FROM students WHERE student_id = $1 AND college_id = $2 LIMIT 1`,
+        [studentId, collegeId]
+    );
+
+    const approval = approvalResult.rows[0] || {};
+
+    return {
+        ...completion,
+        profile_approval_status: approval.profile_approval_status || 'pending',
+        profile_rejection_reason: approval.profile_rejection_reason || null,
+        rejected_at: approval.rejected_at || null,
+        profile_is_approved: approval.profile_is_approved || false,
+        profile_complete: approval.profile_complete || false,
+    };
 }
 
 // ============================================================================
@@ -461,6 +504,42 @@ function calculateProfileCompletion(data) {
         is_complete: totalPercentage >= 100,
         sections,
     };
+}
+
+// ============================================================================
+// HELPER — Sync profile_complete DB column with computed state
+// ============================================================================
+
+async function syncProfileComplete(studentId, collegeId, isComplete) {
+    if (isComplete) {
+        // Determine if auto-approve should fire
+        let shouldAutoApprove = false;
+        try {
+            const { getVerificationSettings } = require('../college/verificationSettings.service');
+            const settings = await getVerificationSettings(collegeId);
+            shouldAutoApprove = settings?.auto_approve_profile_on_complete || settings?.bypass?.profiles || false;
+        } catch (err) {
+            logger.warn('Failed to fetch verification settings for auto-approve', { studentId, error: err.message });
+        }
+
+        // Single atomic UPDATE: set profile_complete + conditionally auto-approve
+        await query(
+            `UPDATE students
+             SET profile_complete = true,
+                 profile_is_approved = CASE WHEN $3 AND profile_approval_status != 'approved' THEN true ELSE profile_is_approved END,
+                 profile_approval_status = CASE WHEN $3 AND profile_approval_status != 'approved' THEN 'approved' ELSE profile_approval_status END,
+                 approved_at = CASE WHEN $3 AND profile_approval_status != 'approved' THEN NOW() ELSE approved_at END,
+                 updated_at = NOW()
+             WHERE student_id = $1 AND college_id = $2 AND profile_complete = false`,
+            [studentId, collegeId, shouldAutoApprove]
+        );
+    } else {
+        await query(
+            `UPDATE students SET profile_complete = false, updated_at = NOW()
+             WHERE student_id = $1 AND college_id = $2 AND profile_complete = true`,
+            [studentId, collegeId]
+        );
+    }
 }
 
 // ============================================================================

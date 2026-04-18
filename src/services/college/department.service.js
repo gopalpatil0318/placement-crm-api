@@ -106,13 +106,22 @@ async function getAllDepartments(collegeId, filters = {}) {
         paramIndex++;
     }
 
+    // Optional passout_year filter for student_count
+    const countParams = [...params]; // Save before adding passout_year (count query doesn't need it)
+    let studentJoinExtra = '';
+    if (filters.passout_year) {
+        studentJoinExtra = ` AND s.student_passout_year = $${paramIndex}`;
+        params.push(Number(filters.passout_year));
+        paramIndex++;
+    }
+
     const whereClause = conditions.join(' AND ');
 
     // Count and fetch in parallel
     const [countResult, deptResult] = await Promise.all([
         query(
             `SELECT COUNT(*) AS total FROM departments d WHERE ${whereClause}`,
-            params
+            countParams
         ),
         query(
             `SELECT d.dept_id, d.dept_name, d.dept_code, d.dept_type,
@@ -122,7 +131,7 @@ async function getAllDepartments(collegeId, filters = {}) {
                 COUNT(DISTINCT s.student_id)::int AS student_count
          FROM departments d
          LEFT JOIN users u ON d.dept_id = u.dept_id AND u.user_status = 'active'
-         LEFT JOIN students s ON d.dept_id = s.dept_id AND s.student_status = 'active'
+         LEFT JOIN students s ON d.dept_id = s.dept_id AND s.student_status = 'active'${studentJoinExtra}
          WHERE ${whereClause}
          GROUP BY d.dept_id
          ORDER BY d.dept_name ASC
@@ -152,7 +161,15 @@ async function getAllDepartments(collegeId, filters = {}) {
  * @param {string} collegeId
  * @returns {Object} Department with user and student counts
  */
-async function getDepartmentById(deptId, collegeId) {
+async function getDepartmentById(deptId, collegeId, filters = {}) {
+    let studentJoinExtra = '';
+    const params = [deptId, collegeId];
+
+    if (filters.passout_year) {
+        studentJoinExtra = ` AND s.student_passout_year = $3`;
+        params.push(Number(filters.passout_year));
+    }
+
     const result = await query(
         `SELECT d.dept_id, d.dept_name, d.dept_code, d.dept_type,
                 d.program_duration_years, d.total_semesters,
@@ -161,10 +178,10 @@ async function getDepartmentById(deptId, collegeId) {
                 COUNT(DISTINCT s.student_id)::int AS student_count
          FROM departments d
          LEFT JOIN users u ON d.dept_id = u.dept_id AND u.user_status = 'active'
-         LEFT JOIN students s ON d.dept_id = s.dept_id AND s.student_status = 'active'
+         LEFT JOIN students s ON d.dept_id = s.dept_id AND s.student_status = 'active'${studentJoinExtra}
          WHERE d.dept_id = $1 AND d.college_id = $2
          GROUP BY d.dept_id`,
-        [deptId, collegeId]
+        params
     );
 
     if (!result.rows.length) {
@@ -289,7 +306,7 @@ async function toggleDepartmentStatus(deptId, collegeId, isActive) {
     const action = isActive ? 'activated' : 'deactivated';
     logger.info(`${LOG.AUTH} Department ${action}`, { deptId, collegeId });
 
-    return result.rows[0];
+    return { ...result.rows[0], _previousStatus: existing.rows[0].is_active };
 }
 
 // ============================================================================

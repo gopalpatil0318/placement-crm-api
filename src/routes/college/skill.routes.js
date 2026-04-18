@@ -4,9 +4,10 @@
  * ============================================================================
  * Base: /api/college
  *
- * #103  POST   /create_skill       → Create skill in master list
- * #104  GET    /get_all_skills     → List skills (search, filter by category)
- * #105  DELETE /delete_skill/:skillId → Delete skill (cascade-deletes student_skills)
+ * #103  POST   /create_skill              → Create skill in master list
+ * #104  GET    /get_all_skills            → List skills (search, filter by category)
+ * #105  DELETE /delete_skill/:skillId     → Delete skill (cascade-deletes student_skills)
+ * #106  PUT    /update_skill/:skillId     → Update skill name and/or category
  * ============================================================================
  */
 
@@ -24,6 +25,7 @@ const {
     createSkillSchema,
     listSkillsSchema,
     skillIdParamSchema,
+    updateSkillSchema,
 } = require('../../validators/college/skill.validator');
 
 // All routes: authenticate + college admin/TPO + rate limit
@@ -48,6 +50,14 @@ router.delete(
     '/delete_skill/:skillId',
     validate(skillIdParamSchema, 'params'),
     asyncHandler(controller.deleteSkill)
+);
+
+// #106 — Update skill
+router.put(
+    '/update_skill/:skillId',
+    validate(skillIdParamSchema, 'params'),
+    validate(updateSkillSchema),
+    asyncHandler(controller.updateSkill)
 );
 
 module.exports = router;

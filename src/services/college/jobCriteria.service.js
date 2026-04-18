@@ -184,6 +184,103 @@ async function updateCriteria(jobId, collegeId, data) {
 }
 
 // ============================================================================
+// HELPER — Build eligibility criteria WHERE conditions
+// ============================================================================
+
+/**
+ * Appends SQL conditions from criteria fields. Returns updated paramIndex.
+ * @param {Object} criteria - The eligibility criteria record
+ * @param {string[]} conditions - Mutable conditions array
+ * @param {Array} params - Mutable params array
+ * @param {number} paramIndex - Current param index
+ * @returns {number} Updated paramIndex
+ */
+function buildCriteriaConditions(criteria, conditions, params, paramIndex) {
+    if (!criteria) return paramIndex;
+
+    // Numeric threshold filters
+    const numericFilters = [
+        { field: 'min_overall_cgpa', sql: col => `COALESCE(acad.overall_cgpa, 0) >= $${col}` },
+        { field: 'max_live_kts', sql: col => `COALESCE(acad.total_live_kts, 0) <= $${col}` },
+        { field: 'min_tenth_percentage', sql: col => `COALESCE(acad.tenth_percentage, 0) >= $${col}` },
+        { field: 'min_twelfth_percentage', sql: col => `(acad.twelfth_or_diploma != '12th' OR COALESCE(acad.twelfth_percentage, 0) >= $${col})` },
+        { field: 'min_diploma_percentage', sql: col => `(acad.twelfth_or_diploma != 'Diploma' OR COALESCE(acad.diploma_percentage, 0) >= $${col})` },
+    ];
+
+    let idx = paramIndex;
+    for (const { field, sql } of numericFilters) {
+        if (criteria[field] != null) {
+            conditions.push(sql(idx));
+            params.push(criteria[field]);
+            idx++;
+        }
+    }
+
+    // Array containment filters
+    const arrayFilters = [
+        { field: 'allowed_genders', sql: col => `pi.gender = ANY($${col})` },
+        { field: 'allowed_departments', sql: col => `d.dept_name = ANY($${col})` },
+        { field: 'allowed_gap_statuses', sql: col => `(CASE WHEN acad.any_gap_during_education = true THEN 'gap' ELSE 'no_gap' END) = ANY($${col})` },
+    ];
+
+    for (const { field, sql } of arrayFilters) {
+        if (criteria[field]?.length > 0) {
+            conditions.push(sql(idx));
+            params.push(criteria[field]);
+            idx++;
+        }
+    }
+
+    // Exclude already placed
+    if (criteria.exclude_already_placed === true) {
+        conditions.push(
+            `NOT EXISTS (
+                SELECT 1 FROM student_applications sa
+                WHERE sa.student_id = s.student_id
+                  AND sa.application_status = 'selected'
+            )`
+        );
+    }
+
+    return idx;
+}
+
+// ============================================================================
+// HELPER — Append search/filter conditions from frontend query params
+// ============================================================================
+
+function applyQueryFilters(filters, conditions, params, paramIndex) {
+    let idx = paramIndex;
+
+    if (filters.search) {
+        conditions.push(
+            `(CONCAT(s.first_name, ' ', COALESCE(s.middle_name, ''), ' ', s.last_name) ILIKE $${idx}
+              OR s.student_email ILIKE $${idx})`
+        );
+        params.push(`%${filters.search}%`);
+        idx++;
+    }
+
+    if (filters.dept_name) {
+        conditions.push(`d.dept_name ILIKE $${idx}`);
+        params.push(`%${filters.dept_name}%`);
+        idx++;
+    }
+
+    // Exclude restricted students
+    conditions.push(
+        `NOT EXISTS (
+            SELECT 1 FROM student_restrictions sr
+            WHERE sr.student_id = s.student_id
+              AND sr.is_active = true
+              AND sr.restriction_type IN ('bar_from_placements', 'temporary_suspension')
+        )`
+    );
+
+    return idx;
+}
+
+// ============================================================================
 // 3. GET ELIGIBLE STUDENTS (Dynamic WHERE — only non-null criteria apply)
 // ============================================================================
 
@@ -222,108 +319,11 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
     const params = [collegeId, STATUS.STUDENT.ACTIVE, job.passout_years];
     let paramIndex = 4;
 
-    // 4. Add criteria-based conditions ONLY if criteria exists and fields are non-null
-    if (criteria) {
-        // 4a. CGPA filter
-        if (criteria.min_overall_cgpa !== null && criteria.min_overall_cgpa !== undefined) {
-            conditions.push(`COALESCE(acad.overall_cgpa, 0) >= $${paramIndex}`);
-            params.push(criteria.min_overall_cgpa);
-            paramIndex++;
-        }
-
-        // 4b. Live KTs filter
-        if (criteria.max_live_kts !== null && criteria.max_live_kts !== undefined) {
-            conditions.push(`COALESCE(acad.total_live_kts, 0) <= $${paramIndex}`);
-            params.push(criteria.max_live_kts);
-            paramIndex++;
-        }
-
-        // 4c. 10th percentage
-        if (criteria.min_tenth_percentage !== null && criteria.min_tenth_percentage !== undefined) {
-            conditions.push(`COALESCE(acad.tenth_percentage, 0) >= $${paramIndex}`);
-            params.push(criteria.min_tenth_percentage);
-            paramIndex++;
-        }
-
-        // 4d. 12th percentage (only for students who did 12th)
-        if (criteria.min_twelfth_percentage !== null && criteria.min_twelfth_percentage !== undefined) {
-            conditions.push(
-                `(acad.twelfth_or_diploma != '12th' OR COALESCE(acad.twelfth_percentage, 0) >= $${paramIndex})`
-            );
-            params.push(criteria.min_twelfth_percentage);
-            paramIndex++;
-        }
-
-        // 4e. Diploma percentage (only for students who did Diploma)
-        if (criteria.min_diploma_percentage !== null && criteria.min_diploma_percentage !== undefined) {
-            conditions.push(
-                `(acad.twelfth_or_diploma != 'Diploma' OR COALESCE(acad.diploma_percentage, 0) >= $${paramIndex})`
-            );
-            params.push(criteria.min_diploma_percentage);
-            paramIndex++;
-        }
-
-        // 4f. Gender filter (array containment)
-        if (criteria.allowed_genders && criteria.allowed_genders.length > 0) {
-            conditions.push(`pi.gender = ANY($${paramIndex})`);
-            params.push(criteria.allowed_genders);
-            paramIndex++;
-        }
-
-        // 4g. Department filter (by name, array containment)
-        if (criteria.allowed_departments && criteria.allowed_departments.length > 0) {
-            conditions.push(`d.dept_name = ANY($${paramIndex})`);
-            params.push(criteria.allowed_departments);
-            paramIndex++;
-        }
-
-        // 4h. Gap status filter
-        if (criteria.allowed_gap_statuses && criteria.allowed_gap_statuses.length > 0) {
-            // Convert boolean gap to string comparison
-            conditions.push(
-                `(CASE WHEN acad.any_gap_during_education = true THEN 'gap' ELSE 'no_gap' END) = ANY($${paramIndex})`
-            );
-            params.push(criteria.allowed_gap_statuses);
-            paramIndex++;
-        }
-
-        // 4i. Exclude already placed students
-        if (criteria.exclude_already_placed === true) {
-            conditions.push(
-                `NOT EXISTS (
-                    SELECT 1 FROM student_applications sa
-                    WHERE sa.student_id = s.student_id
-                      AND sa.application_status = 'selected'
-                )`
-            );
-        }
-    }
+    // 4. Add criteria-based conditions
+    paramIndex = buildCriteriaConditions(criteria, conditions, params, paramIndex);
 
     // 5. Additional query-level filters (from frontend)
-    if (filters.search) {
-        conditions.push(
-            `(CONCAT(s.first_name, ' ', COALESCE(s.middle_name, ''), ' ', s.last_name) ILIKE $${paramIndex}
-              OR s.student_email ILIKE $${paramIndex})`
-        );
-        params.push(`%${filters.search}%`);
-        paramIndex++;
-    }
-
-    if (filters.dept_name) {
-        conditions.push(`d.dept_name ILIKE $${paramIndex}`);
-        params.push(`%${filters.dept_name}%`);
-        paramIndex++;
-    }
-
-    // 6. Check for active restrictions (bar_from_placements or temporary_suspension)
-    conditions.push(
-        `NOT EXISTS (
-            SELECT 1 FROM student_restrictions sr
-            WHERE sr.student_id = s.student_id
-              AND sr.is_active = true
-              AND sr.restriction_type IN ('bar_from_placements', 'temporary_suspension')
-        )`
-    );
+    paramIndex = applyQueryFilters(filters, conditions, params, paramIndex);
 
     const whereClause = conditions.join(' AND ');
 

@@ -14,6 +14,8 @@
 const Joi = require('joi');
 const { STATUS, TRAINING_PROGRAM_TYPES } = require('../../config/constants');
 
+const PAYMENT_STATUSES = Object.values(STATUS.PAYMENT);
+
 // Program types imported from constants (TRAINING_PROGRAM_TYPES)
 
 // ============================================================================
@@ -152,9 +154,36 @@ const createTrainingSchema = Joi.object({
     program_status: Joi.string()
         .valid(...Object.values(STATUS.TRAINING))
         .optional()
-        .default('upcoming')
+        .default('draft')
         .messages({
             'any.only': `Program status must be one of: ${Object.values(STATUS.TRAINING).join(', ')}`,
+        }),
+
+    program_fee: Joi.number()
+        .min(0)
+        .optional()
+        .default(0)
+        .messages({
+            'number.min': 'Program fee cannot be negative',
+        }),
+
+    fee_currency: Joi.string()
+        .trim()
+        .max(10)
+        .optional()
+        .default('INR')
+        .messages({
+            'string.max': 'Fee currency cannot exceed 10 characters',
+        }),
+
+    min_attendance_pct: Joi.number()
+        .min(0)
+        .max(100)
+        .optional()
+        .default(0)
+        .messages({
+            'number.min': 'Minimum attendance percentage cannot be negative',
+            'number.max': 'Minimum attendance percentage cannot exceed 100',
         }),
 });
 
@@ -331,6 +360,30 @@ const updateTrainingSchema = Joi.object({
         .iso()
         .optional()
         .allow(null),
+
+    program_fee: Joi.number()
+        .min(0)
+        .optional()
+        .messages({
+            'number.min': 'Program fee cannot be negative',
+        }),
+
+    fee_currency: Joi.string()
+        .trim()
+        .max(10)
+        .optional()
+        .messages({
+            'string.max': 'Fee currency cannot exceed 10 characters',
+        }),
+
+    min_attendance_pct: Joi.number()
+        .min(0)
+        .max(100)
+        .optional()
+        .messages({
+            'number.min': 'Minimum attendance percentage cannot be negative',
+            'number.max': 'Minimum attendance percentage cannot exceed 100',
+        }),
 }).min(1).messages({
     'object.min': 'At least one field must be provided for update',
 });
@@ -346,6 +399,19 @@ const toggleTrainingStatusSchema = Joi.object({
         .messages({
             'any.only': `Program status must be one of: ${Object.values(STATUS.TRAINING).join(', ')}`,
             'any.required': 'Program status is required',
+        }),
+});
+
+// ============================================================================
+// TOGGLE ENROLLMENT ACCESS
+// ============================================================================
+
+const toggleEnrollmentAccessSchema = Joi.object({
+    allow_enrollments: Joi.boolean()
+        .required()
+        .messages({
+            'any.required': 'allow_enrollments is required',
+            'boolean.base': 'allow_enrollments must be a boolean',
         }),
 });
 
@@ -399,30 +465,11 @@ const listEnrollmentsSchema = Joi.object({
 // ============================================================================
 
 const updateEnrollmentSchema = Joi.object({
-    sessions_attended: Joi.number()
-        .integer()
-        .min(0)
-        .max(500)
-        .optional()
-        .messages({
-            'number.min': 'Sessions attended cannot be negative',
-            'number.max': 'Sessions attended cannot exceed 500',
-        }),
-
     completion_status: Joi.string()
         .valid(...Object.values(STATUS.ENROLLMENT))
         .optional()
         .messages({
             'any.only': `Completion status must be one of: ${Object.values(STATUS.ENROLLMENT).join(', ')}`,
-        }),
-
-    completion_percentage: Joi.number()
-        .min(0)
-        .max(100)
-        .optional()
-        .messages({
-            'number.min': 'Completion percentage cannot be negative',
-            'number.max': 'Completion percentage cannot exceed 100',
         }),
 
     certificate_issued: Joi.boolean()
@@ -437,8 +484,167 @@ const updateEnrollmentSchema = Joi.object({
             'string.uri': 'Please provide a valid certificate URL',
             'string.max': 'Certificate URL cannot exceed 500 characters',
         }),
+
+    payment_status: Joi.string()
+        .valid(...PAYMENT_STATUSES)
+        .optional()
+        .messages({
+            'any.only': `Payment status must be one of: ${PAYMENT_STATUSES.join(', ')}`,
+        }),
+
+    amount_paid: Joi.number()
+        .min(0)
+        .optional()
+        .messages({
+            'number.min': 'Amount paid cannot be negative',
+        }),
 }).min(1).messages({
     'object.min': 'At least one field must be provided for update',
+});
+
+// ============================================================================
+// BULK UPDATE ENROLLMENTS
+// ============================================================================
+
+const bulkUpdateEnrollmentsSchema = Joi.object({
+    updates: Joi.array()
+        .items(
+            Joi.object({
+                enrollment_id: Joi.string().uuid().required().messages({
+                    'string.guid': 'Invalid enrollment ID format',
+                    'any.required': 'Enrollment ID is required',
+                }),
+                completion_status: Joi.string()
+                    .valid(...Object.values(STATUS.ENROLLMENT))
+                    .optional(),
+                payment_status: Joi.string().valid(...PAYMENT_STATUSES).optional(),
+                amount_paid: Joi.number().min(0).optional(),
+                certificate_issued: Joi.boolean().optional(),
+                certificate_url: Joi.string().uri().max(500).optional().allow(null, ''),
+            }).min(2) // enrollment_id + at least 1 field
+        )
+        .min(1)
+        .max(200)
+        .required()
+        .messages({
+            'array.min': 'At least one enrollment update is required',
+            'array.max': 'Cannot update more than 200 enrollments at once',
+            'any.required': 'Enrollment updates are required',
+        }),
+});
+
+// ============================================================================
+// CREATE TRAINING SESSION
+// ============================================================================
+
+const createSessionSchema = Joi.object({
+    session_number: Joi.number()
+        .integer()
+        .min(1)
+        .max(500)
+        .required()
+        .messages({
+            'number.min': 'Session number must be at least 1',
+            'number.max': 'Session number cannot exceed 500',
+            'any.required': 'Session number is required',
+        }),
+
+    session_date: Joi.date()
+        .iso()
+        .optional()
+        .allow(null)
+        .messages({
+            'date.format': 'Session date must be a valid date (YYYY-MM-DD)',
+        }),
+
+    session_topic: Joi.string()
+        .trim()
+        .max(500)
+        .optional()
+        .allow(null, '')
+        .messages({
+            'string.max': 'Session topic cannot exceed 500 characters',
+        }),
+
+    venue: Joi.string()
+        .trim()
+        .max(300)
+        .optional()
+        .allow(null, '')
+        .messages({
+            'string.max': 'Venue cannot exceed 300 characters',
+        }),
+});
+
+// ============================================================================
+// UPDATE TRAINING SESSION
+// ============================================================================
+
+const updateSessionSchema = Joi.object({
+    session_number: Joi.number()
+        .integer()
+        .min(1)
+        .max(500)
+        .optional()
+        .messages({
+            'number.min': 'Session number must be at least 1',
+            'number.max': 'Session number cannot exceed 500',
+        }),
+
+    session_date: Joi.date()
+        .iso()
+        .optional()
+        .allow(null)
+        .messages({
+            'date.format': 'Session date must be a valid date (YYYY-MM-DD)',
+        }),
+
+    session_topic: Joi.string()
+        .trim()
+        .max(500)
+        .optional()
+        .allow(null, '')
+        .messages({
+            'string.max': 'Session topic cannot exceed 500 characters',
+        }),
+
+    venue: Joi.string()
+        .trim()
+        .max(300)
+        .optional()
+        .allow(null, '')
+        .messages({
+            'string.max': 'Venue cannot exceed 300 characters',
+        }),
+}).min(1).messages({
+    'object.min': 'At least one field must be provided for update',
+});
+
+// ============================================================================
+// MARK SESSION ATTENDANCE
+// ============================================================================
+
+const markAttendanceSchema = Joi.object({
+    attendance: Joi.array()
+        .items(
+            Joi.object({
+                enrollment_id: Joi.string().uuid().required().messages({
+                    'string.guid': 'Invalid enrollment ID format',
+                    'any.required': 'Enrollment ID is required',
+                }),
+                present: Joi.boolean().required().messages({
+                    'any.required': 'Present/absent status is required',
+                }),
+            })
+        )
+        .min(1)
+        .max(500)
+        .required()
+        .messages({
+            'array.min': 'At least one attendance record is required',
+            'array.max': 'Cannot mark attendance for more than 500 students at once',
+            'any.required': 'Attendance data is required',
+        }),
 });
 
 // ============================================================================
@@ -463,13 +669,34 @@ const enrollmentIdParamSchema = Joi.object({
     }),
 });
 
+const sessionIdParamSchema = Joi.object({
+    sessionId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid session ID format',
+        'any.required': 'Session ID is required',
+    }),
+});
+
+const studentIdParamSchema = Joi.object({
+    studentId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid student ID format',
+        'any.required': 'Student ID is required',
+    }),
+});
+
 module.exports = {
     createTrainingSchema,
     listTrainingsSchema,
     updateTrainingSchema,
     toggleTrainingStatusSchema,
+    toggleEnrollmentAccessSchema,
     listEnrollmentsSchema,
     updateEnrollmentSchema,
+    bulkUpdateEnrollmentsSchema,
+    createSessionSchema,
+    updateSessionSchema,
+    markAttendanceSchema,
     programIdParamSchema,
     enrollmentIdParamSchema,
+    sessionIdParamSchema,
+    studentIdParamSchema,
 };

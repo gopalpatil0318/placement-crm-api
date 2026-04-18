@@ -49,13 +49,15 @@ function sanitizeBody(body) {
 function requestLogger(req, res, next) {
   const start = Date.now();
 
-  // Log request start (debug level — only in dev)
-  logger.debug(`${LOG.API_START} ${req.method} ${req.originalUrl}`, {
-    requestId: req.id,
-    ip: req.ip,
-    body: sanitizeBody(req.body),
-    query: req.query,
-  });
+  // Log request start (debug level — only in dev; guard to avoid object allocation in production)
+  if (logger.isLevelEnabled('debug')) {
+    logger.debug(`${LOG.API_START} ${req.method} ${req.originalUrl}`, {
+      requestId: req.id,
+      ip: req.ip,
+      body: sanitizeBody(req.body),
+      query: req.query,
+    });
+  }
 
   // Log on response finish
   res.on('finish', () => {

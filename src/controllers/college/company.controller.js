@@ -12,10 +12,16 @@
 
 const companyService = require('../../services/college/company.service');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
+const logger = require('../../config/logger');
 const {
     SUCCESS_MESSAGES,
     ERROR_MESSAGES,
     HTTP_STATUS,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
+    LOG,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -28,6 +34,20 @@ async function createCompany(req, res) {
             req.user.college_id,
             req.validated
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.CREATE,
+            resourceType: AUDIT_RESOURCE_TYPES.COMPANY,
+            resourceId: result.company_id,
+            summary: `Created company "${result.company_name}"`,
+            newValue: result,
+            metadata: { entityName: result.company_name },
+            ipAddress: getClientIp(req),
+        });
 
         return sendCreated(res, result, SUCCESS_MESSAGES.COMPANY_CREATED);
     } catch (err) {
@@ -49,6 +69,7 @@ async function getAllCompanies(req, res) {
 
         return sendPaginated(res, companies, total, { page, limit }, SUCCESS_MESSAGES.COMPANIES_RETRIEVED);
     } catch (err) {
+        logger.error(`${LOG.AUTH} Failed to fetch companies`, { error: err.message });
         return sendError(res, ERROR_MESSAGES.SERVER_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR);
     }
 }
@@ -83,6 +104,20 @@ async function updateCompany(req, res) {
             req.validated
         );
 
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.UPDATE,
+            resourceType: AUDIT_RESOURCE_TYPES.COMPANY,
+            resourceId: req.params.companyId,
+            summary: `Updated company "${result.company_name}"`,
+            newValue: result,
+            metadata: { entityName: result.company_name },
+            ipAddress: getClientIp(req),
+        });
+
         return sendSuccess(res, result, SUCCESS_MESSAGES.COMPANY_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
@@ -105,6 +140,21 @@ async function toggleCompanyStatus(req, res) {
             req.user.college_id,
             company_status
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.STATUS_CHANGE,
+            resourceType: AUDIT_RESOURCE_TYPES.COMPANY,
+            resourceId: req.params.companyId,
+            summary: `Changed company "${result.company_name}" status to ${company_status}`,
+            oldValue: { company_status: result._previousStatus },
+            newValue: { company_status },
+            metadata: { entityName: result.company_name },
+            ipAddress: getClientIp(req),
+        });
 
         const message = company_status === 'active'
             ? SUCCESS_MESSAGES.COMPANY_ACTIVATED

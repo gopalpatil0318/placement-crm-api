@@ -26,6 +26,7 @@ const {
     listApplicationsSchema,
     updateAppStatusSchema,
     bulkUpdateAppStatusSchema,
+    setWaitlistSchema,
     jobIdParamSchema,
     applicationIdParamSchema,
 } = require('../../validators/college/application.validator');
@@ -63,6 +64,29 @@ router.post(
     apiLimiter,
     validate(bulkUpdateAppStatusSchema),
     asyncHandler(controller.bulkUpdateApplicationStatus)
+);
+
+// ── Waitlist Management ─────────────────────────────────────────────────────
+
+router.post(
+    '/set_waitlist/:jobId',
+    apiLimiter,
+    validate(jobIdParamSchema, 'params'),
+    validate(setWaitlistSchema),
+    asyncHandler(controller.setWaitlist)
+);
+
+router.get(
+    '/get_waitlisted/:jobId',
+    validate(jobIdParamSchema, 'params'),
+    asyncHandler(controller.getWaitlistedApplications)
+);
+
+router.post(
+    '/promote_waitlist/:jobId',
+    apiLimiter,
+    validate(jobIdParamSchema, 'params'),
+    asyncHandler(controller.manualPromoteWaitlist)
 );
 
 module.exports = router;

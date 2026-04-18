@@ -12,6 +12,13 @@
  *   PATCH /toggle_training_status/:programId        #93 Change status
  *   GET   /get_training_enrollments/:programId      #94 List enrollments
  *   PATCH /update_enrollment/:enrollmentId          #95 Update enrollment
+ *   PATCH /bulk_update_enrollments/:programId        MF3 Bulk update enrollments
+ *   GET   /student_training_report/:studentId        GAP-1 Student training report
+ *   POST  /training/:programId/sessions              B16 Create session
+ *   GET   /training/:programId/sessions              B16 List sessions
+ *   PUT   /training/sessions/:sessionId              B16 Update session
+ *   DELETE /training/sessions/:sessionId             B16 Delete session
+ *   POST  /training/sessions/:sessionId/attendance   B16 Mark attendance
  * ============================================================================
  */
 
@@ -30,10 +37,17 @@ const {
     listTrainingsSchema,
     updateTrainingSchema,
     toggleTrainingStatusSchema,
+    toggleEnrollmentAccessSchema,
     listEnrollmentsSchema,
     updateEnrollmentSchema,
+    bulkUpdateEnrollmentsSchema,
+    createSessionSchema,
+    updateSessionSchema,
+    markAttendanceSchema,
     programIdParamSchema,
     enrollmentIdParamSchema,
+    sessionIdParamSchema,
+    studentIdParamSchema,
 } = require('../../validators/college/training.validator');
 
 // All training routes require COLLEGEADMIN or TPO + rate limiting
@@ -81,6 +95,14 @@ router.patch(
     asyncHandler(controller.toggleTrainingStatus)
 );
 
+// Toggle enrollment access (open/close enrollment independently of status)
+router.patch(
+    '/toggle_enrollment_access/:programId',
+    validate(programIdParamSchema, 'params'),
+    validate(toggleEnrollmentAccessSchema),
+    asyncHandler(controller.toggleEnrollmentAccess)
+);
+
 // #94 — List enrollments for a program
 router.get(
     '/get_training_enrollments/:programId',
@@ -95,6 +117,66 @@ router.patch(
     validate(enrollmentIdParamSchema, 'params'),
     validate(updateEnrollmentSchema),
     asyncHandler(controller.updateEnrollment)
+);
+
+// MF3 — Bulk update enrollments
+router.patch(
+    '/bulk_update_enrollments/:programId',
+    validate(programIdParamSchema, 'params'),
+    validate(bulkUpdateEnrollmentsSchema),
+    asyncHandler(controller.bulkUpdateEnrollments)
+);
+
+// GAP-1 — Student training report
+router.get(
+    '/student_training_report/:studentId',
+    validate(studentIdParamSchema, 'params'),
+    asyncHandler(controller.getStudentTrainingReport)
+);
+
+// B16 — Create training session
+router.post(
+    '/training/:programId/sessions',
+    validate(programIdParamSchema, 'params'),
+    validate(createSessionSchema),
+    asyncHandler(controller.createTrainingSession)
+);
+
+// B16 — List training sessions
+router.get(
+    '/training/:programId/sessions',
+    validate(programIdParamSchema, 'params'),
+    asyncHandler(controller.getTrainingSessions)
+);
+
+// B16 — Update training session
+router.put(
+    '/training/sessions/:sessionId',
+    validate(sessionIdParamSchema, 'params'),
+    validate(updateSessionSchema),
+    asyncHandler(controller.updateTrainingSession)
+);
+
+// B16 — Delete training session
+router.delete(
+    '/training/sessions/:sessionId',
+    validate(sessionIdParamSchema, 'params'),
+    asyncHandler(controller.deleteTrainingSession)
+);
+
+// B16 — Mark session attendance
+router.post(
+    '/training/sessions/:sessionId/attendance',
+    validate(sessionIdParamSchema, 'params'),
+    validate(markAttendanceSchema),
+    asyncHandler(controller.markSessionAttendance)
+);
+
+// Get session attendance records (per-student, for pre-populating attendance sheet)
+router.get(
+    '/training/sessions/:sessionId/attendance',
+    validate(sessionIdParamSchema, 'params'),
+    asyncHandler(controller.getSessionAttendance)
 );
 
 module.exports = router;

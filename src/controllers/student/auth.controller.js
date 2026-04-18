@@ -15,7 +15,9 @@ const authService = require('../../services/student/auth.service');
 const { sendSuccess } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
 const { SUCCESS_MESSAGES, LOG } = require('../../config/constants');
-const { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS } = require('../../config/cookie');
+const { CLEAR_COOKIE_OPTIONS, CLEAR_REFRESH_COOKIE_OPTIONS } = require('../../config/cookie');
+const { issueTokenPair } = require('../auth.controller');
+const { hashRefreshToken, findRefreshToken, revokeRefreshToken } = require('../../utils/jwtHelper');
 
 // ============================================================================
 // 1. LOGIN
@@ -26,8 +28,13 @@ async function login(req, res) {
 
     const result = await authService.loginStudent(email, password);
 
-    // Set JWT in HttpOnly cookie
-    res.cookie('token', result.token, COOKIE_OPTIONS);
+    // B21: Issue access + refresh token pair
+    await issueTokenPair(
+        res,
+        { id: result.student.student_id, college_id: result.student.college_id, role: 'student', dept_id: result.student.dept_id },
+        result.student.student_id,
+        'student'
+    );
 
     logger.info(`${LOG.AUTH} Student login successful`, {
         studentId: result.student.student_id,
@@ -43,7 +50,18 @@ async function login(req, res) {
 // ============================================================================
 
 async function logout(req, res) {
+    // B21: Revoke refresh token if present
+    const rawRefreshToken = req.cookies?.refresh_token;
+    if (rawRefreshToken) {
+        const tokenHash = hashRefreshToken(rawRefreshToken);
+        const stored = await findRefreshToken(tokenHash);
+        if (stored) {
+            await revokeRefreshToken(stored.token_id);
+        }
+    }
+
     res.clearCookie('token', CLEAR_COOKIE_OPTIONS);
+    res.clearCookie('refresh_token', CLEAR_REFRESH_COOKIE_OPTIONS);
 
     logger.info(`${LOG.AUTH} Student logged out`, {
         studentId: req.user?.id,

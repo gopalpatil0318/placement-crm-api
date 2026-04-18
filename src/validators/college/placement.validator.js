@@ -6,6 +6,7 @@
  *   - listPlacementsSchema        GET    /get_all_placements
  *   - updatePlacementSchema       PUT    /update_placement/:placementId
  *   - verifyOfferLetterSchema     PATCH  /verify_offer_letter/:placementId
+ *   - verifyJoiningLetterSchema    PATCH  /verify_joining_letter/:placementId
  *   - updatePlacementStatusSchema PATCH  /update_placement_status/:placementId
  * ============================================================================
  */
@@ -16,6 +17,29 @@ const {
     PLACEMENT_STATUSES,
     ACCEPTANCE_STATUSES,
 } = require('../../config/constants');
+
+// ============================================================================
+// SHARED HELPERS
+// ============================================================================
+
+const stripHtml = (v) => (typeof v === 'string' ? v.replaceAll(/<[^>]*>/g, '') : v);
+
+const safeUrlField = () =>
+    Joi.string()
+        .uri()
+        .max(2000)
+        .optional()
+        .allow(null, '')
+        .custom((value, helpers) => {
+            if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
+                return helpers.error('string.uri');
+            }
+            return value;
+        })
+        .messages({
+            'string.uri': 'URL must be a valid http or https URL',
+            'string.max': 'URL cannot exceed 2000 characters',
+        });
 
 // ============================================================================
 // CREATE PLACEMENT
@@ -91,15 +115,10 @@ const createPlacementSchema = Joi.object({
         }),
 
     // Offer letter
-    offer_letter_url: Joi.string()
-        .uri()
-        .max(2000)
-        .optional()
-        .allow(null, '')
-        .messages({
-            'string.uri': 'Offer letter URL must be a valid URL',
-            'string.max': 'URL cannot exceed 2000 characters',
-        }),
+    offer_letter_url: safeUrlField(),
+
+    // Joining letter
+    joining_letter_url: safeUrlField(),
 })
     .custom((value, helpers) => {
         const type = value.placement_type;
@@ -152,6 +171,10 @@ const listPlacementsSchema = Joi.object({
         .valid('true', 'false')
         .optional(),
 
+    joining_letter_verified: Joi.string()
+        .valid('true', 'false')
+        .optional(),
+
     search: Joi.string()
         .max(200)
         .trim()
@@ -168,7 +191,7 @@ const listPlacementsSchema = Joi.object({
         .optional()
         .default('desc'),
 
-    page: Joi.number().integer().min(1).optional().default(1),
+    page: Joi.number().integer().min(1).max(10000).optional().default(1),
     limit: Joi.number().integer().min(1).max(100).optional().default(10),
 });
 
@@ -209,11 +232,9 @@ const updatePlacementSchema = Joi.object({
         .optional()
         .allow(null),
 
-    offer_letter_url: Joi.string()
-        .uri()
-        .max(2000)
-        .optional()
-        .allow(null, ''),
+    offer_letter_url: safeUrlField(),
+
+    joining_letter_url: safeUrlField(),
 }).min(1).messages({
     'object.min': 'At least one field must be provided to update',
 });
@@ -223,17 +244,49 @@ const updatePlacementSchema = Joi.object({
 // ============================================================================
 
 const verifyOfferLetterSchema = Joi.object({
-    offer_letter_verified: Joi.boolean()
+    action: Joi.string()
+        .valid('approved', 'rejected')
         .required()
         .messages({
-            'boolean.base': 'offer_letter_verified must be a boolean',
-            'any.required': 'offer_letter_verified is required',
+            'any.only': 'Action must be either approved or rejected',
+            'any.required': 'Action is required',
         }),
 
-    remarks: Joi.string()
+    rejection_reason: Joi.string()
         .max(1000)
         .optional()
-        .allow(null, ''),
+        .allow(null, '')
+        .custom(stripHtml),
+}).custom((value, helpers) => {
+    if (value.action === 'rejected' && (!value.rejection_reason?.trim())) {
+        return helpers.error('any.custom', { message: 'Rejection reason is required when rejecting' });
+    }
+    return value;
+});
+
+// ============================================================================
+// VERIFY JOINING LETTER
+// ============================================================================
+
+const verifyJoiningLetterSchema = Joi.object({
+    action: Joi.string()
+        .valid('approved', 'rejected')
+        .required()
+        .messages({
+            'any.only': 'Action must be either approved or rejected',
+            'any.required': 'Action is required',
+        }),
+
+    rejection_reason: Joi.string()
+        .max(1000)
+        .optional()
+        .allow(null, '')
+        .custom(stripHtml),
+}).custom((value, helpers) => {
+    if (value.action === 'rejected' && (!value.rejection_reason?.trim())) {
+        return helpers.error('any.custom', { message: 'Rejection reason is required when rejecting' });
+    }
+    return value;
 });
 
 // ============================================================================
@@ -257,7 +310,8 @@ const updatePlacementStatusSchema = Joi.object({
     remarks: Joi.string()
         .max(1000)
         .optional()
-        .allow(null, ''),
+        .allow(null, '')
+        .custom(stripHtml),
 });
 
 // ============================================================================
@@ -275,11 +329,74 @@ const placementIdParamSchema = Joi.object({
     }),
 });
 
+// ============================================================================
+// APPLICATION ID PARAM SCHEMA
+// ============================================================================
+
+const applicationIdParamSchema = Joi.object({
+    applicationId: Joi.string().uuid().required().messages({
+        'string.guid': 'Invalid application ID format',
+        'any.required': 'Application ID is required',
+    }),
+});
+
+// ============================================================================
+// BULK CREATE PLACEMENTS
+// ============================================================================
+
+const bulkCreatePlacementsSchema = Joi.object({
+    items: Joi.array()
+        .items(
+            Joi.object({
+                application_id: Joi.string().uuid().required().messages({
+                    'string.guid': 'Invalid application ID format',
+                    'any.required': 'Application ID is required',
+                }),
+                placement_type: Joi.string()
+                    .valid(...PLACEMENT_TYPES)
+                    .required()
+                    .messages({
+                        'any.only': `Placement type must be one of: ${PLACEMENT_TYPES.join(', ')}`,
+                        'any.required': 'Placement type is required',
+                    }),
+                fulltime_package: Joi.number().precision(2).min(0).optional().allow(null),
+                fulltime_designation: Joi.string().max(200).optional().allow(null, ''),
+                fulltime_joining_date: Joi.date().iso().optional().allow(null),
+                internship_stipend: Joi.number().precision(2).min(0).optional().allow(null),
+                internship_duration: Joi.string().max(100).optional().allow(null, ''),
+                internship_start_date: Joi.date().iso().optional().allow(null),
+                offer_letter_url: safeUrlField(),
+                joining_letter_url: safeUrlField(),
+            })
+                .custom((value, helpers) => {
+                    const type = value.placement_type;
+                    if ((type === 'full-time' || type === 'both') && !value.fulltime_package) {
+                        return helpers.error('any.custom', { message: 'Full-time package is required for full-time or both placement type' });
+                    }
+                    if ((type === 'internship' || type === 'both') && !value.internship_stipend && value.internship_stipend !== 0) {
+                        return helpers.error('any.custom', { message: 'Internship stipend is required for internship or both placement type' });
+                    }
+                    return value;
+                })
+        )
+        .min(1)
+        .max(100)
+        .required()
+        .messages({
+            'array.min': 'At least one placement item is required',
+            'array.max': 'Maximum 100 placements per bulk operation',
+            'any.required': 'Items array is required',
+        }),
+});
+
 module.exports = {
     createPlacementSchema,
     listPlacementsSchema,
     updatePlacementSchema,
     verifyOfferLetterSchema,
+    verifyJoiningLetterSchema,
     updatePlacementStatusSchema,
     placementIdParamSchema,
+    applicationIdParamSchema,
+    bulkCreatePlacementsSchema,
 };

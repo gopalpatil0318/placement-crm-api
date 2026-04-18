@@ -13,10 +13,14 @@
 
 const policyService = require('../../services/college/placementPolicy.service');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
 const {
     ERROR_MESSAGES,
     HTTP_STATUS,
     SUCCESS_MESSAGES,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -30,6 +34,20 @@ async function createPolicy(req, res) {
             req.user.id,
             req.validated
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.CREATE,
+            resourceType: AUDIT_RESOURCE_TYPES.POLICY,
+            resourceId: result.policy_id,
+            summary: `Created placement policy "${result.policy_title}"`,
+            newValue: result,
+            metadata: { entityName: result.policy_title },
+            ipAddress: getClientIp(req),
+        });
 
         return sendCreated(res, result, SUCCESS_MESSAGES.POLICY_CREATED);
     } catch (err) {
@@ -92,6 +110,20 @@ async function updatePolicy(req, res) {
             req.validated
         );
 
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.UPDATE,
+            resourceType: AUDIT_RESOURCE_TYPES.POLICY,
+            resourceId: req.params.policyId,
+            summary: `Updated placement policy "${result.policy_title}"`,
+            newValue: result,
+            metadata: { entityName: result.policy_title },
+            ipAddress: getClientIp(req),
+        });
+
         return sendSuccess(res, result, SUCCESS_MESSAGES.POLICY_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
@@ -115,6 +147,21 @@ async function togglePolicyStatus(req, res) {
             is_active
         );
 
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.STATUS_CHANGE,
+            resourceType: AUDIT_RESOURCE_TYPES.POLICY,
+            resourceId: req.params.policyId,
+            summary: `${is_active ? 'Activated' : 'Deactivated'} placement policy "${result.policy_title}"`,
+            oldValue: { is_active: result._previousStatus },
+            newValue: { is_active },
+            metadata: { entityName: result.policy_title },
+            ipAddress: getClientIp(req),
+        });
+
         const message = is_active
             ? SUCCESS_MESSAGES.POLICY_ACTIVATED
             : SUCCESS_MESSAGES.POLICY_DEACTIVATED;
@@ -137,6 +184,20 @@ async function deletePolicy(req, res) {
             req.params.policyId,
             req.user.college_id
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.DELETE,
+            resourceType: AUDIT_RESOURCE_TYPES.POLICY,
+            resourceId: req.params.policyId,
+            summary: `Deleted placement policy "${result.policy_title}"`,
+            oldValue: result,
+            metadata: { entityName: result.policy_title },
+            ipAddress: getClientIp(req),
+        });
 
         return sendSuccess(res, result, SUCCESS_MESSAGES.POLICY_DELETED);
     } catch (err) {

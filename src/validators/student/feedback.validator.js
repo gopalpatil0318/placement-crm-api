@@ -75,6 +75,47 @@ const submitInterviewQuestionSchema = Joi.object({
     .messages({ 'string.max': 'Sample answer cannot exceed 3000 characters' }),
 });
 
+// ── POST /submit_interview_questions (batch) ──────────────────────────────
+const VALID_ROUND_TYPES = ['aptitude', 'technical_interview', 'hr_interview', 'group_discussion', 'coding_test', 'other'];
+
+const submitInterviewQuestionsSchema = Joi.object({
+  company_id: Joi.string().uuid().required()
+    .messages({
+      'any.required': 'Company ID is required',
+      'string.guid': 'Invalid company ID format',
+    }),
+
+  job_id: Joi.string().uuid().required()
+    .messages({
+      'any.required': 'Job ID is required',
+      'string.guid': 'Invalid job ID format',
+    }),
+
+  round_type: Joi.string().valid(...VALID_ROUND_TYPES).required()
+    .messages({
+      'any.required': 'Round type is required',
+      'any.only': `Round type must be one of: ${VALID_ROUND_TYPES.join(', ')}`,
+    }),
+
+  questions: Joi.array().items(
+    Joi.object({
+      question_description: Joi.string().min(5).max(2000).trim().required()
+        .messages({
+          'any.required': 'Question description is required',
+          'string.min': 'Question must be at least 5 characters',
+          'string.max': 'Question cannot exceed 2000 characters',
+        }),
+      sample_answer: Joi.string().max(3000).trim().allow(null, '')
+        .messages({ 'string.max': 'Sample answer cannot exceed 3000 characters' }),
+    })
+  ).min(1).max(10).required()
+    .messages({
+      'array.min': 'At least one question is required',
+      'array.max': 'Cannot submit more than 10 questions at once',
+      'any.required': 'Questions array is required',
+    }),
+});
+
 // ── GET /browse_interview_questions ───────────────────────────────────────
 const browseInterviewQuestionsSchema = Joi.object({
   company_id: Joi.string().uuid()
@@ -85,6 +126,9 @@ const browseInterviewQuestionsSchema = Joi.object({
 
   topic: Joi.string().max(100).trim()
     .messages({ 'string.max': 'Topic filter too long (max 100 chars)' }),
+
+  round_type: Joi.string().valid(...VALID_ROUND_TYPES)
+    .messages({ 'any.only': `Round type must be one of: ${VALID_ROUND_TYPES.join(', ')}` }),
 
   search: Joi.string().max(100).trim()
     .messages({ 'string.max': 'Search query too long (max 100 chars)' }),
@@ -103,5 +147,6 @@ module.exports = {
   submitFeedbackSchema,
   getMyFeedbackSchema,
   submitInterviewQuestionSchema,
+  submitInterviewQuestionsSchema,
   browseInterviewQuestionsSchema,
 };

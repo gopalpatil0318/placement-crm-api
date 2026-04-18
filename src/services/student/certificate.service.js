@@ -18,6 +18,7 @@
 const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
+const { maybeResetApproval } = require('../../utils/approvalResetHelper');
 
 const MAX_CERTIFICATES = 15;
 
@@ -64,10 +65,20 @@ async function addCertificate(studentId, collegeId, data) {
             data.expiry_date = null;
         }
 
-        // 3. Build insert
+        // 3. Build insert — auto-approve if bypass is enabled
+        const { getVerificationSettings } = require('../college/verificationSettings.service');
+        const settings = await getVerificationSettings(collegeId);
+        const autoApprove = settings?.bypass?.certificates ?? false;
+
         const fieldsToInsert = CERTIFICATE_FIELDS.filter(f => data[f] !== undefined);
         const insertColumns = ['student_id', 'college_id', ...fieldsToInsert];
         const insertValues = [studentId, collegeId, ...fieldsToInsert.map(f => data[f])];
+
+        if (autoApprove) {
+            insertColumns.push('verification_status', 'is_verified');
+            insertValues.push('approved', true);
+        }
+
         const placeholders = insertValues.map((_, i) => `$${i + 1}`);
 
         const result = await client.query(
@@ -77,13 +88,8 @@ async function addCertificate(studentId, collegeId, data) {
             insertValues
         );
 
-        // 4. Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // 4. Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'certificates');
 
         await client.query('COMMIT');
 
@@ -137,17 +143,36 @@ async function updateCertificate(certificateId, studentId, collegeId, data) {
         throw Object.assign(new Error('At least one field must be provided to update'), { status: 400 });
     }
 
+    // Check settings to decide if verification_status should reset
+    const { getVerificationSettings } = require('../college/verificationSettings.service');
+    const settings = await getVerificationSettings(collegeId);
+    const resetVerification = settings.re_verify_on_edit.certificates;
+
     const setClauses = fieldsToUpdate
         .map((field, index) => `${field} = $${index + 4}`)
-        .concat([
-            'updated_at = NOW()',
+        .concat(['updated_at = NOW()']);
+
+    // Always reset rejected items to pending on edit (student corrected the issue).
+    // re_verify_on_edit only controls whether already-approved items get re-queued.
+    if (resetVerification) {
+        setClauses.push(
             "verification_status = 'pending'",
             'is_verified = false',
             'verified_by = NULL',
             'verified_at = NULL',
             'rejection_reason = NULL',
             'rejected_at = NULL',
-        ]);
+        );
+    } else {
+        setClauses.push(
+            "verification_status = CASE WHEN verification_status = 'rejected' THEN 'pending' ELSE verification_status END",
+            "is_verified = CASE WHEN verification_status = 'rejected' THEN false ELSE is_verified END",
+            "verified_by = CASE WHEN verification_status = 'rejected' THEN NULL ELSE verified_by END",
+            "verified_at = CASE WHEN verification_status = 'rejected' THEN NULL ELSE verified_at END",
+            "rejection_reason = CASE WHEN verification_status = 'rejected' THEN NULL ELSE rejection_reason END",
+            "rejected_at = CASE WHEN verification_status = 'rejected' THEN NULL ELSE rejected_at END",
+        );
+    }
 
     const values = [
         certificateId, studentId, collegeId,
@@ -173,13 +198,8 @@ async function updateCertificate(certificateId, studentId, collegeId, data) {
             );
         }
 
-        // Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'certificates');
 
         await client.query('COMMIT');
 
@@ -220,13 +240,8 @@ async function deleteCertificate(certificateId, studentId, collegeId) {
             );
         }
 
-        // Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'certificates');
 
         await client.query('COMMIT');
 

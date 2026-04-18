@@ -11,10 +11,14 @@
 
 const contactService = require('../../services/college/companyContact.service');
 const { sendSuccess, sendCreated, sendError, sendPaginated } = require('../../utils/responseHelper');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
 const {
     SUCCESS_MESSAGES,
     ERROR_MESSAGES,
     HTTP_STATUS,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
 } = require('../../config/constants');
 
 // ============================================================================
@@ -28,6 +32,20 @@ async function addContact(req, res) {
             req.user.college_id,
             req.validated
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.CREATE,
+            resourceType: AUDIT_RESOURCE_TYPES.COMPANY,
+            resourceId: req.params.companyId,
+            summary: `Added contact "${result.contact_name}" to company`,
+            newValue: result,
+            metadata: { contactId: result.contact_id, entityName: result.contact_name },
+            ipAddress: getClientIp(req),
+        });
 
         return sendCreated(res, result, SUCCESS_MESSAGES.CONTACT_ADDED);
     } catch (err) {
@@ -68,6 +86,20 @@ async function updateContact(req, res) {
             req.validated
         );
 
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.UPDATE,
+            resourceType: AUDIT_RESOURCE_TYPES.COMPANY,
+            resourceId: result.company_id,
+            summary: `Updated contact "${result.contact_name}"`,
+            newValue: result,
+            metadata: { contactId: req.params.contactId, entityName: result.contact_name },
+            ipAddress: getClientIp(req),
+        });
+
         return sendSuccess(res, result, SUCCESS_MESSAGES.CONTACT_UPDATED);
     } catch (err) {
         if (err.status === 400) return sendError(res, err.message, HTTP_STATUS.BAD_REQUEST);
@@ -90,6 +122,20 @@ async function toggleContactStatus(req, res) {
             req.user.college_id,
             is_active
         );
+
+        logAudit(query, {
+            collegeId: req.user.college_id,
+            userId: req.user.id,
+            userName: req.user.name,
+            userRole: req.user.role,
+            action: AUDIT_ACTIONS.STATUS_CHANGE,
+            resourceType: AUDIT_RESOURCE_TYPES.COMPANY,
+            resourceId: result.company_id,
+            summary: `${is_active ? 'Activated' : 'Deactivated'} contact "${result.contact_name}"`,
+            newValue: { is_active },
+            metadata: { contactId: req.params.contactId, entityName: result.contact_name },
+            ipAddress: getClientIp(req),
+        });
 
         const message = is_active
             ? SUCCESS_MESSAGES.CONTACT_ACTIVATED

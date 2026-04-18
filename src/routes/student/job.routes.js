@@ -42,13 +42,6 @@ router.use(apiLimiter);
 // JOB BROWSING ROUTES
 // ============================================================================
 
-// Get distinct passout years with published jobs (for year dropdown)
-router.get(
-    '/get_available_job_years',
-    authenticate,
-    asyncHandler(controller.getAvailableJobYears)
-);
-
 // List available jobs (published, within deadline, matching passout year)
 router.get(
     '/get_available_jobs',

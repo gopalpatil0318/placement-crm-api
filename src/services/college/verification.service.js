@@ -22,6 +22,7 @@ const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const studentService = require('./student.service');
+const { getVerificationSettings } = require('./verificationSettings.service');
 const {
     LOG,
     ERROR_MESSAGES,
@@ -42,25 +43,47 @@ const VALID_SORT_ORDERS = new Set(['ASC', 'DESC']);
 // 1. GET PENDING VERIFICATION COUNTS (Dashboard)
 // ============================================================================
 
-async function getPendingVerificationCounts(collegeId) {
+async function getPendingVerificationCounts(collegeId, filters = {}) {
+    // Respect category toggles — disabled categories return 0
+    const settings = await getVerificationSettings(collegeId);
+
+    const conditions = { college: ['college_id = $1'], student: ['college_id = $1'] };
+    const params = [collegeId];
+    let paramIndex = 2;
+
+    if (filters.student_passout_year) {
+        conditions.student.push(`student_passout_year = $${paramIndex}`);
+        params.push(Number(filters.student_passout_year));
+        paramIndex++;
+    }
+
+    const studentWhere = conditions.student.join(' AND ');
+
+    // Pre-compute the optional passout year clause to avoid nested ternaries/templates
+    const yearClause = filters.student_passout_year
+        ? `AND s.student_passout_year = $${paramIndex - 1}`
+        : '';
+
+    // Build subquery per category — bypassed categories resolve to literal 0
+    // Profiles: require profile_complete + profile_approval_status = 'pending'
+    // Items: require profile_complete + item verification_status = 'pending' (profile approval is orthogonal)
+    const profilesSql = settings.bypass.profiles
+        ? '0'
+        : `(SELECT COUNT(*) FROM students WHERE ${studentWhere} AND profile_complete = true AND profile_approval_status = $${paramIndex})`;
+    const experiencesSql = settings.bypass.experience
+        ? '0'
+        : `(SELECT COUNT(*) FROM student_experience e JOIN students s ON e.student_id = s.student_id WHERE e.college_id = $1 AND e.verification_status = $${paramIndex} AND s.profile_complete = true ${yearClause})`;
+    const achievementsSql = settings.bypass.achievements
+        ? '0'
+        : `(SELECT COUNT(*) FROM student_achievements a JOIN students s ON a.student_id = s.student_id WHERE a.college_id = $1 AND a.verification_status = $${paramIndex} AND s.profile_complete = true ${yearClause})`;
+    const certificatesSql = settings.bypass.certificates
+        ? '0'
+        : `(SELECT COUNT(*) FROM student_certificates c JOIN students s ON c.student_id = s.student_id WHERE c.college_id = $1 AND c.verification_status = $${paramIndex} AND s.profile_complete = true ${yearClause})`;
+
     // Single query with subqueries — 1 round-trip instead of 4
     const result = await query(
-        `SELECT
-           (SELECT COUNT(*) FROM students
-            WHERE college_id = $1 AND profile_complete = true AND profile_approval_status = $2) AS profiles,
-           (SELECT COUNT(*) FROM student_experience e
-            JOIN students s ON e.student_id = s.student_id
-            WHERE e.college_id = $1 AND e.verification_status = $2
-              AND s.profile_approval_status = $3) AS experiences,
-           (SELECT COUNT(*) FROM student_achievements a
-            JOIN students s ON a.student_id = s.student_id
-            WHERE a.college_id = $1 AND a.verification_status = $2
-              AND s.profile_approval_status = $3) AS achievements,
-           (SELECT COUNT(*) FROM student_certificates c
-            JOIN students s ON c.student_id = s.student_id
-            WHERE c.college_id = $1 AND c.verification_status = $2
-              AND s.profile_approval_status = $3) AS certificates`,
-        [collegeId, STATUS.VERIFICATION.PENDING, STATUS.VERIFICATION.APPROVED]
+        `SELECT ${profilesSql} AS profiles, ${experiencesSql} AS experiences, ${achievementsSql} AS achievements, ${certificatesSql} AS certificates`,
+        [...params, STATUS.VERIFICATION.PENDING]
     );
 
     const row = result.rows[0];
@@ -162,9 +185,8 @@ async function getPendingExperiences(collegeId, filters = {}) {
 
     conditions.push(`e.verification_status = $${paramIndex}`);
     params.push(STATUS.VERIFICATION.PENDING);
-    conditions.push(`s.profile_approval_status = $${paramIndex + 1}`);
-    params.push(STATUS.VERIFICATION.APPROVED);
-    const expParamIndex = paramIndex + 2;
+    conditions.push('s.profile_complete = true');
+    const expParamIndex = paramIndex + 1;
 
     const whereClause = conditions.join(' AND ');
     const sortCol = VALID_SORT_COLUMNS.has(filters.sort_by) ? filters.sort_by : 'created_at';
@@ -220,9 +242,8 @@ async function getPendingAchievements(collegeId, filters = {}) {
 
     conditions.push(`a.verification_status = $${paramIndex}`);
     params.push(STATUS.VERIFICATION.PENDING);
-    conditions.push(`s.profile_approval_status = $${paramIndex + 1}`);
-    params.push(STATUS.VERIFICATION.APPROVED);
-    const achParamIndex = paramIndex + 2;
+    conditions.push('s.profile_complete = true');
+    const achParamIndex = paramIndex + 1;
 
     const whereClause = conditions.join(' AND ');
     const sortCol = VALID_SORT_COLUMNS.has(filters.sort_by) ? filters.sort_by : 'created_at';
@@ -279,9 +300,8 @@ async function getPendingCertificates(collegeId, filters = {}) {
 
     conditions.push(`c.verification_status = $${paramIndex}`);
     params.push(STATUS.VERIFICATION.PENDING);
-    conditions.push(`s.profile_approval_status = $${paramIndex + 1}`);
-    params.push(STATUS.VERIFICATION.APPROVED);
-    const certParamIndex = paramIndex + 2;
+    conditions.push('s.profile_complete = true');
+    const certParamIndex = paramIndex + 1;
 
     const whereClause = conditions.join(' AND ');
     const sortCol = VALID_SORT_COLUMNS.has(filters.sort_by) ? filters.sort_by : 'created_at';
@@ -328,6 +348,124 @@ async function getPendingCertificates(collegeId, filters = {}) {
 }
 
 // ============================================================================
+// SHARED — Single-item verification helper (reduces 3 identical functions)
+// ============================================================================
+
+const ITEM_VERIFY_CONFIG = Object.freeze({
+    experience: {
+        table: 'student_experience',
+        idCol: 'experience_id',
+        returning: `t.experience_id, t.student_id, t.college_id,
+                   t.company_name, t.company_website, t.position_title,
+                   t.employment_type, t.job_description, t.responsibilities,
+                   t.technologies_used, t.work_location, t.work_mode,
+                   t.start_date, t.end_date, t.is_current, t.duration_months,
+                   t.offer_letter_url, t.completion_certificate_url,
+                   t.is_verified, t.verification_status,
+                   t.verified_by, t.verified_at,
+                   t.rejection_reason, t.rejected_at,
+                   t.created_at, t.updated_at`,
+        notFoundMsg: ERROR_MESSAGES.EXPERIENCE_NOT_FOUND,
+    },
+    achievement: {
+        table: 'student_achievements',
+        idCol: 'achievement_id',
+        returning: `t.achievement_id, t.student_id, t.college_id,
+                   t.achievement_title, t.achievement_description,
+                   t.achievement_type, t.issuing_organization,
+                   t.event_name, t.achievement_level,
+                   t.position_rank, t.participants_count,
+                   t.achievement_date, t.certificate_url, t.proof_url,
+                   t.is_verified, t.verification_status,
+                   t.verified_by, t.verified_at,
+                   t.rejection_reason, t.rejected_at,
+                   t.is_featured, t.display_order,
+                   t.created_at, t.updated_at`,
+        notFoundMsg: ERROR_MESSAGES.ACHIEVEMENT_NOT_FOUND,
+    },
+    certificate: {
+        table: 'student_certificates',
+        idCol: 'certificate_id',
+        returning: `t.certificate_id, t.student_id, t.college_id,
+                   t.certificate_name, t.certificate_description,
+                   t.certificate_type, t.issuing_organization,
+                   t.issuing_platform, t.credential_id, t.credential_url,
+                   t.issue_date, t.expiry_date, t.does_not_expire,
+                   t.skills_covered, t.certificate_url,
+                   t.is_verified, t.verification_status,
+                   t.verified_by, t.verified_at,
+                   t.rejection_reason, t.rejected_at,
+                   t.created_at, t.updated_at`,
+        notFoundMsg: ERROR_MESSAGES.CERTIFICATE_NOT_FOUND,
+    },
+});
+
+async function verifyItem(category, itemId, collegeId, userId, action, rejectionReason) {
+    const cfg = ITEM_VERIFY_CONFIG[category];
+    const isVerified = action === STATUS.VERIFICATION.APPROVED;
+
+    const result = await query(
+        `UPDATE ${cfg.table} t
+         SET verification_status = $1,
+             is_verified = $2,
+             verified_by = $3,
+             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
+             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
+             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
+             updated_at = NOW()
+         FROM students s
+         WHERE t.${cfg.idCol} = $5 AND t.college_id = $6
+           AND s.student_id = t.student_id
+         RETURNING ${cfg.returning},
+                  s.first_name AS student_first_name,
+                  s.last_name AS student_last_name`,
+        [action, isVerified, userId, rejectionReason || null, itemId, collegeId,
+         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
+    );
+
+    if (!result.rows.length) {
+        throw Object.assign(new Error(cfg.notFoundMsg), { status: 404 });
+    }
+
+    logger.info(`${LOG.API_END} ${category} ${action}`, { [cfg.idCol]: itemId, collegeId, userId });
+    return result.rows[0];
+}
+
+// ============================================================================
+// SHARED — Bulk-item verification helper (reduces 3 identical functions)
+// ============================================================================
+
+async function bulkVerifyItems(category, ids, collegeId, userId, action, rejectionReason) {
+    const cfg = ITEM_VERIFY_CONFIG[category];
+    const isVerified = action === STATUS.VERIFICATION.APPROVED;
+
+    const result = await query(
+        `UPDATE ${cfg.table}
+         SET verification_status = $1,
+             is_verified = $2,
+             verified_by = $3,
+             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
+             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
+             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
+             updated_at = NOW()
+         WHERE ${cfg.idCol} = ANY($5::uuid[]) AND college_id = $6
+         RETURNING ${cfg.idCol}`,
+        [action, isVerified, userId, rejectionReason || null, ids, collegeId,
+         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
+    );
+
+    logger.info(`${LOG.API_END} Bulk ${category} verification`, {
+        action, requested: ids.length, updated: result.rows.length, collegeId, userId,
+    });
+
+    return {
+        requested: ids.length,
+        updated: result.rows.length,
+        updated_ids: result.rows.map(r => r[cfg.idCol]),
+    };
+}
+
+// ============================================================================
 // 6. VERIFY STUDENT PROFILE (single)
 // ============================================================================
 
@@ -337,124 +475,19 @@ async function verifyStudentProfile(studentId, collegeId, userId, action, reject
 }
 
 // ============================================================================
-// 7. VERIFY EXPERIENCE (single)
+// 7–9. VERIFY ITEMS (single — delegates to shared helper)
 // ============================================================================
 
-async function verifyExperience(experienceId, collegeId, userId, action, rejectionReason) {
-    const isVerified = action === STATUS.VERIFICATION.APPROVED;
-
-    const result = await query(
-        `UPDATE student_experience
-         SET verification_status = $1,
-             is_verified = $2,
-             verified_by = $3,
-             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
-             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
-             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
-             updated_at = NOW()
-         WHERE experience_id = $5 AND college_id = $6
-         RETURNING experience_id, student_id, college_id,
-                   company_name, company_website, position_title,
-                   employment_type, job_description, responsibilities,
-                   technologies_used, work_location, work_mode,
-                   start_date, end_date, is_current, duration_months,
-                   offer_letter_url, completion_certificate_url,
-                   is_verified, verification_status,
-                   verified_by, verified_at,
-                   rejection_reason, rejected_at,
-                   created_at, updated_at`,
-        [action, isVerified, userId, rejectionReason || null, experienceId, collegeId,
-         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
-    );
-
-    if (!result.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.EXPERIENCE_NOT_FOUND), { status: 404 });
-    }
-
-    logger.info(`${LOG.API_END} Experience ${action}`, { experienceId, collegeId, userId });
-
-    return result.rows[0];
+function verifyExperience(id, collegeId, userId, action, reason) {
+    return verifyItem('experience', id, collegeId, userId, action, reason);
 }
 
-// ============================================================================
-// 8. VERIFY ACHIEVEMENT (single)
-// ============================================================================
-
-async function verifyAchievement(achievementId, collegeId, userId, action, rejectionReason) {
-    const isVerified = action === STATUS.VERIFICATION.APPROVED;
-
-    const result = await query(
-        `UPDATE student_achievements
-         SET verification_status = $1,
-             is_verified = $2,
-             verified_by = $3,
-             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
-             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
-             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
-             updated_at = NOW()
-         WHERE achievement_id = $5 AND college_id = $6
-         RETURNING achievement_id, student_id, college_id,
-                   achievement_title, achievement_description,
-                   achievement_type, issuing_organization,
-                   event_name, achievement_level,
-                   position_rank, participants_count,
-                   achievement_date, certificate_url, proof_url,
-                   is_verified, verification_status,
-                   verified_by, verified_at,
-                   rejection_reason, rejected_at,
-                   is_featured, display_order,
-                   created_at, updated_at`,
-        [action, isVerified, userId, rejectionReason || null, achievementId, collegeId,
-         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
-    );
-
-    if (!result.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.ACHIEVEMENT_NOT_FOUND), { status: 404 });
-    }
-
-    logger.info(`${LOG.API_END} Achievement ${action}`, { achievementId, collegeId, userId });
-
-    return result.rows[0];
+function verifyAchievement(id, collegeId, userId, action, reason) {
+    return verifyItem('achievement', id, collegeId, userId, action, reason);
 }
 
-// ============================================================================
-// 9. VERIFY CERTIFICATE (single)
-// ============================================================================
-
-async function verifyCertificate(certificateId, collegeId, userId, action, rejectionReason) {
-    const isVerified = action === STATUS.VERIFICATION.APPROVED;
-
-    const result = await query(
-        `UPDATE student_certificates
-         SET verification_status = $1,
-             is_verified = $2,
-             verified_by = $3,
-             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
-             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
-             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
-             updated_at = NOW()
-         WHERE certificate_id = $5 AND college_id = $6
-         RETURNING certificate_id, student_id, college_id,
-                   certificate_name, certificate_description,
-                   certificate_type, issuing_organization,
-                   issuing_platform, credential_id, credential_url,
-                   issue_date, expiry_date, does_not_expire,
-                   skills_covered, certificate_url,
-                   is_verified, verification_status,
-                   verified_by, verified_at,
-                   rejection_reason, rejected_at,
-                   created_at, updated_at`,
-        [action, isVerified, userId, rejectionReason || null, certificateId, collegeId,
-         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
-    );
-
-    if (!result.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.CERTIFICATE_NOT_FOUND), { status: 404 });
-    }
-
-    logger.info(`${LOG.API_END} Certificate ${action}`, { certificateId, collegeId, userId });
-
-    return result.rows[0];
+function verifyCertificate(id, collegeId, userId, action, reason) {
+    return verifyItem('certificate', id, collegeId, userId, action, reason);
 }
 
 // ============================================================================
@@ -570,114 +603,19 @@ async function bulkVerifyProfiles(ids, collegeId, userId, action, rejectionReaso
 }
 
 // ============================================================================
-// 11. BULK VERIFY EXPERIENCES
+// 11–13. BULK VERIFY ITEMS (delegates to shared helper)
 // ============================================================================
 
-async function bulkVerifyExperiences(ids, collegeId, userId, action, rejectionReason) {
-    const isVerified = action === STATUS.VERIFICATION.APPROVED;
-
-    const result = await query(
-        `UPDATE student_experience
-         SET verification_status = $1,
-             is_verified = $2,
-             verified_by = $3,
-             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
-             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
-             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
-             updated_at = NOW()
-         WHERE experience_id = ANY($5::uuid[]) AND college_id = $6
-         RETURNING experience_id`,
-        [action, isVerified, userId, rejectionReason || null, ids, collegeId,
-         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
-    );
-
-    logger.info(`${LOG.API_END} Bulk experience verification`, {
-        action,
-        requested: ids.length,
-        updated: result.rows.length,
-        collegeId,
-        userId,
-    });
-
-    return {
-        requested: ids.length,
-        updated: result.rows.length,
-        updated_ids: result.rows.map(r => r.experience_id),
-    };
+function bulkVerifyExperiences(ids, collegeId, userId, action, rejectionReason) {
+    return bulkVerifyItems('experience', ids, collegeId, userId, action, rejectionReason);
 }
 
-// ============================================================================
-// 12. BULK VERIFY ACHIEVEMENTS
-// ============================================================================
-
-async function bulkVerifyAchievements(ids, collegeId, userId, action, rejectionReason) {
-    const isVerified = action === STATUS.VERIFICATION.APPROVED;
-
-    const result = await query(
-        `UPDATE student_achievements
-         SET verification_status = $1,
-             is_verified = $2,
-             verified_by = $3,
-             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
-             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
-             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
-             updated_at = NOW()
-         WHERE achievement_id = ANY($5::uuid[]) AND college_id = $6
-         RETURNING achievement_id`,
-        [action, isVerified, userId, rejectionReason || null, ids, collegeId,
-         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
-    );
-
-    logger.info(`${LOG.API_END} Bulk achievement verification`, {
-        action,
-        requested: ids.length,
-        updated: result.rows.length,
-        collegeId,
-        userId,
-    });
-
-    return {
-        requested: ids.length,
-        updated: result.rows.length,
-        updated_ids: result.rows.map(r => r.achievement_id),
-    };
+function bulkVerifyAchievements(ids, collegeId, userId, action, rejectionReason) {
+    return bulkVerifyItems('achievement', ids, collegeId, userId, action, rejectionReason);
 }
 
-// ============================================================================
-// 13. BULK VERIFY CERTIFICATES
-// ============================================================================
-
-async function bulkVerifyCertificates(ids, collegeId, userId, action, rejectionReason) {
-    const isVerified = action === STATUS.VERIFICATION.APPROVED;
-
-    const result = await query(
-        `UPDATE student_certificates
-         SET verification_status = $1,
-             is_verified = $2,
-             verified_by = $3,
-             verified_at = CASE WHEN $1 = $7 THEN NOW() ELSE verified_at END,
-             rejection_reason = CASE WHEN $1 = $8 THEN $4 ELSE NULL END,
-             rejected_at = CASE WHEN $1 = $8 THEN NOW() ELSE NULL END,
-             updated_at = NOW()
-         WHERE certificate_id = ANY($5::uuid[]) AND college_id = $6
-         RETURNING certificate_id`,
-        [action, isVerified, userId, rejectionReason || null, ids, collegeId,
-         STATUS.VERIFICATION.APPROVED, STATUS.VERIFICATION.REJECTED]
-    );
-
-    logger.info(`${LOG.API_END} Bulk certificate verification`, {
-        action,
-        requested: ids.length,
-        updated: result.rows.length,
-        collegeId,
-        userId,
-    });
-
-    return {
-        requested: ids.length,
-        updated: result.rows.length,
-        updated_ids: result.rows.map(r => r.certificate_id),
-    };
+function bulkVerifyCertificates(ids, collegeId, userId, action, rejectionReason) {
+    return bulkVerifyItems('certificate', ids, collegeId, userId, action, rejectionReason);
 }
 
 // ============================================================================

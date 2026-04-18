@@ -15,7 +15,9 @@
 
 const studentService = require('../../services/college/student.service');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
-const { SUCCESS_MESSAGES } = require('../../config/constants');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
+const { SUCCESS_MESSAGES, AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // 1. REGISTER SINGLE STUDENT
@@ -26,6 +28,20 @@ async function registerStudent(req, res) {
         req.validated,
         req.user.college_id
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.CREATE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: result.student_id,
+        summary: `Registered student "${result.first_name} ${result.last_name}"`,
+        newValue: result,
+        metadata: { entityName: `${result.first_name} ${result.last_name}` },
+        ipAddress: getClientIp(req),
+    });
 
     return sendCreated(res, result, SUCCESS_MESSAGES.STUDENT_REGISTERED);
 }
@@ -41,6 +57,18 @@ async function bulkRegisterStudents(req, res) {
         students,
         req.user.college_id
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.BULK_IMPORT,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        summary: `Bulk registered ${result.summary?.total ?? students.length} students (${result.summary?.success ?? 0} success, ${result.summary?.failed ?? 0} failed)`,
+        metadata: result.summary,
+        ipAddress: getClientIp(req),
+    });
 
     return sendCreated(res, result, SUCCESS_MESSAGES.STUDENTS_BULK_REGISTERED);
 }
@@ -98,6 +126,20 @@ async function updateStudent(req, res) {
         req.validated
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: req.params.studentId,
+        summary: `Updated student "${result.first_name} ${result.last_name}" profile`,
+        newValue: result,
+        metadata: { entityName: `${result.first_name} ${result.last_name}` },
+        ipAddress: getClientIp(req),
+    });
+
     return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_UPDATED);
 }
 
@@ -113,6 +155,21 @@ async function toggleStudentStatus(req, res) {
         req.user.college_id,
         student_status
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: req.params.studentId,
+        summary: `Changed student "${result.first_name} ${result.last_name}" status to "${student_status}"`,
+        oldValue: { student_status: result._previousStatus },
+        newValue: { student_status },
+        metadata: { entityName: `${result.first_name} ${result.last_name}` },
+        ipAddress: getClientIp(req),
+    });
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_STATUS_TOGGLED);
 }
@@ -131,6 +188,21 @@ async function approveStudentProfile(req, res) {
         action,
         rejection_reason
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.STUDENT,
+        resourceId: req.params.studentId,
+        summary: `${action === 'approved' ? 'Approved' : 'Rejected'} student "${result.first_name} ${result.last_name}" profile`,
+        oldValue: { approval_status: result._previousApprovalStatus },
+        newValue: { action, rejection_reason: rejection_reason ?? null },
+        metadata: { entityName: `${result.first_name} ${result.last_name}` },
+        ipAddress: getClientIp(req),
+    });
 
     const message = action === 'approved'
         ? SUCCESS_MESSAGES.STUDENT_PROFILE_APPROVED

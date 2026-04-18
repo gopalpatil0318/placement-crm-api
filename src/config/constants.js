@@ -76,6 +76,8 @@ const STATUS = Object.freeze({
     SELECTED: 'selected',
     OFFERED: 'offered',
     WITHDRAWN: 'withdrawn',
+    WAITLISTED: 'waitlisted',
+    AUTO_WITHDRAWN: 'auto_withdrawn',
   }),
 
   // job_rounds.round_status
@@ -99,7 +101,9 @@ const STATUS = Object.freeze({
   PLACEMENT: Object.freeze({
     OFFERED: 'offered',
     ACCEPTED: 'accepted',
-    REJECTED: 'rejected',
+    DECLINED: 'declined',
+    REVOKED: 'revoked',
+    EXPIRED: 'expired',
     JOINED: 'joined',
     CANCELLED: 'cancelled',
   }),
@@ -130,9 +134,10 @@ const STATUS = Object.freeze({
 
   // training_programs.program_status
   TRAINING: Object.freeze({
+    DRAFT: 'draft',
     UPCOMING: 'upcoming',
-    ENROLLMENT_OPEN: 'enrollment_open',
     IN_PROGRESS: 'in_progress',
+    ON_HOLD: 'on_hold',
     COMPLETED: 'completed',
     CANCELLED: 'cancelled',
   }),
@@ -166,10 +171,23 @@ const STATUS = Object.freeze({
     TRAINING_ENROLLMENT: 'training_enrollment',
     TRAINING_COMPLETED: 'training_completed',
     PROFILE_INCOMPLETE: 'profile_incomplete',
+    PROFILE_APPROVED: 'profile_approved',
+    PROFILE_REJECTED: 'profile_rejected',
+    ITEM_VERIFIED: 'item_verified',
+    ITEM_REJECTED: 'item_rejected',
     ELIGIBILITY_OVERRIDE_REQUESTED: 'eligibility_override_requested',
     ELIGIBILITY_OVERRIDE_APPROVED: 'eligibility_override_approved',
     ELIGIBILITY_OVERRIDE_REJECTED: 'eligibility_override_rejected',
     GENERAL: 'general',
+    // Phase 1: New lifecycle notification types
+    OFFER_EXPIRING: 'offer_expiring',
+    OFFER_EXPIRED: 'offer_expired',
+    OFFER_DECLINED: 'offer_declined',
+    OFFER_REVOKED: 'offer_revoked',
+    OFFER_ACCEPTED: 'offer_accepted',
+    AUTO_WITHDRAWN: 'auto_withdrawn',
+    WAITLIST_PROMOTED: 'waitlist_promoted',
+    ROUND_PROCESSING_COMPLETE: 'round_processing_complete',
   }),
 
   // notifications.recipient_type
@@ -190,6 +208,15 @@ const STATUS = Object.freeze({
     PENDING: 'pending',
     APPROVED: 'approved',
     REJECTED: 'rejected',
+  }),
+
+  // training_enrollments.payment_status
+  PAYMENT: Object.freeze({
+    NOT_APPLICABLE: 'not_applicable',
+    PENDING: 'pending',
+    PAID: 'paid',
+    WAIVED: 'waived',
+    REFUNDED: 'refunded',
   }),
 });
 
@@ -265,11 +292,11 @@ const ERROR_MESSAGES = Object.freeze({
   INVALID_APPLICATION_TRANSITION: 'Invalid application status transition',
   PLACEMENT_NOT_FOUND: 'Placement record not found',
   PLACEMENT_NOT_OFFERED_ACCEPT: 'Only offers with status "offered" can be accepted',
-  PLACEMENT_NOT_OFFERED_REJECT: 'Only offers with status "offered" can be rejected',
+  PLACEMENT_NOT_OFFERED_REJECT: 'Only offers with status "offered" can be declined',
   PLACEMENT_ALREADY_ACCEPTED: 'You have already accepted this offer',
-  PLACEMENT_ALREADY_REJECTED: 'You have already rejected this offer',
-  PLACEMENT_ALREADY_ACCEPTED_CANNOT_REJECT: 'This offer has already been accepted and cannot be rejected',
-  PLACEMENT_ALREADY_REJECTED_CANNOT_ACCEPT: 'This offer has already been rejected and cannot be accepted',
+  PLACEMENT_ALREADY_REJECTED: 'You have already declined this offer',
+  PLACEMENT_ALREADY_ACCEPTED_CANNOT_REJECT: 'This offer has already been accepted and cannot be declined',
+  PLACEMENT_ALREADY_REJECTED_CANNOT_ACCEPT: 'This offer has already been declined and cannot be accepted',
   PLACEMENT_DUPLICATE_APPLICATION: 'Placement record already exists for this application',
   APPLICATION_NOT_ELIGIBLE_FOR_PLACEMENT: 'Application must be "selected" or "offered" to create a placement',
   JOINING_DATE_MUST_BE_FUTURE: 'Full-time joining date must be in the future',
@@ -278,6 +305,12 @@ const ERROR_MESSAGES = Object.freeze({
   PLACEMENT_NO_FIELDS_TO_UPDATE: 'No valid fields provided for update',
   OFFER_LETTER_NO_URL: 'Cannot verify offer letter — no offer letter URL uploaded yet',
   OFFER_LETTER_TERMINAL_STATUS: 'Cannot verify offer for a terminal placement',
+  JOINING_LETTER_NO_URL: 'Cannot verify joining letter — no joining letter URL uploaded yet',
+  JOINING_LETTER_TERMINAL_STATUS: 'Cannot verify joining letter for a terminal placement',
+  DOCUMENT_UPLOAD_NO_FIELDS: 'Provide at least one document URL (offer_letter_url or joining_letter_url)',
+  DOCUMENT_UPLOAD_NOT_ALLOWED: 'Cannot upload documents for this placement status',
+  JOINING_LETTER_NOT_ACCEPTED: 'Joining letter can only be uploaded after offer is accepted',
+  DOCUMENT_REJECTION_REASON_REQUIRED: 'Rejection reason is required when rejecting a document',
   PLACEMENT_ALREADY_STATUS: 'Placement is already in this status',
   INVALID_PLACEMENT_TRANSITION: 'Invalid placement status transition',
   ROUND_NOT_FOUND: 'Selection round not found',
@@ -303,6 +336,23 @@ const ERROR_MESSAGES = Object.freeze({
   TRAINING_FEEDBACK_ALREADY_SUBMITTED: 'You have already submitted feedback for this program',
   TRAINING_FEEDBACK_DROP_FORBIDDEN: 'Cannot submit feedback for a dropped enrollment',
   TRAINING_FEEDBACK_NOT_STARTED: 'Cannot submit feedback before program has started',
+  TRAINING_FEEDBACK_NOT_SUBMITTED: 'No feedback to update. Please submit feedback first',
+  TRAINING_FEEDBACK_NO_SESSIONS: 'You must attend at least one session before submitting feedback',
+  PROFILE_NOT_COMPLETE_FOR_ENROLLMENT: 'Your profile must be complete before enrolling in a training program',
+  PROFILE_NOT_APPROVED_FOR_ENROLLMENT: 'Your profile must be approved before enrolling in a training program',
+  ENROLLMENT_INVALID_TRANSITION: 'Invalid enrollment status transition',
+  ENROLLMENT_MAX_BELOW_CURRENT: 'Max enrollment cannot be less than current active enrollment count',
+  TRAINING_ENROLLMENT_ACCESS_INVALID: 'Cannot open enrollments for a program in draft, completed, or cancelled status',
+  WITHDRAW_NOT_ALLOWED: 'Withdrawal is only allowed for enrolled or in-progress enrollments',
+  WITHDRAW_PROGRAM_ENDED: 'Cannot withdraw from a completed or cancelled program',
+  SESSION_NOT_FOUND: 'Training session not found',
+  SESSION_NUMBER_EXCEEDS_TOTAL: 'Session number cannot exceed total sessions for this program',
+  SESSION_DUPLICATE_NUMBER: 'A session with this number already exists for this program',
+  SESSION_HAS_ATTENDANCE: 'Cannot delete a session that already has attendance records',
+  SESSION_ATTENDANCE_ALREADY_MARKED: 'Attendance has already been marked for this session. Use update instead',
+  ENROLLMENT_INVALID_FOR_ATTENDANCE: 'One or more enrollments are not eligible for attendance (dropped or failed)',
+  BULK_ENROLLMENT_NO_ITEMS: 'No enrollment updates provided',
+  BULK_ENROLLMENT_INVALID_IDS: 'One or more enrollment IDs do not belong to this program',
   NOTIFICATION_NOT_FOUND: 'Notification not found',
   FEEDBACK_NOT_FOUND: 'Feedback not found',
   INTERVIEW_QUESTION_NOT_FOUND: 'Interview question not found',
@@ -312,6 +362,26 @@ const ERROR_MESSAGES = Object.freeze({
   SKILL_NOT_FOUND: 'Skill not found',
   SKILL_DUPLICATE: 'A skill with this name already exists in your college',
   RESOURCE_NOT_FOUND: 'The requested resource was not found',
+
+  // Company Tiers
+  TIER_NOT_FOUND: 'Company tier not found',
+  TIER_DUPLICATE_NAME: 'A tier with this name already exists for this passout year',
+  TIER_DUPLICATE_LEVEL: 'A tier with this level already exists for this passout year',
+  TIER_HAS_JOBS: 'Cannot delete a tier that is assigned to active jobs',
+
+  // Placement Settings
+  SETTINGS_NOT_FOUND: 'Placement settings not found for this passout year',
+
+  // Offer Lifecycle
+  OFFER_EXPIRED_CANNOT_ACCEPT: 'This offer has expired and can no longer be accepted',
+  OFFER_EXPIRED_CANNOT_DECLINE: 'This offer has already expired',
+  OFFER_REVOKE_REASON_REQUIRED: 'A reason is required when revoking an offer',
+  VACANCY_LIMIT_REACHED: 'No vacancies remaining for this position',
+  MAX_ACTIVE_OFFERS_REACHED: 'Student has reached the maximum number of active offers allowed',
+  DREAM_UPGRADE_NOT_ALLOWED: 'Dream company upgrade is not enabled for this passout year',
+  PLACED_SAME_OR_LOWER_TIER: 'You are already placed at the same or higher tier. Only dream company upgrades are allowed',
+  APPLICATION_REVERT_NOT_ALLOWED: 'Can only revert system-generated rejections (expired offers, closed jobs, round failures)',
+  BULK_PLACEMENT_NO_ITEMS: 'No application IDs provided for bulk offer creation',
 
   // Business logic
   PROFILE_NOT_APPROVED: 'Your profile must be approved before you can apply for jobs',
@@ -331,6 +401,8 @@ const ERROR_MESSAGES = Object.freeze({
   FEEDBACK_ALREADY_SUBMITTED: 'You have already submitted feedback for this job',
   FEEDBACK_FEATURE_DISABLED: 'Feedback feature is not enabled for your college',
   INTERVIEW_QUESTIONS_FEATURE_DISABLED: 'Interview questions feature is not enabled for your college',
+  INTERVIEW_QUESTIONS_BATCH_LIMIT: 'Cannot submit more than 10 questions at once',
+  NO_APPLICATIONS_FOUND: 'No applications found for this student',
 
   // Override Requests (College)
   OVERRIDE_NOT_FOUND: 'Override request not found',
@@ -346,6 +418,7 @@ const ERROR_MESSAGES = Object.freeze({
   STUDENT_OVERRIDE_PENDING: 'You already have a pending override request for this job.',
   STUDENT_OVERRIDE_APPROVED: 'Your override request was already approved. You can now apply.',
   STUDENT_OVERRIDE_REJECTED: 'Your override request was rejected. You cannot submit another request for this job.',
+  STUDENT_OVERRIDE_MAX_ATTEMPTS: 'You have reached the maximum override request attempts for this job.',
   STUDENT_ALREADY_ELIGIBLE: 'You are already eligible for this job. No override request needed. You can apply directly.',
   PASSOUT_YEAR_NOT_OVERRIDABLE: 'Your passout year does not match the job requirements. Passout year cannot be overridden.',
 
@@ -412,6 +485,9 @@ const ERROR_MESSAGES = Object.freeze({
   ROUND_NOT_EDITABLE: 'Round is in a terminal state and cannot be edited',
   ROUND_ALREADY_STATUS: 'Round already has the requested status',
   INVALID_ROUND_STATUS_TRANSITION: 'Invalid round status transition',
+  ROUND_NOT_COMPLETED: 'Round must be in completed status before processing',
+  ROUND_ALREADY_PROCESSED: 'This round has already been processed',
+  JOB_CLOSE_CASCADE_FAILED: 'Failed to cascade job close to applications',
 
   // Round Result
   RESULT_NOT_FOUND: 'Round result not found',
@@ -422,6 +498,8 @@ const ERROR_MESSAGES = Object.freeze({
   CANNOT_UPDATE_RESULT_CANCELLED_ROUND: 'Cannot update results in a cancelled round',
   CANNOT_UPDATE_RESULT_CANCELLED_JOB: 'Cannot update results for a cancelled job',
   INVALID_APPLICATION_FOR_RESULT: 'Application not found for this job or does not belong to this college',
+  ROUND_NOT_STARTED: 'This round must be started (set to In Progress) before results can be entered',
+  PREVIOUS_ROUND_NOT_PASSED: 'Student did not pass the previous round and cannot participate in this round',
 
   // Question
   QUESTION_NOT_FOUND: 'Application question not found',
@@ -560,12 +638,19 @@ const SUCCESS_MESSAGES = Object.freeze({
   OFFER_REJECTED: 'Offer declined',
   OFFER_LETTER_VERIFIED: 'Offer letter verified successfully',
   OFFER_LETTER_UNVERIFIED: 'Offer letter verification removed',
+  OFFER_LETTER_REJECTED: 'Offer letter rejected',
+  JOINING_LETTER_VERIFIED: 'Joining letter verified successfully',
+  JOINING_LETTER_UNVERIFIED: 'Joining letter verification removed',
+  JOINING_LETTER_REJECTED: 'Joining letter rejected',
+  DOCUMENTS_UPLOADED: 'Placement documents uploaded successfully',
   PLACEMENTS_RETRIEVED: 'Placements retrieved successfully',
   PLACEMENT_RETRIEVED: 'Placement details retrieved successfully',
   PLACEMENT_ACCEPTED: 'Placement accepted',
   PLACEMENT_JOINED: 'Student marked as joined',
-  PLACEMENT_REJECTED: 'Placement rejected',
+  PLACEMENT_REJECTED: 'Placement declined',
   PLACEMENT_CANCELLED: 'Placement cancelled',
+  PLACEMENT_REVOKED: 'Offer revoked successfully',
+  PLACEMENT_EXPIRED: 'Offer has expired',
 
   // Round
   ROUND_ADDED: 'Selection round added',
@@ -596,6 +681,24 @@ const SUCCESS_MESSAGES = Object.freeze({
   POLICY_ACTIVATED: 'Policy activated successfully',
   POLICY_DEACTIVATED: 'Policy deactivated successfully',
 
+  // Company Tiers
+  TIER_CREATED: 'Company tier created successfully',
+  TIER_UPDATED: 'Company tier updated',
+  TIER_DELETED: 'Company tier removed',
+  TIERS_RETRIEVED: 'Company tiers retrieved successfully',
+
+  // Placement Settings
+  SETTINGS_RETRIEVED: 'Placement settings retrieved successfully',
+  SETTINGS_SAVED: 'Placement settings saved successfully',
+
+  // Offer Lifecycle
+  OFFER_DECLINED_SUCCESS: 'Offer declined successfully',
+  OFFER_REVOKED_SUCCESS: 'Offer revoked successfully',
+  APPLICATION_REVERTED: 'Application reverted to selected status',
+  BULK_PLACEMENTS_CREATED: 'Bulk placement offers created',
+  ROUND_PROCESSING_PREVIEW: 'Round processing preview generated',
+  ROUND_PROCESSED: 'Round results processed and students advanced',
+
   // Restriction
   RESTRICTION_ADDED: 'Student restriction applied',
   RESTRICTION_UPDATED: 'Restriction updated',
@@ -609,6 +712,7 @@ const SUCCESS_MESSAGES = Object.freeze({
   TRAINING_CREATED: 'Training program created',
   TRAINING_UPDATED: 'Training program updated',
   TRAINING_STATUS_CHANGED: 'Training program status updated',
+  TRAINING_ENROLLMENT_ACCESS_CHANGED: 'Enrollment access updated',
   TRAININGS_RETRIEVED: 'Training programs retrieved successfully',
   TRAINING_RETRIEVED: 'Training program retrieved successfully',
   ENROLLMENTS_RETRIEVED: 'Enrollments retrieved successfully',
@@ -617,6 +721,16 @@ const SUCCESS_MESSAGES = Object.freeze({
   AVAILABLE_TRAININGS_RETRIEVED: 'Available training programs retrieved successfully',
   ENROLLED_TRAININGS_RETRIEVED: 'Enrolled training programs retrieved successfully',
   FEEDBACK_SUBMITTED: 'Thank you for your feedback!',
+  FEEDBACK_UPDATED: 'Feedback updated successfully',
+  ENROLLMENT_WITHDRAWN: 'Successfully withdrawn from the training program',
+  BULK_ENROLLMENT_UPDATED: 'Bulk enrollment update completed',
+  STUDENT_TRAINING_REPORT_RETRIEVED: 'Student training report retrieved successfully',
+  SESSION_CREATED: 'Training session created',
+  SESSION_UPDATED: 'Training session updated',
+  SESSION_DELETED: 'Training session deleted',
+  SESSIONS_RETRIEVED: 'Training sessions retrieved successfully',
+  ATTENDANCE_MARKED: 'Attendance marked successfully',
+  ATTENDANCE_RETRIEVED: 'Session attendance retrieved successfully',
   FEEDBACK_RETRIEVED: 'Feedback retrieved successfully',
   MY_FEEDBACK_RETRIEVED: 'Your feedback retrieved successfully',
   FEEDBACK_APPROVED: 'Feedback approved successfully',
@@ -624,6 +738,9 @@ const SUCCESS_MESSAGES = Object.freeze({
   INTERVIEW_QUESTIONS_RETRIEVED: 'Interview questions retrieved successfully',
   BROWSE_QUESTIONS_RETRIEVED: 'Approved interview questions retrieved successfully',
   INTERVIEW_QUESTION_SUBMITTED: 'Interview question submitted for review',
+  INTERVIEW_QUESTIONS_BATCH_SUBMITTED: 'Interview questions submitted for review',
+  APPLIED_JOB_OPTIONS_RETRIEVED: 'Applied job options retrieved successfully',
+  QUESTION_COMPANIES_RETRIEVED: 'Interview question companies retrieved successfully',
   INTERVIEW_QUESTION_APPROVED: 'Interview question approved successfully',
   INTERVIEW_QUESTION_REJECTED: 'Interview question rejected',
 
@@ -667,6 +784,9 @@ const SUCCESS_MESSAGES = Object.freeze({
   DEPARTMENT_STATS_RETRIEVED: 'Department-wise statistics retrieved',
   COMPANY_STATS_RETRIEVED: 'Company-wise statistics retrieved',
   YEAR_COMPARISON_RETRIEVED: 'Year comparison data retrieved',
+
+  // Audit Trail
+  AUDIT_LOGS_RETRIEVED: 'Audit logs retrieved successfully',
 
   // Generic
   FETCHED_SUCCESSFULLY: 'Data retrieved successfully',
@@ -809,6 +929,24 @@ const FEATURES = Object.freeze({
 const ROUND_TYPES = Object.freeze(['aptitude', 'technical', 'hr', 'group_discussion', 'coding', 'other']);
 
 // ============================================================================
+// DRIVE TYPES (matches job_postings.drive_type column)
+// ============================================================================
+const DRIVE_TYPES = Object.freeze(['on_campus', 'off_campus', 'pool_campus']);
+
+// ============================================================================
+// APPLICATION STATUSES (matches student_applications.application_status CHECK)
+// ============================================================================
+const APPLICATION_STATUSES = Object.freeze([
+  'pending', 'under_review', 'shortlisted', 'rejected', 'selected',
+  'offered', 'withdrawn', 'waitlisted', 'auto_withdrawn',
+]);
+
+// ============================================================================
+// AUTO-WITHDRAWAL RULES (matches placement_settings.auto_withdrawal_rule CHECK)
+// ============================================================================
+const AUTO_WITHDRAWAL_RULES = Object.freeze(['none', 'same_tier', 'same_or_lower_tier', 'all']);
+
+// ============================================================================
 // MCQ QUESTION TYPES (subset of QUESTION_TYPES that require options)
 // ============================================================================
 const MCQ_TYPES = Object.freeze(['mcq_single', 'mcq_multiple']);
@@ -817,8 +955,8 @@ const MCQ_TYPES = Object.freeze(['mcq_single', 'mcq_multiple']);
 // PLACEMENT TYPE & STATUS ENUMS
 // ============================================================================
 const PLACEMENT_TYPES = Object.freeze(['full-time', 'internship', 'both']);
-const PLACEMENT_STATUSES = Object.freeze(['offered', 'accepted', 'rejected', 'joined', 'cancelled']);
-const ACCEPTANCE_STATUSES = Object.freeze(['accepted', 'rejected', 'pending']);
+const PLACEMENT_STATUSES = Object.freeze(['offered', 'accepted', 'declined', 'revoked', 'expired', 'joined', 'cancelled']);
+const ACCEPTANCE_STATUSES = Object.freeze(['accepted', 'rejected', 'pending']); // deprecated — kept for backward compat
 const RESTRICTION_TYPES = Object.freeze(Object.values(STATUS.RESTRICTION));
 const OVERRIDE_STATUSES = Object.freeze(Object.values(STATUS.OVERRIDE));
 const REVIEW_ACTIONS = Object.freeze(['approve', 'reject']);
@@ -826,6 +964,95 @@ const TRAINING_PROGRAM_TYPES = Object.freeze([
   'aptitude', 'coding', 'soft_skills', 'interview_prep',
   'resume_building', 'technical', 'group_discussion', 'other',
 ]);
+
+// ============================================================================
+// ENROLLMENT STATUS VALID TRANSITIONS (state machine)
+// ============================================================================
+const ENROLLMENT_VALID_TRANSITIONS = Object.freeze({
+  enrolled: ['dropped'],                  // enrolled→in_progress is now auto-cascaded when program starts
+  in_progress: ['completed', 'dropped', 'failed'],
+  completed: ['in_progress'],   // can resume for extra sessions
+  dropped: ['in_progress'],     // re-admit into active participation
+  failed: ['in_progress'],      // retry — rejoin active participation
+});
+
+// ============================================================================
+// SKILL CATEGORIES (matches skills.skill_category CHECK constraint)
+// ============================================================================
+const SKILL_CATEGORIES = Object.freeze([
+  // Software & IT
+  'programming_language', 'framework', 'database', 'devops', 'cloud', 'testing',
+  // Design & Creative
+  'design', 'cad_modeling',
+  // Engineering & Domain
+  'simulation', 'embedded_systems', 'manufacturing', 'electrical_systems',
+  'data_analytics', 'ai_ml',
+  // Professional
+  'project_management', 'soft_skill', 'communication', 'domain_knowledge',
+  // General
+  'tool', 'other',
+]);
+
+const SKILL_CATEGORY_LABELS = Object.freeze({
+  programming_language: 'Programming Language',
+  framework: 'Framework',
+  database: 'Database',
+  devops: 'DevOps',
+  cloud: 'Cloud',
+  testing: 'Testing',
+  design: 'Design',
+  cad_modeling: 'CAD / Modeling',
+  simulation: 'Simulation',
+  embedded_systems: 'Embedded Systems',
+  manufacturing: 'Manufacturing',
+  electrical_systems: 'Electrical Systems',
+  data_analytics: 'Data Analytics',
+  ai_ml: 'AI / ML',
+  project_management: 'Project Management',
+  soft_skill: 'Soft Skill',
+  communication: 'Communication',
+  domain_knowledge: 'Domain Knowledge',
+  tool: 'Tool',
+  other: 'Other',
+});
+
+const SKILL_CATEGORY_GROUPS = Object.freeze({
+  'Software & IT': ['programming_language', 'framework', 'database', 'devops', 'cloud', 'testing'],
+  'Design & Creative': ['design', 'cad_modeling'],
+  'Engineering & Domain': ['simulation', 'embedded_systems', 'manufacturing', 'electrical_systems', 'data_analytics', 'ai_ml'],
+  'Professional': ['project_management', 'soft_skill', 'communication', 'domain_knowledge'],
+  'General': ['tool', 'other'],
+});
+
+// ============================================================================
+// AUDIT TRAIL — B23 enums (match CHECK constraints on audit_log table)
+// ============================================================================
+const AUDIT_ACTIONS = Object.freeze({
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  STATUS_CHANGE: 'status_change',
+  BULK_IMPORT: 'bulk_import',
+  BULK_UPDATE: 'bulk_update',
+});
+
+const AUDIT_RESOURCE_TYPES = Object.freeze({
+  APPLICATION: 'application',
+  PLACEMENT: 'placement',
+  RESTRICTION: 'restriction',
+  POLICY: 'policy',
+  OVERRIDE: 'override',
+  JOB: 'job',
+  STUDENT: 'student',
+  USER: 'user',
+  TRAINING: 'training',
+  COMPANY: 'company',
+  DEPARTMENT: 'department',
+  SKILL: 'skill',
+  COMPANY_TIER: 'company_tier',
+  PLACEMENT_SETTING: 'placement_setting',
+  JOB_ROUND: 'job_round',
+});
 
 // ============================================================================
 // EXPORTS
@@ -860,4 +1087,15 @@ module.exports = {
   OVERRIDE_STATUSES,
   REVIEW_ACTIONS,
   TRAINING_PROGRAM_TYPES,
+  ENROLLMENT_VALID_TRANSITIONS,
+  SKILL_CATEGORIES,
+  SKILL_CATEGORY_LABELS,
+  SKILL_CATEGORY_GROUPS,
+  AUDIT_ACTIONS,
+  AUDIT_RESOURCE_TYPES,
+  DRIVE_TYPES,
+  APPLICATION_STATUSES,
+  AUTO_WITHDRAWAL_RULES,
+  NOTIFICATION_TYPE: STATUS.NOTIFICATION_TYPE,
+  RECIPIENT_TYPE: STATUS.RECIPIENT_TYPE,
 };

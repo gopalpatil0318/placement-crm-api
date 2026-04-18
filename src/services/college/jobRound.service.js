@@ -10,11 +10,9 @@
 
 const { query } = require('../../config/db');
 const logger = require('../../config/logger');
-const {
-    LOG,
-    ERROR_MESSAGES,
-    STATUS,
-} = require('../../config/constants');
+const { LOG, ERROR_MESSAGES, STATUS } = require('../../config/constants');
+const { assertTransition } = require('../../utils/stateMachine');
+const { notifyRoundScheduled } = require('../../utils/placementNotifier');
 
 // Updatable fields (round_number is auto-calculated, never user-editable)
 const FIELDS = ['round_name', 'round_description', 'round_type', 'round_date', 'round_venue'];
@@ -25,13 +23,7 @@ const ROUND_RETURNING_COLUMNS = [
     'round_type', 'round_date', 'round_venue', 'round_status', 'created_at',
 ].join(', ');
 
-// Valid round status transitions
-const VALID_TRANSITIONS = {
-    pending: ['in_progress', 'cancelled'],
-    in_progress: ['completed', 'cancelled'],
-    completed: [],    // terminal
-    cancelled: [],    // terminal
-};
+// Round status transitions delegated to src/utils/stateMachine.js
 
 // ============================================================================
 // HELPER — Verify job exists and belongs to college
@@ -174,6 +166,13 @@ async function addRound(jobId, collegeId, data) {
         collegeId,
     });
 
+    // Fire-and-forget: notify applicants about the scheduled round
+    notifyRoundScheduled(
+        collegeId, jobId, result.rows[0].round_id,
+        data.round_name, data.round_date ?? null,
+        job.job_title, job.company_name
+    ).catch(() => {});
+
     return formatRound({
         ...result.rows[0],
         job_title: job.job_title,
@@ -296,22 +295,8 @@ async function updateRoundStatus(roundId, collegeId, newStatus) {
         );
     }
 
-    // 3. Same status check
-    if (existing.round_status === newStatus) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.ROUND_ALREADY_STATUS),
-            { status: 400 }
-        );
-    }
-
-    // 4. Validate transition
-    const allowedTransitions = VALID_TRANSITIONS[existing.round_status] ?? [];
-    if (!allowedTransitions.includes(newStatus)) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.INVALID_ROUND_STATUS_TRANSITION),
-            { status: 400 }
-        );
-    }
+    // 3. Validate transition (same-status + invalid both handled)
+    assertTransition('round', existing.round_status, newStatus);
 
     // 5. Update
     const result = await query(

@@ -21,8 +21,12 @@
 const userService = require('../../services/college/user.service');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../utils/responseHelper');
 const logger = require('../../config/logger');
-const { SUCCESS_MESSAGES, LOG } = require('../../config/constants');
-const { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS } = require('../../config/cookie');
+const { logAudit, getClientIp } = require('../../utils/auditHelper');
+const { query } = require('../../config/db');
+const { SUCCESS_MESSAGES, LOG, AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../config/constants');
+const { CLEAR_COOKIE_OPTIONS, CLEAR_REFRESH_COOKIE_OPTIONS } = require('../../config/cookie');
+const { issueTokenPair } = require('../auth.controller');
+const { hashRefreshToken, findRefreshToken, revokeRefreshToken } = require('../../utils/jwtHelper');
 
 // ============================================================================
 // AUTH — 1. LOGIN
@@ -33,7 +37,13 @@ async function login(req, res) {
 
     const result = await userService.loginCollegeUser(email, password);
 
-    res.cookie('token', result.token, COOKIE_OPTIONS);
+    // B21: Issue access + refresh token pair
+    await issueTokenPair(
+        res,
+        { id: result.user.user_id, college_id: result.user.college_id, role: result.user.user_role, dept_id: result.user.dept_id || null },
+        result.user.user_id,
+        'college'
+    );
 
     logger.info(`${LOG.AUTH} College user login successful`, {
         userId: result.user.user_id,
@@ -50,7 +60,18 @@ async function login(req, res) {
 // ============================================================================
 
 async function logout(req, res) {
+    // B21: Revoke refresh token if present
+    const rawRefreshToken = req.cookies?.refresh_token;
+    if (rawRefreshToken) {
+        const tokenHash = hashRefreshToken(rawRefreshToken);
+        const stored = await findRefreshToken(tokenHash);
+        if (stored) {
+            await revokeRefreshToken(stored.token_id);
+        }
+    }
+
     res.clearCookie('token', CLEAR_COOKIE_OPTIONS);
+    res.clearCookie('refresh_token', CLEAR_REFRESH_COOKIE_OPTIONS);
 
     logger.info(`${LOG.AUTH} College user logged out`, {
         userId: req.user?.id,
@@ -107,6 +128,20 @@ async function changePassword(req, res) {
 async function createUser(req, res) {
     const result = await userService.createUser(req.validated, req.user.college_id);
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.CREATE,
+        resourceType: AUDIT_RESOURCE_TYPES.USER,
+        resourceId: result.user_id,
+        summary: `Created user "${result.user_name}" with role "${result.user_role}"`,
+        newValue: result,
+        metadata: { entityName: result.user_name, role: result.user_role },
+        ipAddress: getClientIp(req),
+    });
+
     return sendCreated(res, result, SUCCESS_MESSAGES.USER_CREATED);
 }
 
@@ -144,6 +179,20 @@ async function updateUser(req, res) {
         req.validated
     );
 
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.UPDATE,
+        resourceType: AUDIT_RESOURCE_TYPES.USER,
+        resourceId: req.params.userId,
+        summary: `Updated user "${result.user_name}"`,
+        newValue: result,
+        metadata: { entityName: result.user_name },
+        ipAddress: getClientIp(req),
+    });
+
     return sendSuccess(res, result, SUCCESS_MESSAGES.USER_UPDATED);
 }
 
@@ -159,6 +208,21 @@ async function toggleUserStatus(req, res) {
         req.user.college_id,
         user_status
     );
+
+    logAudit(query, {
+        collegeId: req.user.college_id,
+        userId: req.user.id,
+        userName: req.user.name,
+        userRole: req.user.role,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.USER,
+        resourceId: req.params.userId,
+        summary: `Changed user "${result.user_name}" status to "${user_status}"`,
+        oldValue: { user_status: result._previousStatus },
+        newValue: { user_status },
+        metadata: { entityName: result.user_name, role: result.user_role },
+        ipAddress: getClientIp(req),
+    });
 
     const message = user_status === 'active'
         ? SUCCESS_MESSAGES.USER_ACTIVATED

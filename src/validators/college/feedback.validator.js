@@ -61,6 +61,9 @@ const getAllInterviewQuestionsSchema = Joi.object({
   topic: Joi.string().max(100).trim()
     .messages({ 'string.max': 'Topic filter too long (max 100 chars)' }),
 
+  round_type: Joi.string().max(50).trim()
+    .messages({ 'string.max': 'Round type filter too long (max 50 chars)' }),
+
   search: Joi.string().max(100).trim()
     .messages({ 'string.max': 'Search query too long (max 100 chars)' }),
 

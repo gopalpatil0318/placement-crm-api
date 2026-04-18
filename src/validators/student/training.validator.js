@@ -3,10 +3,12 @@
  * STUDENT TRAINING VALIDATOR — Joi Schemas for Training Programs (Own)
  * ============================================================================
  * Endpoints:
- *   GET  /get_available_training                        — listAvailableTrainingsSchema (query)
- *   POST /enroll_in_training/:programId                 — (no body needed)
- *   GET  /get_enrolled_training                         — listEnrolledTrainingsSchema (query)
- *   POST /submit_training_feedback/:enrollmentId        — submitFeedbackSchema (body)
+ *   GET   /get_available_training                        — listAvailableTrainingsSchema (query)
+ *   POST  /enroll_in_training/:programId                 — (no body needed)
+ *   GET   /get_enrolled_training                         — listEnrolledTrainingsSchema (query)
+ *   POST  /submit_training_feedback/:enrollmentId        — submitFeedbackSchema (body)
+ *   PUT   /update_training_feedback/:enrollmentId        — updateFeedbackSchema (body)
+ *   PATCH /withdraw_from_training/:programId             — (no body needed)
  * ============================================================================
  */
 
@@ -102,6 +104,9 @@ const submitFeedbackSchema = Joi.object({
         }),
 });
 
+// Update feedback uses the same shape as submit
+const updateFeedbackSchema = submitFeedbackSchema;
+
 // ============================================================================
 // PARAM — :programId
 // ============================================================================
@@ -126,6 +131,7 @@ module.exports = {
     listAvailableTrainingsSchema,
     listEnrolledTrainingsSchema,
     submitFeedbackSchema,
+    updateFeedbackSchema,
     programIdParamSchema,
     enrollmentIdParamSchema,
 };

@@ -20,6 +20,7 @@ const {
     ERROR_MESSAGES,
     DB_ERROR_CODES,
 } = require('../../config/constants');
+const { maybeResetApproval } = require('../../utils/approvalResetHelper');
 
 // Explicit columns returned from all queries (excludes student_id, college_id, dept_id)
 const RETURNING_COLUMNS = `grade_id, semester_number, academic_year, sgpa, cgpa,
@@ -73,9 +74,9 @@ async function addSemesterGrade(studentId, collegeId, deptId, data) {
             [
                 studentId, collegeId, deptId, data.semester_number,
                 data.academic_year || null,
-                data.sgpa != null ? data.sgpa : null,
-                data.cgpa != null ? data.cgpa : null,
-                data.backlogs_in_semester != null ? data.backlogs_in_semester : 0,
+                data.sgpa ?? null,
+                data.cgpa ?? null,
+                data.backlogs_in_semester ?? 0,
                 data.backlog_subjects || [],
                 data.semester_status || 'in_progress',
             ]
@@ -177,17 +178,8 @@ async function updateSemesterGrade(gradeId, studentId, collegeId, data) {
             );
         }
 
-        // 3. Auto-reset profile approval when student updates semester grades
-        await client.query(
-            `UPDATE students
-             SET profile_approval_status = 'pending', profile_is_approved = false,
-                 approved_by = NULL, approved_at = NULL,
-                 profile_rejection_reason = NULL, rejected_at = NULL,
-                 updated_at = NOW()
-             WHERE student_id = $1 AND college_id = $2
-               AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // 3. Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'semester_grades');
 
         await client.query('COMMIT');
 

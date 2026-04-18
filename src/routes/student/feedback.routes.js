@@ -19,6 +19,7 @@ const {
   submitFeedbackSchema,
   getMyFeedbackSchema,
   submitInterviewQuestionSchema,
+  submitInterviewQuestionsSchema,
   browseInterviewQuestionsSchema,
 } = require('../../validators/student/feedback.validator');
 
@@ -51,6 +52,25 @@ router.get(
   '/browse_interview_questions',
   validate(browseInterviewQuestionsSchema, 'query'),
   asyncHandler(controller.browseInterviewQuestions)
+);
+
+// #176 — Get applied companies & jobs (for submit form dropdowns)
+router.get(
+  '/applied_job_options',
+  asyncHandler(controller.getAppliedJobOptions)
+);
+
+// #177 — Batch submit interview questions
+router.post(
+  '/submit_interview_questions',
+  validate(submitInterviewQuestionsSchema),
+  asyncHandler(controller.submitInterviewQuestions)
+);
+
+// #178 — Get companies with approved interview questions
+router.get(
+  '/interview_question_companies',
+  asyncHandler(controller.getInterviewQuestionCompanies)
 );
 
 module.exports = router;

@@ -21,7 +21,7 @@ const FEEDBACK_RETURNING_COLUMNS = 'feedback_id, is_approved, updated_at';
 const QUESTION_SELECT_COLUMNS = `
   iq.question_id, iq.company_id, iq.job_id, iq.student_id,
   iq.question_description, iq.topic, iq.sample_answer,
-  iq.is_approved, iq.created_at, iq.updated_at`;
+  iq.round_type, iq.is_approved, iq.created_at, iq.updated_at`;
 
 const QUESTION_RETURNING_COLUMNS = 'question_id, is_approved, updated_at';
 
@@ -145,6 +145,11 @@ async function getAllInterviewQuestions(collegeId, filters) {
   if (filters.topic) {
     conditions.push(`iq.topic ILIKE $${paramIndex++}`);
     params.push(`%${filters.topic}%`);
+  }
+
+  if (filters.round_type?.trim()) {
+    conditions.push(`iq.round_type = $${paramIndex++}`);
+    params.push(filters.round_type.trim());
   }
 
   if (filters.search?.trim()) {

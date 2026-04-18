@@ -13,8 +13,10 @@ const http = require('node:http');
 const app = require('./app');
 const config = require('./config/env');
 const logger = require('./config/logger');
-const { closeAllPools, testConnectivity } = require('./config/db');
+const { closeAllPools, testConnectivity, query } = require('./config/db');
 const { APP, LOG } = require('./config/constants');
+const { sweepExpiredOffers } = require('./utils/policyHelper');
+const { notifyExpiringOffers } = require('./utils/placementNotifier');
 
 const server = http.createServer(app);
 
@@ -111,6 +113,33 @@ async function startServer() {
     logger.info(`${LOG.STARTUP}    Database:    ✅ Connected (${db.latency}ms)`);
     logger.info(`${LOG.STARTUP}    PG Version:  ${db.version}`);
     logger.info(`${LOG.STARTUP} ====================================`);
+
+    // 3. Background job: sweep expired offers every hour
+    //    Processes all active colleges, then sends 24-hour expiry reminders.
+    const SWEEP_INTERVAL = 3_600_000; // 1 hour
+
+    async function runExpirySweep() {
+      try {
+        const colleges = await query(
+          `SELECT college_id FROM colleges WHERE college_status = 'active'`
+        );
+        let totalExpired = 0;
+        for (const { college_id } of colleges.rows) {
+          totalExpired += await sweepExpiredOffers(college_id);
+          await notifyExpiringOffers(college_id);
+        }
+        if (totalExpired > 0) {
+          logger.info(`${LOG.STARTUP} Expiry sweep: ${totalExpired} offers expired across ${colleges.rowCount} colleges`);
+        }
+      } catch (err) {
+        logger.error(`${LOG.STARTUP} Expiry sweep failed`, { error: err.message });
+      }
+    }
+
+    // Run once at startup (after 30s delay to let things settle)
+    setTimeout(runExpirySweep, 30_000).unref();
+    // Then run every hour
+    setInterval(runExpirySweep, SWEEP_INTERVAL).unref();
   });
 }
 

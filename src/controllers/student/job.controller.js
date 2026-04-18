@@ -24,32 +24,28 @@ const {
 } = require('../../config/constants');
 
 // ============================================================================
-// 0. GET AVAILABLE JOB YEARS
-// ============================================================================
-
-async function getAvailableJobYears(req, res) {
-    const years = await jobService.getAvailableJobYears(req.user.college_id);
-    return sendSuccess(res, { years }, SUCCESS_MESSAGES.JOB_YEARS_RETRIEVED);
-}
-
-// ============================================================================
 // 1. GET AVAILABLE JOBS
 // ============================================================================
 
 async function getAvailableJobs(req, res) {
-    const { jobs, total, page, limit } = await jobService.getAvailableJobs(
+    const { jobs, total, page, limit, placement_context } = await jobService.getAvailableJobs(
         req.user.id,
         req.user.college_id,
         req.validated
     );
 
-    return sendPaginated(
-        res,
-        jobs,
-        total,
-        { page, limit },
-        SUCCESS_MESSAGES.AVAILABLE_JOBS_RETRIEVED
-    );
+    return res.status(200).json({
+        success: true,
+        message: SUCCESS_MESSAGES.AVAILABLE_JOBS_RETRIEVED,
+        data: jobs,
+        pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+        },
+        placement_context,
+    });
 }
 
 // ============================================================================
@@ -221,7 +217,6 @@ async function withdrawApplication(req, res) {
 // ============================================================================
 
 module.exports = {
-    getAvailableJobYears,
     getAvailableJobs,
     getJobDetails,
     checkJobEligibility,

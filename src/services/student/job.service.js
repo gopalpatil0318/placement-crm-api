@@ -21,13 +21,19 @@ const {
     LOG,
     ERROR_MESSAGES,
     STATUS,
+    NOTIFICATION_TYPE,
+    RECIPIENT_TYPE,
 } = require('../../config/constants');
+const { enforceDeadlines } = require('../../utils/deadlineHelper');
+const { checkApplyPolicy } = require('../../utils/policyHelper');
 
 // Statuses that allow withdrawal by student
 const WITHDRAWABLE_STATUSES = [
     STATUS.APPLICATION.PENDING,
     STATUS.APPLICATION.UNDER_REVIEW,
     STATUS.APPLICATION.SHORTLISTED,
+    STATUS.APPLICATION.SELECTED,
+    STATUS.APPLICATION.OFFERED,
 ];
 
 // ============================================================================
@@ -42,13 +48,13 @@ const DENIAL_RETURNING_COLUMNS = `denial_id, student_id, job_id, college_id,
 
 const APPLICATION_VERIFY_COLUMNS = `a.application_id, a.job_id, a.position_id,
     a.application_status, a.current_round_id, a.is_eligible, a.eligibility_remarks,
-    a.applied_at, a.last_updated_at, a.college_id, a.student_id`;
+    a.waitlist_rank, a.applied_at, a.last_updated_at, a.college_id, a.student_id`;
 
 const CRITERIA_SELECT_COLUMNS = `criteria_id, job_id, min_overall_cgpa, max_live_kts,
     min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
-    min_package, max_package,
+    min_existing_package, max_existing_package,
     allowed_genders, allowed_departments, allowed_gap_statuses,
-    exclude_already_placed, created_at, updated_at`;
+    exclude_already_placed, created_at`;
 
 // ============================================================================
 // HELPER — Verify job exists and belongs to student's college
@@ -63,10 +69,13 @@ async function verifyJob(jobId, collegeId) {
                 j.passout_years, j.application_deadline,
                 j.job_status, j.allow_applications,
                 j.created_at,
-                c.company_id, c.company_name, c.company_website,
+                j.tier_id, j.drive_type,
+                ct.tier_name, ct.tier_level,
+                c.company_id, c.company_name, c.company_website, c.company_logo,
                 c.industry AS industry_type
          FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
+         LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
          WHERE j.job_id = $1 AND j.college_id = $2
          LIMIT 1`,
         [jobId, collegeId]
@@ -87,7 +96,7 @@ async function verifyStudentApplication(applicationId, studentId, collegeId) {
     const result = await query(
         `SELECT ${APPLICATION_VERIFY_COLUMNS},
                 j.job_title, j.job_status, j.application_deadline,
-                c.company_name,
+                c.company_name, c.company_logo,
                 p.position_name
          FROM student_applications a
          JOIN job_postings j ON a.job_id = j.job_id
@@ -185,20 +194,22 @@ function checkDemographicCriteria(criteria, student) {
 
     if (criteria.allowed_genders && criteria.allowed_genders.length > 0) {
         if (!student.gender || !criteria.allowed_genders.includes(student.gender)) {
-            issues.push(`Allowed genders: ${criteria.allowed_genders.join(', ')}`);
+            issues.push(`Allowed genders: ${criteria.allowed_genders.join(', ')}. Your gender: ${student.gender || 'Not set'}`);
         }
     }
 
     if (criteria.allowed_departments && criteria.allowed_departments.length > 0) {
         if (!criteria.allowed_departments.includes(student.dept_name)) {
-            issues.push(`Allowed departments: ${criteria.allowed_departments.join(', ')}`);
+            issues.push(`Allowed departments: ${criteria.allowed_departments.join(', ')}. Your department: ${student.dept_name}`);
         }
     }
 
     if (criteria.allowed_gap_statuses && criteria.allowed_gap_statuses.length > 0) {
         const gapStatus = student.any_gap_during_education ? 'gap' : 'no_gap';
         if (!criteria.allowed_gap_statuses.includes(gapStatus)) {
-            issues.push(`Education gap status not permitted for this job`);
+            const gapLabel = gapStatus === 'gap' ? 'Gap' : 'No Gap';
+            const allowedLabels = criteria.allowed_gap_statuses.map(s => s === 'gap' ? 'Gap' : 'No Gap').join(', ');
+            issues.push(`Allowed gap status: ${allowedLabels}. Your status: ${gapLabel}`);
         }
     }
 
@@ -243,7 +254,7 @@ async function evaluateEligibility(jobId, student) {
         const placedResult = await query(
             `SELECT 1 FROM placement_results
              WHERE student_id = $1
-               AND placement_status NOT IN ('cancelled', 'rejected')
+               AND placement_status IN ('accepted', 'joined')
              LIMIT 1`,
             [student.student_id]
         );
@@ -266,8 +277,14 @@ async function evaluateEligibility(jobId, student) {
 async function checkApplicationBlockers(studentId, student, job) {
     const blockers = [];
 
-    // 1. Profile must be approved
-    if (!student.profile_is_approved) {
+    // 1. Profile approval check (respects verification settings)
+    const { getVerificationSettings } = require('../college/verificationSettings.service');
+    const settings = await getVerificationSettings(student.college_id);
+
+    const needsApproval = settings.require_profile_approval_for_jobs
+        ? !student.profile_is_approved
+        : !student.profile_complete;
+    if (needsApproval) {
         blockers.push(ERROR_MESSAGES.PROFILE_NOT_APPROVED);
     }
 
@@ -292,9 +309,10 @@ async function checkApplicationBlockers(studentId, student, job) {
     }
 
     // 6-8. Run independent DB checks in parallel
-    const [existingApp, existingDenial, restrictions] = await Promise.all([
+    // B18: Check placement_settings for allow_reapply_after_withdrawal
+    const [existingApp, existingDenial, restrictions, reapplySettings] = await Promise.all([
         query(
-            `SELECT 1 FROM student_applications
+            `SELECT application_status FROM student_applications
              WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
             [studentId, job.job_id]
         ),
@@ -311,16 +329,35 @@ async function checkApplicationBlockers(studentId, student, job) {
              LIMIT 1`,
             [studentId]
         ),
+        query(
+            `SELECT allow_reapply_after_withdrawal FROM placement_settings
+             WHERE college_id = $1 AND passout_year = $2 LIMIT 1`,
+            [student.college_id, student.student_passout_year]
+        ),
     ]);
 
     if (existingApp.rows.length > 0) {
-        blockers.push(ERROR_MESSAGES.ALREADY_APPLIED);
+        const appStatus = existingApp.rows[0].application_status;
+        const isWithdrawn = appStatus === STATUS.APPLICATION.WITHDRAWN || appStatus === STATUS.APPLICATION.AUTO_WITHDRAWN;
+        const reapplyRow = reapplySettings.rows[0] || { allow_reapply_after_withdrawal: false };
+        const allowReapply = reapplyRow.allow_reapply_after_withdrawal === true;
+
+        // B18: Skip ALREADY_APPLIED blocker if the app was withdrawn and reapply is allowed
+        if (!(isWithdrawn && allowReapply)) {
+            blockers.push(ERROR_MESSAGES.ALREADY_APPLIED);
+        }
     }
     if (existingDenial.rows.length > 0) {
         blockers.push(ERROR_MESSAGES.ALREADY_OPTED_OUT);
     }
     if (restrictions.rows.length > 0) {
         blockers.push(ERROR_MESSAGES.STUDENT_RESTRICTED);
+    }
+
+    // 9. Tier-based placement policy check
+    const policyResult = await checkApplyPolicy(studentId, student.college_id, job.job_id, student.student_passout_year);
+    if (!policyResult.allowed) {
+        blockers.push(policyResult.reason);
     }
 
     return blockers;
@@ -331,6 +368,9 @@ async function checkApplicationBlockers(studentId, student, job) {
 // ============================================================================
 
 async function getAvailableJobs(studentId, collegeId, filters = {}) {
+    // Auto-close applications past deadline (check-on-access)
+    await enforceDeadlines(collegeId);
+
     // Get student's passout year
     const studentResult = await query(
         `SELECT student_passout_year FROM students
@@ -369,6 +409,12 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         paramIndex++;
     }
 
+    if (filters.drive_type) {
+        conditions.push(`j.drive_type = $${paramIndex}`);
+        params.push(filters.drive_type);
+        paramIndex++;
+    }
+
     if (filters.company_name?.trim()) {
         conditions.push(`c.company_name ILIKE $${paramIndex}`);
         params.push(`%${filters.company_name.trim()}%`);
@@ -389,7 +435,8 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
     const sortOrd = filters.sort_order === 'desc' ? 'DESC' : 'ASC';
 
     // Count + fetch in parallel (independent queries)
-    const [countResult, jobsResult] = await Promise.all([
+    // Also fetch student profile for eligibility evaluation
+    const [countResult, jobsResult, studentProfile] = await Promise.all([
         query(
             `SELECT COUNT(*) AS total
              FROM job_postings j
@@ -403,7 +450,9 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
                 j.job_type, j.internship_duration, j.internship_stipend,
                 j.application_deadline, j.created_at,
                 j.bond_duration,
-                c.company_id, c.company_name, c.company_website, c.industry AS industry_type,
+                j.tier_id, j.drive_type,
+                ct.tier_name, ct.tier_level,
+                c.company_id, c.company_name, c.company_website, c.company_logo, c.industry AS industry_type,
                 -- Application status for this student (NULL if not applied)
                 sa.application_id,
                 sa.application_status,
@@ -411,11 +460,18 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
                 ad.denial_id,
                 -- Position count & total applications via LEFT JOIN aggregates
                 COALESCE(pc.position_count, 0) AS position_count,
-                COALESCE(ac.total_applications, 0) AS total_applications
+                COALESCE(ac.total_applications, 0) AS total_applications,
+                -- Eligibility criteria for inline evaluation
+                ec.min_overall_cgpa, ec.max_live_kts,
+                ec.min_tenth_percentage, ec.min_twelfth_percentage, ec.min_diploma_percentage,
+                ec.allowed_genders, ec.allowed_departments, ec.allowed_gap_statuses,
+                ec.exclude_already_placed
          FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
+         LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
          LEFT JOIN student_applications sa ON sa.job_id = j.job_id AND sa.student_id = $${paramIndex}
          LEFT JOIN application_denials ad ON ad.job_id = j.job_id AND ad.student_id = $${paramIndex}
+         LEFT JOIN job_eligibility_criteria ec ON ec.job_id = j.job_id
          LEFT JOIN (
              SELECT job_id, COUNT(*) AS position_count
              FROM job_positions WHERE position_status = 'active'
@@ -431,10 +487,65 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
          LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}`,
         [...params, studentId, limit, offset]
         ),
+        getStudentProfile(studentId, collegeId),
     ]);
     const total = Number.parseInt(countResult.rows[0].total, 10);
 
-    const jobs = jobsResult.rows.map(row => ({
+    // Fetch placement context for policy banner (active placement + college settings)
+    const placementCtxResult = await query(
+        `SELECT pr.placement_status, c.company_name, ct.tier_name, ct.tier_level,
+                ps.max_active_offers, ps.allow_dream_upgrade
+         FROM placement_results pr
+         JOIN job_positions jp ON pr.position_id = jp.position_id
+         JOIN job_postings j ON jp.job_id = j.job_id
+         JOIN companies c ON j.company_id = c.company_id
+         LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
+         LEFT JOIN placement_settings ps ON ps.college_id = $1 AND ps.passout_year = $3
+         WHERE pr.student_id = $2 AND pr.college_id = $1
+           AND pr.placement_status IN ('offered', 'accepted', 'joined')
+         ORDER BY ct.tier_level DESC NULLS LAST
+         LIMIT 1`,
+        [collegeId, studentId, passoutYear]
+    );
+
+    const placementContext = placementCtxResult.rows.length > 0
+        ? {
+            is_placed: true,
+            company_name: placementCtxResult.rows[0].company_name,
+            tier_name: placementCtxResult.rows[0].tier_name || null,
+            tier_level: placementCtxResult.rows[0].tier_level ?? null,
+            max_placements: placementCtxResult.rows[0].max_active_offers ?? 1,
+            allow_dream_upgrade: placementCtxResult.rows[0].allow_dream_upgrade ?? true,
+        }
+        : { is_placed: false };
+
+    // Check if student is currently placed (for exclude_already_placed criteria)
+    let isPlaced = placementContext.is_placed;
+    if (!isPlaced && jobsResult.rows.some(r => r.exclude_already_placed)) {
+        const placedCheck = await query(
+            `SELECT 1 FROM placement_results
+             WHERE student_id = $1 AND placement_status IN ('accepted', 'joined') LIMIT 1`,
+            [studentId]
+        );
+        isPlaced = placedCheck.rows.length > 0;
+    }
+
+    const jobs = jobsResult.rows.map(row => {
+        // Inline eligibility evaluation using criteria from LEFT JOIN
+        let is_eligible = true;
+        if (row.min_overall_cgpa != null || row.max_live_kts != null || row.allowed_genders != null) {
+            // Has criteria — evaluate against student profile
+            const issues = [
+                ...checkAcademicCriteria(row, studentProfile),
+                ...checkDemographicCriteria(row, studentProfile),
+            ];
+            if (row.exclude_already_placed && isPlaced) {
+                issues.push('Already placed');
+            }
+            is_eligible = issues.length === 0;
+        }
+
+        return {
         job_id: row.job_id,
         job_title: row.job_title,
         job_description: row.job_description,
@@ -448,10 +559,12 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         application_deadline: row.application_deadline,
         bond_duration: row.bond_duration ?? null,
         posted_at: row.created_at,
+        drive_type: row.drive_type,
         // Company info
         company_id: row.company_id,
         company_name: row.company_name,
         company_website: row.company_website ?? null,
+        company_logo: row.company_logo ?? null,
         industry_type: row.industry_type ?? null,
         // Counts
         position_count: Number.parseInt(row.position_count, 10),
@@ -460,9 +573,12 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         application_status: row.application_status ?? null,
         has_applied: row.application_id != null,
         has_denied: row.denial_id != null,
-    }));
+        // Eligibility
+        is_eligible,
+    };
+    });
 
-    return { jobs, total, page, limit };
+    return { jobs, total, page, limit, placement_context: placementContext };
 }
 
 // ============================================================================
@@ -560,6 +676,7 @@ async function getJobDetails(jobId, studentId, collegeId) {
             company_id: job.company_id,
             company_name: job.company_name,
             company_website: job.company_website ?? null,
+            company_logo: job.company_logo ?? null,
             industry_type: job.industry_type ?? null,
         },
         positions: positionsResult.rows.map(row => ({
@@ -627,6 +744,9 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
         checkApplicationBlockers(studentId, student, job),
     ]);
 
+    // Fetch policy info for frontend (tier-based placement status)
+    const policyResult = await checkApplyPolicy(studentId, collegeId, jobId, student.student_passout_year);
+
     return {
         job: {
             job_id: job.job_id,
@@ -655,6 +775,7 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
         },
         blockers,
         can_apply: eligibility.is_eligible && blockers.length === 0,
+        policy: policyResult.policy_info || null,
     };
 }
 
@@ -695,9 +816,57 @@ async function resolveEligibilityOverride(studentId, jobId, eligibility) {
     throwBadRequest(ERROR_MESSAGES.OVERRIDE_PENDING);
 }
 
+/**
+ * B20: Validate MCQ answer options against question_options.
+ * Deduplicates submitted options and enforces mcq_single = exactly 1.
+ */
+function validateMcqAnswer(question, answer) {
+    const validOptions = Array.isArray(question.question_options) && question.question_options.length > 0
+        ? new Set(question.question_options)
+        : null;
+
+    if (!validOptions) return;
+
+    const uniqueSubmitted = [...new Set(answer.answer_options)];
+    answer.answer_options = uniqueSubmitted;
+
+    for (const opt of uniqueSubmitted) {
+        if (!validOptions.has(opt)) {
+            throwBadRequest(`Answer "${opt}" is not a valid option for question #${question.question_order}`);
+        }
+    }
+
+    if (question.question_type === 'mcq_single' && uniqueSubmitted.length !== 1) {
+        throwBadRequest(`Question #${question.question_order} requires exactly one answer`);
+    }
+}
+
+/**
+ * Validate a single answer against its question definition.
+ */
+function validateSingleAnswer(q, answer) {
+    if (q.is_required && !answer) {
+        throwBadRequest(`${ERROR_MESSAGES.REQUIRED_QUESTION_NOT_ANSWERED} (question #${q.question_order})`);
+    }
+
+    const hasContent =
+        answer.answer_text?.trim() ||
+        (answer.answer_options && answer.answer_options.length > 0) ||
+        (answer.answer_boolean !== null && answer.answer_boolean !== undefined);
+
+    if (q.is_required && !hasContent) {
+        throwBadRequest(`${ERROR_MESSAGES.REQUIRED_QUESTION_EMPTY} (question #${q.question_order})`);
+    }
+
+    const isMcq = q.question_type === 'mcq_single' || q.question_type === 'mcq_multiple';
+    if (isMcq && answer.answer_options?.length > 0) {
+        validateMcqAnswer(q, answer);
+    }
+}
+
 async function validateAnswers(jobId, data) {
     const questionsResult = await query(
-        `SELECT question_id, question_type, is_required, question_order
+        `SELECT question_id, question_type, is_required, question_order, question_options
          FROM application_questions
          WHERE job_id = $1
          ORDER BY question_order ASC`,
@@ -711,20 +880,9 @@ async function validateAnswers(jobId, data) {
     }
 
     for (const q of questions) {
-        if (!q.is_required) continue;
-
         const answer = answersMap.get(q.question_id);
-        if (!answer) {
-            throwBadRequest(`${ERROR_MESSAGES.REQUIRED_QUESTION_NOT_ANSWERED} (question #${q.question_order})`);
-        }
-
-        const hasContent =
-            answer.answer_text?.trim() ||
-            (answer.answer_options && answer.answer_options.length > 0) ||
-            (answer.answer_boolean !== null && answer.answer_boolean !== undefined);
-        if (!hasContent) {
-            throwBadRequest(`${ERROR_MESSAGES.REQUIRED_QUESTION_EMPTY} (question #${q.question_order})`);
-        }
+        if (!q.is_required && !answer) continue;
+        validateSingleAnswer(q, answer);
     }
 
     const validQuestionIds = new Set(questions.map(q => q.question_id));
@@ -763,6 +921,107 @@ async function insertApplicationAnswers(client, applicationId, answers) {
     return ansResult.rows;
 }
 
+/**
+ * B19: Re-validate job fields under FOR UPDATE lock.
+ */
+function revalidateLockedJob(locked) {
+    if (!locked?.job_status || locked.job_status !== STATUS.JOB.PUBLISHED) {
+        throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_PUBLISHED), { status: 400 });
+    }
+    if (locked.allow_applications === false) {
+        throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_ACCEPTING), { status: 400 });
+    }
+    if (locked.application_deadline && new Date(locked.application_deadline) < new Date()) {
+        throw Object.assign(new Error(ERROR_MESSAGES.DEADLINE_PASSED), { status: 400 });
+    }
+}
+
+/**
+ * Validate that position_id (if provided) is active for the given job.
+ */
+async function validatePositionIfProvided(positionId, jobId) {
+    if (!positionId) return;
+    const posCheck = await query(
+        `SELECT 1 FROM job_positions
+         WHERE position_id = $1 AND job_id = $2 AND position_status = 'active' LIMIT 1`,
+        [positionId, jobId]
+    );
+    if (!posCheck.rows.length) {
+        throwBadRequest(ERROR_MESSAGES.POSITION_NOT_ACTIVE);
+    }
+}
+
+/**
+ * B19: Handle transaction errors — deadlock retry, unique constraint, or rethrow.
+ * Returns true if the caller should retry (deadlock).
+ */
+function handleApplicationError(error, retries, studentId, jobId) {
+    if (error.code === '40P01' && retries < 1) {
+        logger.warn(`${LOG.TRANSACTION} Deadlock detected, retrying application`, { studentId, jobId, retries: retries + 1 });
+        return true; // retry
+    }
+    if (error.code === '23505') {
+        throw Object.assign(new Error(ERROR_MESSAGES.ALREADY_APPLIED), { status: 409 });
+    }
+    logger.error(`${LOG.TRANSACTION} Job application rolled back`, {
+        error: error.message,
+        stack: error.stack,
+        studentId,
+        jobId,
+    });
+    throw error;
+}
+
+/**
+ * B18: Check for duplicate application in transaction. Returns existing app ID if reapply allowed.
+ */
+function checkDuplicateApplication(existingApp) {
+    if (!existingApp) return null;
+    const isWithdrawn = existingApp.application_status === STATUS.APPLICATION.WITHDRAWN
+        || existingApp.application_status === STATUS.APPLICATION.AUTO_WITHDRAWN;
+    if (!isWithdrawn) {
+        throw Object.assign(new Error(ERROR_MESSAGES.ALREADY_APPLIED), { status: 409 });
+    }
+    return existingApp.application_id; // reapply path
+}
+
+/**
+ * B18: Reactivate a withdrawn application for re-apply.
+ */
+async function reactivateWithdrawnApplication(client, applicationId, data, eligibility, approvedOverrideId) {
+    const eligibilityRemarks = eligibility.is_eligible ? null : eligibility.issues.join('; ');
+
+    await client.query(
+        `DELETE FROM application_answers WHERE application_id = $1`,
+        [applicationId]
+    );
+
+    const updateResult = await client.query(
+        `UPDATE student_applications
+         SET application_status = $1,
+             position_id = $2,
+             is_eligible = $3,
+             eligibility_remarks = $4,
+             override_id = $5,
+             current_round_id = NULL,
+             waitlist_rank = NULL,
+             auto_withdrawal_reason = NULL,
+             applied_at = NOW(),
+             last_updated_at = NOW()
+         WHERE application_id = $6
+         RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
+        [
+            STATUS.APPLICATION.PENDING,
+            data.position_id || null,
+            eligibility.is_eligible,
+            eligibilityRemarks,
+            approvedOverrideId,
+            applicationId,
+        ]
+    );
+    return updateResult.rows[0];
+}
+
 async function applyForJob(jobId, studentId, collegeId, data) {
     const [job, student] = await Promise.all([
         verifyJob(jobId, collegeId),
@@ -779,84 +1038,106 @@ async function applyForJob(jobId, studentId, collegeId, data) {
     const approvedOverrideId = await resolveEligibilityOverride(studentId, jobId, eligibility);
 
     // Validate position_id if provided
-    if (data.position_id) {
-        const posCheck = await query(
-            `SELECT 1 FROM job_positions
-             WHERE position_id = $1 AND job_id = $2 AND position_status = 'active' LIMIT 1`,
-            [data.position_id, jobId]
-        );
-        if (!posCheck.rows.length) {
-            throwBadRequest(ERROR_MESSAGES.POSITION_NOT_ACTIVE);
-        }
-    }
+    await validatePositionIfProvided(data.position_id, jobId);
 
     await validateAnswers(jobId, data);
 
     const client = await getClient();
+    let retries = 0;
 
-    try {
-        await client.query('BEGIN');
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+        try {
+            await client.query('BEGIN');
 
-        const eligibilityRemarks = eligibility.is_eligible
-            ? null
-            : eligibility.issues.join('; ');
+            // B19: Lock the job row to serialise concurrent applications
+            const lockedJob = await client.query(
+                `SELECT j.job_id, j.allow_applications, j.application_deadline, j.job_status
+                 FROM job_postings j
+                 WHERE j.job_id = $1
+                 FOR UPDATE`,
+                [jobId]
+            );
 
-        const appResult = await client.query(
-            `INSERT INTO student_applications
-                (student_id, job_id, position_id, college_id,
-                 application_status, is_eligible, eligibility_remarks, override_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
-            [
+            // Re-validate critical fields under lock (admin may have changed status)
+            revalidateLockedJob(lockedJob.rows[0]);
+
+            // B19: Re-check duplicate inside transaction (prevents race between check and insert)
+            // B18: If a withdrawn/auto_withdrawn app exists and reapply is allowed, reuse it
+            const dupCheck = await client.query(
+                `SELECT application_id, application_status FROM student_applications
+                 WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
+                [studentId, jobId]
+            );
+
+            const eligibilityRemarks = eligibility.is_eligible
+                ? null
+                : eligibility.issues.join('; ');
+
+            const reapplyAppId = checkDuplicateApplication(dupCheck.rows[0]);
+            let application;
+
+            if (reapplyAppId) {
+                application = await reactivateWithdrawnApplication(
+                    client, reapplyAppId, data, eligibility, approvedOverrideId
+                );
+            } else {
+                // Normal first-time application
+                const appResult = await client.query(
+                    `INSERT INTO student_applications
+                        (student_id, job_id, position_id, college_id,
+                         application_status, is_eligible, eligibility_remarks, override_id)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
+                    [
+                        studentId,
+                        jobId,
+                        data.position_id || null,
+                        collegeId,
+                        STATUS.APPLICATION.PENDING,
+                        eligibility.is_eligible,
+                        eligibilityRemarks,
+                        approvedOverrideId,
+                    ]
+                );
+                application = appResult.rows[0];
+            }
+
+            const insertedAnswers = await insertApplicationAnswers(client, application.application_id, data.answers || []);
+
+            await client.query('COMMIT');
+
+            logger.info(`${LOG.TRANSACTION} Job application committed`, {
+                applicationId: application.application_id,
                 studentId,
                 jobId,
-                data.position_id || null,
                 collegeId,
-                STATUS.APPLICATION.PENDING,
-                eligibility.is_eligible,
-                eligibilityRemarks,
-                approvedOverrideId,
-            ]
-        );
+                answersCount: insertedAnswers.length,
+                isReapply: !!reapplyAppId,
+            });
 
-        const application = appResult.rows[0];
-        const insertedAnswers = await insertApplicationAnswers(client, application.application_id, data.answers || []);
+            return {
+                application_id: application.application_id,
+                job_id: application.job_id,
+                position_id: application.position_id,
+                application_status: application.application_status,
+                is_eligible: application.is_eligible,
+                eligibility_remarks: application.eligibility_remarks ?? null,
+                applied_at: application.applied_at,
+                answers_submitted: insertedAnswers.length,
+                job_title: job.job_title,
+                company_name: job.company_name,
+            };
+        } catch (error) {
+            await client.query('ROLLBACK');
 
-        await client.query('COMMIT');
-
-        logger.info(`${LOG.TRANSACTION} Job application committed`, {
-            applicationId: application.application_id,
-            studentId,
-            jobId,
-            collegeId,
-            answersCount: insertedAnswers.length,
-        });
-
-        return {
-            application_id: application.application_id,
-            job_id: application.job_id,
-            position_id: application.position_id,
-            application_status: application.application_status,
-            is_eligible: application.is_eligible,
-            eligibility_remarks: application.eligibility_remarks ?? null,
-            applied_at: application.applied_at,
-            answers_submitted: insertedAnswers.length,
-            job_title: job.job_title,
-            company_name: job.company_name,
-        };
-    } catch (error) {
-        await client.query('ROLLBACK');
-
-        logger.error(`${LOG.TRANSACTION} Job application rolled back`, {
-            error: error.message,
-            stack: error.stack,
-            studentId,
-            jobId,
-        });
-
-        throw error;
-    } finally {
-        client.release();
+            if (handleApplicationError(error, retries, studentId, jobId)) {
+                retries++;
+                continue;
+            }
+        } finally {
+            client.release();
+        }
     }
 }
 
@@ -990,12 +1271,12 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         query(
             `SELECT a.application_id, a.job_id, a.position_id,
                 a.application_status, a.current_round_id,
-                a.is_eligible, a.eligibility_remarks,
+                a.is_eligible, a.eligibility_remarks, a.waitlist_rank,
                 a.applied_at, a.last_updated_at,
                 j.job_title, j.job_type, j.job_location,
                 j.salary_package, j.salary_min, j.salary_max,
                 j.job_status, j.application_deadline,
-                c.company_id, c.company_name,
+                c.company_id, c.company_name, c.company_logo,
                 p.position_name,
                 -- Current round info
                 jr.round_name AS current_round_name,
@@ -1043,6 +1324,7 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         rejected: 0,
         selected: 0,
         offered: 0,
+        waitlisted: 0,
         withdrawn: 0,
     };
 
@@ -1059,6 +1341,7 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         application_status: row.application_status,
         is_eligible: row.is_eligible,
         eligibility_remarks: row.eligibility_remarks ?? null,
+        waitlist_rank: row.waitlist_rank ?? null,
         applied_at: row.applied_at,
         last_updated_at: row.last_updated_at,
         // Job info
@@ -1073,6 +1356,7 @@ async function getMyApplications(studentId, collegeId, filters = {}) {
         // Company info
         company_id: row.company_id,
         company_name: row.company_name,
+        company_logo: row.company_logo ?? null,
         // Position info
         position_name: row.position_name ?? null,
         // Round progress
@@ -1149,6 +1433,7 @@ async function getApplicationDetails(applicationId, studentId, collegeId) {
             current_round_id: app.current_round_id,
             is_eligible: app.is_eligible,
             eligibility_remarks: app.eligibility_remarks ?? null,
+            waitlist_rank: app.waitlist_rank ?? null,
             applied_at: app.applied_at,
             last_updated_at: app.last_updated_at,
             // Job info
@@ -1156,6 +1441,7 @@ async function getApplicationDetails(applicationId, studentId, collegeId) {
             job_status: app.job_status,
             application_deadline: app.application_deadline,
             company_name: app.company_name,
+            company_logo: app.company_logo ?? null,
             position_name: app.position_name ?? null,
         },
         answers: answersResult.rows.map(row => ({
@@ -1229,56 +1515,122 @@ async function withdrawApplication(applicationId, studentId, collegeId, reason) 
         throwBadRequest(`${ERROR_MESSAGES.CANNOT_WITHDRAW_STATUS}. Allowed: ${WITHDRAWABLE_STATUSES.join(', ')}`);
     }
 
-    const result = await query(
-        `UPDATE student_applications
-         SET application_status = $1,
-             eligibility_remarks = CASE
-                 WHEN $2::text IS NOT NULL THEN
-                     CASE WHEN eligibility_remarks IS NOT NULL AND eligibility_remarks != ''
-                          THEN eligibility_remarks || ' | Withdrawal reason: ' || $2
-                          ELSE 'Withdrawal reason: ' || $2
-                     END
-                 ELSE eligibility_remarks
-             END,
-             last_updated_at = NOW()
-         WHERE application_id = $3
-         RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
-        [STATUS.APPLICATION.WITHDRAWN, reason || null, applicationId]
-    );
+    // B18: Use transaction — may need to decline placement + notify admin
+    const client = await getClient();
 
-    logger.info(`${LOG.AUTH} Student withdrew application`, {
-        applicationId,
-        studentId,
-        jobId: app.job_id,
-        collegeId,
-        previousStatus: currentStatus,
-    });
+    try {
+        await client.query('BEGIN');
 
-    return {
-        application_id: result.rows[0].application_id,
-        application_status: result.rows[0].application_status,
-        previous_status: currentStatus,
-        last_updated_at: result.rows[0].last_updated_at,
-        job_title: app.job_title,
-        company_name: app.company_name,
-    };
-}
+        // 1. Update application status to withdrawn (clear waitlist_rank)
+        const result = await client.query(
+            `UPDATE student_applications
+             SET application_status = $1,
+                 waitlist_rank = NULL,
+                 eligibility_remarks = CASE
+                     WHEN $2::text IS NOT NULL THEN
+                         CASE WHEN eligibility_remarks IS NOT NULL AND eligibility_remarks != ''
+                              THEN eligibility_remarks || ' | Withdrawal reason: ' || $2
+                              ELSE 'Withdrawal reason: ' || $2
+                         END
+                     ELSE eligibility_remarks
+                 END,
+                 last_updated_at = NOW()
+             WHERE application_id = $3
+             RETURNING ${APPLICATION_RETURNING_COLUMNS}`,
+            [STATUS.APPLICATION.WITHDRAWN, reason || null, applicationId]
+        );
 
-// ============================================================================
-// GET AVAILABLE JOB YEARS — distinct passout years with published jobs
-// ============================================================================
+        // 1b. Compact remaining waitlist ranks if the student was waitlisted
+        if (currentStatus === STATUS.APPLICATION.WAITLISTED && app.waitlist_rank) {
+            await client.query(
+                `UPDATE student_applications
+                 SET waitlist_rank = waitlist_rank - 1,
+                     last_updated_at = NOW()
+                 WHERE job_id = $1
+                   AND college_id = $2
+                   AND application_status = $3
+                   AND waitlist_rank > $4`,
+                [app.job_id, collegeId, STATUS.APPLICATION.WAITLISTED, app.waitlist_rank]
+            );
+        }
 
-async function getAvailableJobYears(collegeId) {
-    const result = await query(
-        `SELECT DISTINCT unnest(passout_years) AS year
-         FROM job_postings
-         WHERE college_id = $1
-           AND job_status = $2
-         ORDER BY year DESC`,
-        [collegeId, STATUS.JOB.PUBLISHED]
-    );
+        // 2. B18: If withdrawing from 'offered', auto-decline the placement record
+        let declinedPlacement = null;
+        if (currentStatus === STATUS.APPLICATION.OFFERED) {
+            const placementResult = await client.query(
+                `UPDATE placement_results
+                 SET placement_status = $1,
+                     declined_reason = $2,
+                     updated_at = NOW()
+                 WHERE application_id = $3
+                   AND student_id = $4
+                   AND placement_status = $5
+                 RETURNING placement_id, placement_status`,
+                [
+                    STATUS.PLACEMENT.DECLINED,
+                    reason ? `Student withdrew: ${reason}` : 'Student withdrew application',
+                    applicationId,
+                    studentId,
+                    STATUS.PLACEMENT.OFFERED,
+                ]
+            );
+            declinedPlacement = placementResult.rows[0] || null;
+        }
 
-    return result.rows.map(r => r.year);
+        // 3. B18: Notify admin/TPO users about the withdrawal
+        const reasonSnippet = reason ? ' Reason: ' + reason.substring(0, 200) : '';
+        const declineNote = declinedPlacement ? ' Associated offer was auto-declined.' : '';
+        const notifBody = 'Student withdrew from ' + app.job_title + ' at ' + app.company_name
+            + ' (previous status: ' + currentStatus + ').' + reasonSnippet + declineNote;
+
+        await client.query(
+            `INSERT INTO notifications
+                (college_id, recipient_type, recipient_id, title, body,
+                 notification_type, related_entity_type, related_entity_id)
+             SELECT $1, $2, u.user_id,
+                    $3, $4,
+                    $5, $6, $7
+             FROM users u
+             WHERE u.college_id = $1
+               AND u.user_role IN ('tpo', 'collegeadmin', 'tpc')
+               AND u.user_status = 'active'`,
+            [
+                collegeId,
+                RECIPIENT_TYPE.USER,
+                `Application Withdrawn: ${app.job_title}`,
+                notifBody,
+                NOTIFICATION_TYPE.APPLICATION_STATUS_CHANGED,
+                'application',
+                applicationId,
+            ]
+        );
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Student withdrew application`, {
+            applicationId,
+            studentId,
+            jobId: app.job_id,
+            collegeId,
+            previousStatus: currentStatus,
+            placementDeclined: !!declinedPlacement,
+        });
+
+        return {
+            application_id: result.rows[0].application_id,
+            application_status: result.rows[0].application_status,
+            previous_status: currentStatus,
+            last_updated_at: result.rows[0].last_updated_at,
+            job_title: app.job_title,
+            company_name: app.company_name,
+            placement_declined: declinedPlacement ? declinedPlacement.placement_id : null,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 // ============================================================================
@@ -1286,7 +1638,6 @@ async function getAvailableJobYears(collegeId) {
 // ============================================================================
 
 module.exports = {
-    getAvailableJobYears,
     getAvailableJobs,
     getJobDetails,
     checkJobEligibility,

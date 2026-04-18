@@ -20,6 +20,18 @@ const COOKIE_OPTIONS = Object.freeze({
   secure: config.isProd,
   sameSite: 'lax',
   domain: COOKIE_DOMAIN,
+  maxAge: 2 * 60 * 60 * 1000, // 2 hours (matches access token expiry)
+});
+
+/**
+ * Cookie options for refresh token — longer-lived, httpOnly, same security.
+ */
+const REFRESH_COOKIE_OPTIONS = Object.freeze({
+  httpOnly: true,
+  secure: config.isProd,
+  sameSite: 'lax',
+  domain: COOKIE_DOMAIN,
+  path: '/',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 });
 
@@ -34,4 +46,15 @@ const CLEAR_COOKIE_OPTIONS = Object.freeze({
   domain: COOKIE_OPTIONS.domain,
 });
 
-module.exports = { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS };
+/**
+ * Options for clearing the refresh token cookie.
+ */
+const CLEAR_REFRESH_COOKIE_OPTIONS = Object.freeze({
+  httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
+  secure: REFRESH_COOKIE_OPTIONS.secure,
+  sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
+  domain: REFRESH_COOKIE_OPTIONS.domain,
+  path: REFRESH_COOKIE_OPTIONS.path,
+});
+
+module.exports = { COOKIE_OPTIONS, CLEAR_COOKIE_OPTIONS, REFRESH_COOKIE_OPTIONS, CLEAR_REFRESH_COOKIE_OPTIONS };

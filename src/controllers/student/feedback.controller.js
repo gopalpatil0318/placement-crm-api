@@ -94,9 +94,57 @@ const browseInterviewQuestions = async (req, res) => {
   );
 };
 
+// ── #176 GET /applied_job_options ─────────────────────────────────────────
+const getAppliedJobOptions = async (req, res) => {
+  const result = await feedbackService.getAppliedJobOptions(
+    req.user.id,
+    req.user.college_id
+  );
+
+  return sendSuccess(res, result, SUCCESS_MESSAGES.APPLIED_JOB_OPTIONS_RETRIEVED);
+};
+
+// ── #177 POST /submit_interview_questions (batch) ─────────────────────────
+const submitInterviewQuestions = async (req, res) => {
+  const startTime = Date.now();
+
+  logger.info(`${LOG.API_START} submitInterviewQuestions`, {
+    student_id: req.user.id,
+    college_id: req.user.college_id,
+    job_id: req.validated.job_id,
+    question_count: req.validated.questions?.length,
+  });
+
+  const result = await feedbackService.submitInterviewQuestions(
+    req.user.id,
+    req.user.college_id,
+    req.validated
+  );
+
+  logger.info(`${LOG.API_END} submitInterviewQuestions`, {
+    student_id: req.user.id,
+    created_count: result.length,
+    duration_ms: Date.now() - startTime,
+  });
+
+  return sendCreated(res, result, SUCCESS_MESSAGES.INTERVIEW_QUESTIONS_BATCH_SUBMITTED);
+};
+
+// ── #178 GET /interview_question_companies ────────────────────────────────
+const getInterviewQuestionCompanies = async (req, res) => {
+  const result = await feedbackService.getInterviewQuestionCompanies(
+    req.user.college_id
+  );
+
+  return sendSuccess(res, result, SUCCESS_MESSAGES.QUESTION_COMPANIES_RETRIEVED);
+};
+
 module.exports = {
   submitFeedback,
   getMyFeedback,
   submitInterviewQuestion,
   browseInterviewQuestions,
+  getAppliedJobOptions,
+  submitInterviewQuestions,
+  getInterviewQuestionCompanies,
 };

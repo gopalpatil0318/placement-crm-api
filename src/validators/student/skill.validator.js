@@ -9,12 +9,9 @@
  */
 
 const Joi = require('joi');
+const { SKILL_CATEGORIES } = require('../../config/constants');
 
 const VALID_PROFICIENCY = ['beginner', 'intermediate', 'advanced', 'expert'];
-const VALID_SKILL_CATEGORIES = [
-    'programming_language', 'framework', 'database', 'devops',
-    'cloud', 'design', 'testing', 'soft_skill', 'tool', 'other',
-];
 
 // ============================================================================
 // ADD SKILL (to master skills table)
@@ -32,11 +29,11 @@ const addSkillSchema = Joi.object({
         }),
 
     skill_category: Joi.string()
-        .valid(...VALID_SKILL_CATEGORIES)
-        .optional()
-        .allow(null, '')
+        .valid(...SKILL_CATEGORIES)
+        .required()
         .messages({
-            'any.only': `Category must be one of: ${VALID_SKILL_CATEGORIES.join(', ')}`,
+            'any.only': `Category must be one of: ${SKILL_CATEGORIES.join(', ')}`,
+            'any.required': 'Skill category is required',
         }),
 });
 

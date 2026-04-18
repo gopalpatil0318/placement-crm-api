@@ -18,7 +18,15 @@ const {
     LOG,
     ERROR_MESSAGES,
     STATUS,
+    NOTIFICATION_TYPE,
+    RECIPIENT_TYPE,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
 } = require('../../config/constants');
+const { assertTransition } = require('../../utils/stateMachine');
+const { enforceDeadlines } = require('../../utils/deadlineHelper');
+const { logAudit } = require('../../utils/auditHelper');
+const { notifyJobPublished } = require('../../utils/placementNotifier');
 
 // Core job fields that can be updated
 const UPDATABLE_FIELDS = [
@@ -27,6 +35,7 @@ const UPDATABLE_FIELDS = [
     'bond_duration', 'bond_details', 'job_type',
     'internship_duration', 'internship_stipend',
     'passout_years', 'application_deadline', 'allow_applications',
+    'drive_type',
 ];
 
 // Explicit column lists — no SELECT * or RETURNING *
@@ -36,7 +45,8 @@ const JOB_RETURNING_COLUMNS = [
     'bond_duration', 'bond_details', 'job_type',
     'internship_duration', 'internship_stipend',
     'passout_years', 'application_deadline', 'job_status',
-    'allow_applications', 'created_by', 'created_at', 'updated_at',
+    'allow_applications', 'drive_type', 'tier_id',
+    'created_by', 'created_at', 'updated_at',
 ].join(', ');
 
 const POSITION_COLUMNS = [
@@ -62,13 +72,7 @@ const QUESTION_COLUMNS = [
     'question_options', 'is_required', 'question_order', 'created_at',
 ].join(', ');
 
-// Valid status transitions
-const STATUS_TRANSITIONS = {
-    [STATUS.JOB.DRAFT]: [STATUS.JOB.PUBLISHED, STATUS.JOB.CANCELLED],
-    [STATUS.JOB.PUBLISHED]: [STATUS.JOB.CLOSED, STATUS.JOB.CANCELLED],
-    [STATUS.JOB.CLOSED]: [STATUS.JOB.PUBLISHED],
-    [STATUS.JOB.CANCELLED]: [],
-};
+// Status transitions delegated to src/utils/stateMachine.js
 
 // ============================================================================
 // 1. CREATE JOB (Transaction: job + positions + criteria + rounds + questions)
@@ -89,6 +93,7 @@ async function createJob(collegeId, userId, data) {
         bond_duration, bond_details, job_type,
         internship_duration, internship_stipend,
         passout_years, application_deadline,
+        drive_type,
         positions, eligibility_criteria, rounds, questions,
     } = data;
 
@@ -143,8 +148,8 @@ async function createJob(collegeId, userId, data) {
                (college_id, company_id, job_title, job_description, job_location,
                 salary_package, salary_min, salary_max, bond_duration, bond_details,
                 job_type, internship_duration, internship_stipend,
-                passout_years, application_deadline, job_status, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                passout_years, application_deadline, job_status, created_by, drive_type)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
              RETURNING ${JOB_RETURNING_COLUMNS}`,
             [
                 collegeId, company_id, job_title, job_description ?? null, job_location,
@@ -152,6 +157,7 @@ async function createJob(collegeId, userId, data) {
                 bond_duration ?? null, bond_details ?? null,
                 job_type, internship_duration ?? null, internship_stipend ?? null,
                 passout_years, application_deadline, STATUS.JOB.DRAFT, userId,
+                drive_type ?? 'on_campus',
             ]
         );
 
@@ -289,6 +295,9 @@ async function createJob(collegeId, userId, data) {
  * @returns {{ jobs, total, page, limit }}
  */
 async function getAllJobs(collegeId, filters = {}) {
+    // Auto-close applications past deadline (check-on-access)
+    await enforceDeadlines(collegeId);
+
     const { page, limit, offset } = getPagination(filters);
 
     const conditions = ['j.college_id = $1'];
@@ -316,6 +325,12 @@ async function getAllJobs(collegeId, filters = {}) {
     if (filters.job_type) {
         conditions.push(`j.job_type = $${paramIndex}`);
         params.push(filters.job_type);
+        paramIndex++;
+    }
+
+    if (filters.drive_type) {
+        conditions.push(`j.drive_type = $${paramIndex}`);
+        params.push(filters.drive_type);
         paramIndex++;
     }
 
@@ -351,11 +366,14 @@ async function getAllJobs(collegeId, filters = {}) {
             `SELECT j.${JOB_RETURNING_COLUMNS.split(', ').join(', j.')},
                     c.company_name,
                     c.company_logo,
+                    ct.tier_name,
+                    ct.tier_level,
                     COALESCE(pos.cnt, 0) AS positions_count,
                     COALESCE(app.cnt, 0) AS applications_count,
                     u.user_name AS created_by_name
              FROM job_postings j
              JOIN companies c ON j.company_id = c.company_id
+             LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
              LEFT JOIN users u ON j.created_by = u.user_id
              LEFT JOIN (
                  SELECT job_id, COUNT(*) AS cnt
@@ -403,9 +421,11 @@ async function getJobById(jobId, collegeId) {
     const jobResult = await query(
         `SELECT j.${JOB_RETURNING_COLUMNS.split(', ').join(', j.')},
                 c.company_name, c.company_logo, c.company_website,
+                ct.tier_name, ct.tier_level,
                 u.user_name AS created_by_name
          FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
+         LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
          LEFT JOIN users u ON j.created_by = u.user_id
          WHERE j.job_id = $1 AND j.college_id = $2
          LIMIT 1`,
@@ -486,20 +506,29 @@ async function getJobById(jobId, collegeId) {
  * @returns {Object} Updated job
  */
 async function updateJob(jobId, collegeId, data) {
-    // 1. Verify job exists
-    const existing = await query(
-        `SELECT j.job_id, j.job_status, j.salary_min, j.salary_max,
-                j.application_deadline, c.company_name
-         FROM job_postings j
-         JOIN companies c ON j.company_id = c.company_id
-         WHERE j.job_id = $1 AND j.college_id = $2
-         LIMIT 1`,
-        [jobId, collegeId]
-    );
+    // 1. Verify job exists + fetch application count
+    const [existing, appCountResult] = await Promise.all([
+        query(
+            `SELECT j.job_id, j.job_status, j.salary_min, j.salary_max,
+                    j.application_deadline, c.company_name
+             FROM job_postings j
+             JOIN companies c ON j.company_id = c.company_id
+             WHERE j.job_id = $1 AND j.college_id = $2
+             LIMIT 1`,
+            [jobId, collegeId]
+        ),
+        query(
+            `SELECT COUNT(*) AS total FROM student_applications
+             WHERE job_id = $1 AND college_id = $2`,
+            [jobId, collegeId]
+        ),
+    ]);
 
     if (!existing.rows.length) {
         throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_FOUND), { status: 404 });
     }
+
+    const applicationCount = Number.parseInt(appCountResult.rows[0].total, 10);
 
     // 2. Can only edit draft or published jobs (not closed or cancelled)
     const currentStatus = existing.rows[0].job_status;
@@ -556,18 +585,179 @@ async function updateJob(jobId, collegeId, data) {
     logger.info(`${LOG.AUTH} Job updated`, {
         jobId,
         updatedFields: fieldsToUpdate,
+        applicationCount,
         collegeId,
     });
 
     return {
         ...result.rows[0],
         company_name: existing.rows[0].company_name,
+        application_count: applicationCount,
     };
 }
 
 // ============================================================================
 // 5. UPDATE JOB STATUS (with transition validation)
 // ============================================================================
+
+/**
+ * Determine the best tier_id for a job by iterating ALL passout years
+ * and picking the tier with the highest tier_level.
+ */
+async function autoClassifyTier(jobId, collegeId) {
+    const jobInfo = await query(
+        `SELECT salary_max, passout_years FROM job_postings WHERE job_id = $1`,
+        [jobId]
+    );
+    const { salary_max, passout_years } = jobInfo.rows[0];
+    if (!salary_max || !passout_years?.length) return null;
+
+    const { classifyJobTier } = require('./companyTier.service');
+    let bestTier = null;
+    for (const year of passout_years) {
+        const tier = await classifyJobTier(collegeId, year, salary_max);
+        if (tier && (!bestTier || tier.tier_level > bestTier.tier_level)) {
+            bestTier = tier;
+        }
+    }
+    return bestTier?.tier_id || null;
+}
+
+/**
+ * Cascade on job close/cancel: reject active apps, cancel pending/in_progress rounds.
+ * MUST run inside a transaction — accepts client, not the pool query function.
+ */
+async function cascadeJobClose(client, jobId, collegeId) {
+    // Reject pending + under_review + shortlisted applications
+    const rejectedApps = await client.query(
+        `UPDATE student_applications
+         SET application_status = $1,
+             eligibility_remarks = COALESCE(eligibility_remarks, '') || ' | Auto-rejected: job closed',
+             last_updated_at = NOW()
+         WHERE job_id = $2 AND college_id = $3
+           AND application_status IN ($4, $5, $6)
+         RETURNING application_id, student_id`,
+        [STATUS.APPLICATION.REJECTED, jobId, collegeId,
+         STATUS.APPLICATION.PENDING, STATUS.APPLICATION.UNDER_REVIEW, STATUS.APPLICATION.SHORTLISTED]
+    );
+
+    // Reject selected + waitlisted applications (no active offer yet)
+    const rejectedAdvanced = await client.query(
+        `UPDATE student_applications
+         SET application_status = $1,
+             eligibility_remarks = COALESCE(eligibility_remarks, '') || ' | Auto-rejected: job cancelled',
+             last_updated_at = NOW()
+         WHERE job_id = $2 AND college_id = $3
+           AND application_status IN ($4, $5)
+         RETURNING application_id, student_id`,
+        [STATUS.APPLICATION.REJECTED, jobId, collegeId,
+         STATUS.APPLICATION.SELECTED, STATUS.APPLICATION.WAITLISTED]
+    );
+
+    // Revoke active placements (offered status only — accepted/joined placements are kept)
+    const revokedPlacements = await client.query(
+        `UPDATE placement_results
+         SET placement_status = 'revoked',
+             updated_at = NOW()
+         WHERE job_id = $1 AND college_id = $2
+           AND placement_status = 'offered'
+         RETURNING placement_id, student_id, application_id`,
+        [jobId, collegeId]
+    );
+
+    // Reject the applications behind revoked placements
+    if (revokedPlacements.rowCount > 0) {
+        const revokedAppIds = revokedPlacements.rows.map(r => r.application_id);
+        await client.query(
+            `UPDATE student_applications
+             SET application_status = $1,
+                 eligibility_remarks = COALESCE(eligibility_remarks, '') || ' | Offer revoked: job cancelled',
+                 last_updated_at = NOW()
+             WHERE application_id = ANY($2)`,
+            [STATUS.APPLICATION.REJECTED, revokedAppIds]
+        );
+    }
+
+    // Cancel pending + in_progress rounds
+    const cancelledRounds = await client.query(
+        `UPDATE job_rounds
+         SET round_status = $1
+         WHERE job_id = $2
+           AND round_status IN ($3, $4)
+         RETURNING round_id`,
+        [STATUS.ROUND.CANCELLED, jobId,
+         STATUS.ROUND.PENDING, STATUS.ROUND.IN_PROGRESS]
+    );
+
+    // Notify affected students (batched to handle large cascades)
+    const allAffectedStudents = [
+        ...rejectedApps.rows.map(r => ({ ...r, reason: 'Your application was automatically rejected because the job posting was closed.' })),
+        ...rejectedAdvanced.rows.map(r => ({ ...r, reason: 'Your application was rejected because the job has been cancelled.' })),
+        ...revokedPlacements.rows.map(r => ({ student_id: r.student_id, application_id: r.application_id, reason: 'Your offer has been revoked because the job has been cancelled.' })),
+    ];
+
+    if (allAffectedStudents.length > 0) {
+        const BATCH = 100;
+        for (let i = 0; i < allAffectedStudents.length; i += BATCH) {
+            const batch = allAffectedStudents.slice(i, i + BATCH);
+            const vals = batch.map((_, j) => {
+                const o = j * 8;
+                return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, $${o + 8})`;
+            }).join(', ');
+            const params = batch.flatMap(row => [
+                collegeId, RECIPIENT_TYPE.STUDENT, row.student_id,
+                'Application Auto-Rejected',
+                row.reason,
+                NOTIFICATION_TYPE.AUTO_WITHDRAWN,
+                'application', row.application_id,
+            ]);
+
+            await client.query(
+                `INSERT INTO notifications
+                    (college_id, recipient_type, recipient_id, title, body,
+                     notification_type, related_entity_type, related_entity_id)
+                 VALUES ${vals}`,
+                params
+            );
+        }
+    }
+
+    const totalRejected = rejectedApps.rowCount + rejectedAdvanced.rowCount + revokedPlacements.rowCount;
+
+    // Audit trail for cascade
+    await logAudit(client, {
+        collegeId,
+        userId: 'system',
+        userName: 'System',
+        userRole: 'system',
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        resourceType: AUDIT_RESOURCE_TYPES.JOB,
+        resourceId: jobId,
+        summary: `Job close cascade: ${totalRejected} applications rejected, ${revokedPlacements.rowCount} offers revoked, ${cancelledRounds.rowCount} rounds cancelled`,
+        metadata: {
+            applicationsRejected: rejectedApps.rowCount,
+            advancedAppsRejected: rejectedAdvanced.rowCount,
+            offersRevoked: revokedPlacements.rowCount,
+            roundsCancelled: cancelledRounds.rowCount,
+        },
+    });
+
+    if (totalRejected > 0 || cancelledRounds.rowCount > 0) {
+        logger.info(`${LOG.AUTH} Job close cascade`, {
+            jobId, collegeId,
+            applicationsRejected: rejectedApps.rowCount,
+            advancedAppsRejected: rejectedAdvanced.rowCount,
+            offersRevoked: revokedPlacements.rowCount,
+            roundsCancelled: cancelledRounds.rowCount,
+        });
+    }
+
+    return {
+        applicationsRejected: totalRejected,
+        offersRevoked: revokedPlacements.rowCount,
+        roundsCancelled: cancelledRounds.rowCount,
+    };
+}
 
 /**
  * Change job status following valid transitions:
@@ -582,7 +772,7 @@ async function updateJob(jobId, collegeId, data) {
  * @returns {Object} Updated job
  */
 async function updateJobStatus(jobId, collegeId, newStatus) {
-    // 1. Verify job exists
+    // 1. Verify job exists (outside transaction — read-only)
     const existing = await query(
         `SELECT j.job_id, j.job_status, j.application_deadline, c.company_name
          FROM job_postings j
@@ -598,22 +788,8 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
 
     const currentStatus = existing.rows[0].job_status;
 
-    // 2. Same status?
-    if (currentStatus === newStatus) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.JOB_ALREADY_STATUS),
-            { status: 400 }
-        );
-    }
-
-    // 3. Validate transition
-    const allowedTransitions = STATUS_TRANSITIONS[currentStatus] || [];
-    if (!allowedTransitions.includes(newStatus)) {
-        throw Object.assign(
-            new Error(`${ERROR_MESSAGES.INVALID_JOB_STATUS_TRANSITION}. Allowed: ${allowedTransitions.join(', ') || 'none'}`),
-            { status: 400 }
-        );
-    }
+    // 2. Validate transition (same-status + invalid both handled)
+    assertTransition('job', currentStatus, newStatus);
 
     // 4. If publishing, validate job has at least 1 active position + valid deadline
     if (newStatus === STATUS.JOB.PUBLISHED) {
@@ -641,28 +817,69 @@ async function updateJobStatus(jobId, collegeId, newStatus) {
         }
     }
 
-    // 5. Update status + handle allow_applications
+    // 5. Auto-classify tier on publish
+    const autoTierId = newStatus === STATUS.JOB.PUBLISHED
+        ? await autoClassifyTier(jobId, collegeId)
+        : null;
+
+    // 6. Update status + cascade in a single transaction
     const allowApplications = newStatus === STATUS.JOB.PUBLISHED;
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
 
-    const result = await query(
-        `UPDATE job_postings
-         SET job_status = $1, allow_applications = $2, updated_at = NOW()
-         WHERE job_id = $3 AND college_id = $4
-         RETURNING ${JOB_RETURNING_COLUMNS}`,
-        [newStatus, allowApplications, jobId, collegeId]
-    );
+        const updateFields = ['job_status = $1', 'allow_applications = $2', 'updated_at = NOW()'];
+        const updateParams = [newStatus, allowApplications];
+        let paramIdx = 3;
 
-    logger.info(`${LOG.AUTH} Job status changed`, {
-        jobId,
-        previousStatus: currentStatus,
-        newStatus,
-        collegeId,
-    });
+        if (autoTierId) {
+            updateFields.push(`tier_id = $${paramIdx}`);
+            updateParams.push(autoTierId);
+            paramIdx++;
+        }
 
-    return {
-        ...result.rows[0],
-        company_name: existing.rows[0].company_name,
-    };
+        updateParams.push(jobId, collegeId);
+
+        const result = await client.query(
+            `UPDATE job_postings
+             SET ${updateFields.join(', ')}
+             WHERE job_id = $${paramIdx} AND college_id = $${paramIdx + 1}
+             RETURNING ${JOB_RETURNING_COLUMNS}`,
+            updateParams
+        );
+
+        // 7. Cascade on job close/cancel (inside same transaction)
+        let cascade = null;
+        if (newStatus === STATUS.JOB.CLOSED || newStatus === STATUS.JOB.CANCELLED) {
+            cascade = await cascadeJobClose(client, jobId, collegeId);
+        }
+
+        await client.query('COMMIT');
+
+        // Fire-and-forget: notify students when job is published
+        if (newStatus === STATUS.JOB.PUBLISHED && currentStatus !== STATUS.JOB.PUBLISHED) {
+            notifyJobPublished(collegeId, jobId, result.rows[0].job_title, existing.rows[0].company_name).catch(() => {});
+        }
+
+        logger.info(`${LOG.AUTH} Job status changed`, {
+            jobId,
+            previousStatus: currentStatus,
+            newStatus,
+            collegeId,
+        });
+
+        return {
+            ...result.rows[0],
+            company_name: existing.rows[0].company_name,
+            _previousStatus: currentStatus,
+            _cascade: cascade,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 // ============================================================================

@@ -15,7 +15,7 @@
  */
 
 const Joi = require('joi');
-const { JOB_TYPES, STATUS } = require('../../config/constants');
+const { JOB_TYPES, STATUS, DRIVE_TYPES } = require('../../config/constants');
 
 // ============================================================================
 // GET /get_available_jobs — Query params
@@ -25,6 +25,7 @@ const listAvailableJobsSchema = Joi.object({
     // Filters
     search: Joi.string().max(200).optional().allow(''),
     job_type: Joi.string().valid(...JOB_TYPES).optional(),
+    drive_type: Joi.string().valid(...DRIVE_TYPES).optional(),
     company_name: Joi.string().max(200).optional().allow(''),
 
     // Sorting

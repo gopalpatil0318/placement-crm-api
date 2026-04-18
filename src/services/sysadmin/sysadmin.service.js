@@ -32,7 +32,7 @@ const {
  *
  * @param {string} email
  * @param {string} password
- * @returns {{ token: string, role: string, email: string }}
+ * @returns {Promise<{ token: string, role: string, email: string }>}
  * @throws {Error} INVALID_CREDENTIALS
  */
 async function loginSysadmin(email, password) {
@@ -66,7 +66,7 @@ async function loginSysadmin(email, password) {
 
 /**
  * @param {Object} data - Validated body from createCollegeSchema
- * @returns {{ college: Object, admin: Object }}
+ * @returns {Promise<{ college: Object, admin: Object }>}
  */
 async function createCollege(data) {
     const client = await getClient();
@@ -186,7 +186,7 @@ async function createCollege(data) {
 
 /**
  * @param {{ page, limit, offset, status?, type?, search? }} params
- * @returns {{ colleges: Array, total: number }}
+ * @returns {Promise<{ colleges: Array, total: number }>}
  */
 async function getAllColleges({ page, limit, offset, status, type, search }) {
     const conditions = [];

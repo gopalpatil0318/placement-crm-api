@@ -343,7 +343,7 @@ async function togglePolicyStatus(policyId, collegeId, isActive) {
         is_active: isActive,
     });
 
-    return result.rows[0];
+    return { ...result.rows[0], _previousStatus: existing.is_active };
 }
 
 // ============================================================================

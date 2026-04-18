@@ -27,14 +27,13 @@ const CRITERIA_SELECT_COLUMNS = `
     criteria_id, job_id, min_overall_cgpa, max_live_kts,
     min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
     allowed_genders, allowed_departments, allowed_gap_statuses,
-    exclude_already_placed, min_hsc_percentage, min_ssc_percentage,
-    min_package_lpa, max_package_lpa
+    exclude_already_placed, min_existing_package, max_existing_package
 `;
 
 const OVERRIDE_RETURNING_COLUMNS = `
     override_id, job_id, student_id, college_id,
     override_status, request_reason, ineligibility_reasons,
-    requested_at
+    request_attempt, requested_at
 `;
 
 // ============================================================================
@@ -117,7 +116,7 @@ function checkMaxCriterion(criterionValue, studentValue, label) {
 function checkArrayCriterion(allowed, actual, label) {
     if (!allowed || allowed.length === 0) return null;
     if (!actual || !allowed.includes(actual)) {
-        return `${label}: ${allowed.join(', ')}`;
+        return `${label}: ${allowed.join(', ')}. Yours: ${actual || 'Not set'}`;
     }
     return null;
 }
@@ -164,7 +163,7 @@ async function evaluateEligibility(jobId, student) {
         const placedResult = await query(
             `SELECT 1 FROM placement_results
              WHERE student_id = $1
-               AND placement_status NOT IN ('cancelled', 'rejected')
+               AND placement_status IN ('accepted', 'joined')
              LIMIT 1`,
             [student.student_id]
         );
@@ -203,13 +202,18 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
 
     // Existing override request
     const overrideResult = await query(
-        `SELECT override_id, override_status, rejection_reason, review_notes, requested_at, reviewed_at
+        `SELECT override_id, override_status, rejection_reason, review_notes,
+                request_attempt, requested_at, reviewed_at
          FROM job_eligibility_override_requests
          WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
         [studentId, jobId]
     );
 
     const existingOverride = overrideResult.rows[0] || null;
+
+    // B17: Allow re-request when override was rejected and attempt < 2
+    const canReRequest = existingOverride?.override_status === STATUS.OVERRIDE.REJECTED
+        && (existingOverride.request_attempt || 1) < 2;
 
     // Application status
     const appResult = await query(
@@ -234,13 +238,14 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
                 : []),
             ...eligibility.issues,
         ],
-        can_request_override: !eligibility.is_eligible && !yearMismatch && !existingOverride,
+        can_request_override: !eligibility.is_eligible && !yearMismatch && (!existingOverride || canReRequest),
         override_request: existingOverride
             ? {
                 override_id: existingOverride.override_id,
                 override_status: existingOverride.override_status,
                 rejection_reason: existingOverride.rejection_reason ?? null,
                 review_notes: existingOverride.review_notes ?? null,
+                request_attempt: existingOverride.request_attempt ?? 1,
                 requested_at: existingOverride.requested_at,
                 reviewed_at: existingOverride.reviewed_at ?? null,
             }
@@ -252,6 +257,35 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
             }
             : null,
     };
+}
+
+// ============================================================================
+// HELPER — Validate existing override for re-request eligibility (B17)
+// ============================================================================
+
+function validateExistingOverride(existing) {
+    if (!existing) return; // No existing override — first request, proceed
+
+    if (existing.override_status === STATUS.OVERRIDE.REJECTED) {
+        const attempt = existing.request_attempt || 1;
+        if (attempt >= 2) {
+            throw Object.assign(
+                new Error(ERROR_MESSAGES.STUDENT_OVERRIDE_MAX_ATTEMPTS),
+                { status: 409 }
+            );
+        }
+        return; // Allow re-request (attempt < 2)
+    }
+
+    // Pending or approved — block
+    const messageMap = {
+        [STATUS.OVERRIDE.PENDING]: ERROR_MESSAGES.STUDENT_OVERRIDE_PENDING,
+        [STATUS.OVERRIDE.APPROVED]: ERROR_MESSAGES.STUDENT_OVERRIDE_APPROVED,
+    };
+    throw Object.assign(
+        new Error(messageMap[existing.override_status] || ERROR_MESSAGES.STUDENT_OVERRIDE_PENDING),
+        { status: 409 }
+    );
 }
 
 // ============================================================================
@@ -269,75 +303,68 @@ async function checkJobEligibilityForOverride(jobId, studentId, collegeId) {
  * @param {Object} data - { request_reason }
  * @returns {Object} Created override request
  */
+// ============================================================================
+// HELPER — Validate job/student prerequisites for override request
+// ============================================================================
+
+function validateOverridePrerequisites(job, student) {
+    if (job.job_status !== STATUS.JOB.PUBLISHED) {
+        throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_PUBLISHED), { status: 400 });
+    }
+    if (job.allow_applications === false) {
+        throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_ACCEPTING), { status: 400 });
+    }
+    if (job.application_deadline && new Date(job.application_deadline) < new Date()) {
+        throw Object.assign(new Error(ERROR_MESSAGES.DEADLINE_PASSED), { status: 400 });
+    }
+    const passoutYears = Array.isArray(job.passout_years) ? job.passout_years : [];
+    if (!passoutYears.includes(student.student_passout_year)) {
+        throw Object.assign(new Error(ERROR_MESSAGES.PASSOUT_YEAR_NOT_OVERRIDABLE), { status: 400 });
+    }
+    if (!student.profile_is_approved) {
+        throw Object.assign(new Error(ERROR_MESSAGES.PROFILE_NOT_APPROVED), { status: 400 });
+    }
+}
+
+// ============================================================================
+// HELPER — Ensure no active (non-withdrawn) application exists
+// ============================================================================
+
+function ensureNoActiveApplication(existingApp) {
+    if (existingApp.rows.length === 0) return;
+    const appStatus = existingApp.rows[0].application_status;
+    if (appStatus !== STATUS.APPLICATION.WITHDRAWN && appStatus !== STATUS.APPLICATION.AUTO_WITHDRAWN) {
+        throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_OVERRIDE_ALREADY_APPLIED), { status: 400 });
+    }
+}
+
 async function requestOverride(jobId, studentId, collegeId, data) {
     const [job, student] = await Promise.all([
         verifyJob(jobId, collegeId),
         getStudentProfile(studentId, collegeId),
     ]);
 
-    // Job must be published and accepting applications
-    if (job.job_status !== STATUS.JOB.PUBLISHED) {
-        throw Object.assign(new Error(ERROR_MESSAGES.JOB_NOT_PUBLISHED), { status: 400 });
-    }
+    validateOverridePrerequisites(job, student);
 
-    if (job.allow_applications === false) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.JOB_NOT_ACCEPTING),
-            { status: 400 }
-        );
-    }
-
-    if (job.application_deadline && new Date(job.application_deadline) < new Date()) {
-        throw Object.assign(new Error(ERROR_MESSAGES.DEADLINE_PASSED), { status: 400 });
-    }
-
-    // Passout year MUST match — override does not cover year mismatch
-    const passoutYears = Array.isArray(job.passout_years) ? job.passout_years : [];
-    if (!passoutYears.includes(student.student_passout_year)) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.PASSOUT_YEAR_NOT_OVERRIDABLE),
-            { status: 400 }
-        );
-    }
-
-    // Check profile approval
-    if (!student.profile_is_approved) {
-        throw Object.assign(new Error(ERROR_MESSAGES.PROFILE_NOT_APPROVED), { status: 400 });
-    }
-
-    // Run parallel checks: already applied, existing override
+    // Run parallel checks: already applied (excluding withdrawn), existing override
     const [existingApp, existingOverride] = await Promise.all([
         query(
-            `SELECT 1 FROM student_applications
+            `SELECT application_status FROM student_applications
              WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
             [studentId, jobId]
         ),
         query(
-            `SELECT override_id, override_status FROM job_eligibility_override_requests
+            `SELECT override_id, override_status, request_attempt
+             FROM job_eligibility_override_requests
              WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
             [studentId, jobId]
         ),
     ]);
 
-    if (existingApp.rows.length > 0) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.STUDENT_OVERRIDE_ALREADY_APPLIED),
-            { status: 400 }
-        );
-    }
+    ensureNoActiveApplication(existingApp);
 
-    if (existingOverride.rows.length > 0) {
-        const overrideStatus = existingOverride.rows[0].override_status;
-        const messageMap = {
-            [STATUS.OVERRIDE.PENDING]: ERROR_MESSAGES.STUDENT_OVERRIDE_PENDING,
-            [STATUS.OVERRIDE.APPROVED]: ERROR_MESSAGES.STUDENT_OVERRIDE_APPROVED,
-            [STATUS.OVERRIDE.REJECTED]: ERROR_MESSAGES.STUDENT_OVERRIDE_REJECTED,
-        };
-        throw Object.assign(
-            new Error(messageMap[overrideStatus] || ERROR_MESSAGES.STUDENT_OVERRIDE_PENDING),
-            { status: 409 }
-        );
-    }
+    // B17: Validate existing override — may allow re-request after rejection
+    validateExistingOverride(existingOverride.rows[0]);
 
     // Evaluate eligibility — must be ineligible to request override
     const eligibility = await evaluateEligibility(jobId, student);
@@ -348,24 +375,48 @@ async function requestOverride(jobId, studentId, collegeId, data) {
         );
     }
 
-    // Insert override request + notification in a transaction
+    // Insert or update override request + notification in a transaction
     const ineligibilityText = eligibility.issues.join('; ');
     const client = await getClient();
+    const isReRequest = existingOverride.rows.length > 0;
 
     try {
         await client.query('BEGIN');
 
-        const insertResult = await client.query(
-            `INSERT INTO job_eligibility_override_requests
-                (student_id, job_id, college_id, request_reason, ineligibility_reasons)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING ${OVERRIDE_RETURNING_COLUMNS}`,
-            [studentId, jobId, collegeId, data.request_reason.trim(), ineligibilityText]
-        );
+        let override;
 
-        const override = insertResult.rows[0];
+        if (isReRequest) {
+            // B17: Re-request — UPDATE existing rejected override
+            const updateResult = await client.query(
+                `UPDATE job_eligibility_override_requests
+                 SET override_status = 'pending',
+                     request_reason = $1,
+                     ineligibility_reasons = $2,
+                     request_attempt = request_attempt + 1,
+                     rejection_reason = NULL,
+                     review_notes = NULL,
+                     reviewed_by = NULL,
+                     reviewed_at = NULL,
+                     requested_at = NOW()
+                 WHERE student_id = $3 AND job_id = $4
+                 RETURNING ${OVERRIDE_RETURNING_COLUMNS}`,
+                [data.request_reason.trim(), ineligibilityText, studentId, jobId]
+            );
+            override = updateResult.rows[0];
+        } else {
+            // First request — INSERT new override
+            const insertResult = await client.query(
+                `INSERT INTO job_eligibility_override_requests
+                    (student_id, job_id, college_id, request_reason, ineligibility_reasons)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING ${OVERRIDE_RETURNING_COLUMNS}`,
+                [studentId, jobId, collegeId, data.request_reason.trim(), ineligibilityText]
+            );
+            override = insertResult.rows[0];
+        }
 
-        // Notify TPO users in this college about the new override request
+        // Notify TPO users in this college about the override request
+        const attemptLabel = isReRequest ? ' (Re-request)' : '';
         await client.query(
             `INSERT INTO notifications
                 (college_id, recipient_type, recipient_id, title, body,
@@ -380,7 +431,7 @@ async function requestOverride(jobId, studentId, collegeId, data) {
             [
                 collegeId,
                 RECIPIENT_TYPE.USER,
-                `Override Request: ${job.job_title}`,
+                `Override Request${attemptLabel}: ${job.job_title}`,
                 `${student.first_name} ${student.last_name} (${student.dept_name}) has requested an eligibility override for ${job.job_title} at ${job.company_name}. Reason: ${data.request_reason.trim().substring(0, 150)}`,
                 NOTIFICATION_TYPE.ELIGIBILITY_OVERRIDE_REQUESTED,
                 'job',
@@ -390,11 +441,12 @@ async function requestOverride(jobId, studentId, collegeId, data) {
 
         await client.query('COMMIT');
 
-        logger.info(`${LOG.AUTH} Eligibility override request submitted`, {
+        logger.info(`${LOG.AUTH} Eligibility override request ${isReRequest ? 're-' : ''}submitted`, {
             overrideId: override.override_id,
             studentId,
             jobId,
             collegeId,
+            attempt: override.request_attempt,
         });
 
         return {
@@ -403,6 +455,7 @@ async function requestOverride(jobId, studentId, collegeId, data) {
             override_status: override.override_status,
             request_reason: override.request_reason,
             ineligibility_reasons: override.ineligibility_reasons,
+            request_attempt: override.request_attempt,
             requested_at: override.requested_at,
             job_title: job.job_title,
             company_name: job.company_name,
@@ -457,6 +510,7 @@ async function getMyOverrideRequests(studentId, collegeId, filters = {}) {
             `SELECT r.override_id, r.override_status,
                     r.request_reason, r.ineligibility_reasons,
                     r.rejection_reason, r.review_notes,
+                    r.request_attempt,
                     r.requested_at, r.reviewed_at,
                     j.job_id, j.job_title, j.passout_years,
                     j.application_deadline, j.job_status,

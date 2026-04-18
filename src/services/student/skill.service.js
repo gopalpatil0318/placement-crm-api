@@ -28,6 +28,7 @@ const {
     ERROR_MESSAGES,
     DB_ERROR_CODES,
 } = require('../../config/constants');
+const { maybeResetApproval } = require('../../utils/approvalResetHelper');
 
 // ============================================================================
 // 1. ADD SKILL (to master skills table)
@@ -39,7 +40,7 @@ async function addSkill(collegeId, data) {
             `INSERT INTO skills (college_id, skill_name, skill_category)
              VALUES ($1, $2, $3)
              RETURNING skill_id, skill_name, skill_category, created_at`,
-            [collegeId, data.skill_name.trim(), data.skill_category || null]
+            [collegeId, data.skill_name, data.skill_category]
         );
 
         return result.rows[0];
@@ -63,7 +64,7 @@ async function deleteSkill(skillId, collegeId) {
     const result = await query(
         `DELETE FROM skills
          WHERE skill_id = $1 AND college_id = $2
-         RETURNING skill_id, skill_name`,
+         RETURNING skill_id, skill_name, skill_category`,
         [skillId, collegeId]
     );
 
@@ -118,7 +119,6 @@ async function syncMySkills(studentId, collegeId, incomingSkills) {
 
         // 2. Build sets for comparison
         const incomingSkillIds = new Set(incomingSkills.map(s => s.skill_id));
-        const incomingSkillsMap = new Map(incomingSkills.map(s => [s.skill_id, s.proficiency_level]));
 
         const toAdd = [];
         const toUpdate = [];
@@ -188,18 +188,9 @@ async function syncMySkills(studentId, collegeId, incomingSkills) {
             );
         }
 
-        // Auto-reset profile approval when student changes skills
+        // Conditionally reset profile approval (respects verification settings)
         if (toAdd.length > 0 || toUpdate.length > 0 || toRemove.length > 0) {
-            await client.query(
-                `UPDATE students
-                 SET profile_approval_status = 'pending', profile_is_approved = false,
-                     approved_by = NULL, approved_at = NULL,
-                     profile_rejection_reason = NULL, rejected_at = NULL,
-                     updated_at = NOW()
-                 WHERE student_id = $1 AND college_id = $2
-                   AND profile_approval_status != 'pending'`,
-                [studentId, collegeId]
-            );
+            await maybeResetApproval(client, studentId, collegeId, 'skills');
         }
 
         await client.query('COMMIT');

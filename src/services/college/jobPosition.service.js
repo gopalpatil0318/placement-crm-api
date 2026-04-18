@@ -195,7 +195,23 @@ async function updatePosition(positionId, collegeId, data) {
         }
     }
 
-    // 4. Build dynamic UPDATE
+    // 4. If vacancies changing, ensure not reducing below active offers
+    if (data.vacancies !== undefined && data.vacancies < existing.vacancies) {
+        const activeOffers = await query(
+            `SELECT COUNT(*) AS cnt FROM placement_results
+             WHERE position_id = $1 AND placement_status IN ('offered', 'accepted', 'joined')`,
+            [positionId]
+        );
+        const activeCount = Number.parseInt(activeOffers.rows[0]?.cnt ?? '0', 10);
+        if (data.vacancies < activeCount) {
+            throw Object.assign(
+                new Error(`Cannot reduce vacancies to ${data.vacancies} — there are ${activeCount} active offers/placements for this position`),
+                { status: 400 }
+            );
+        }
+    }
+
+    // 5. Build dynamic UPDATE
     const fieldsToUpdate = FIELDS.filter(f => data[f] !== undefined);
 
     if (!fieldsToUpdate.length) {

@@ -17,27 +17,21 @@ const {
     ERROR_MESSAGES,
     SUCCESS_MESSAGES,
     STATUS,
+    NOTIFICATION_TYPE,
+    RECIPIENT_TYPE,
 } = require('../../config/constants');
+const { assertTransition, validateTransition } = require('../../utils/stateMachine');
 
 // Explicit column list for student_applications table
 const APPLICATION_COLUMNS = `a.application_id, a.student_id, a.job_id, a.position_id, a.college_id,
     a.application_status, a.current_round_id, a.is_eligible,
-    a.eligibility_remarks, a.applied_at, a.last_updated_at`;
+    a.eligibility_remarks, a.waitlist_rank, a.auto_withdrawal_reason, a.applied_at, a.last_updated_at`;
 
 const APPLICATION_RETURNING_COLUMNS = `application_id, student_id, job_id, position_id, college_id,
     application_status, current_round_id, is_eligible,
-    eligibility_remarks, applied_at, last_updated_at`;
+    eligibility_remarks, waitlist_rank, auto_withdrawal_reason, applied_at, last_updated_at`;
 
-// Valid admin status transitions
-const ADMIN_TRANSITIONS = {
-    pending: ['under_review', 'shortlisted', 'rejected'],
-    under_review: ['shortlisted', 'rejected'],
-    shortlisted: ['selected', 'rejected'],
-    selected: ['offered', 'rejected'],
-    offered: ['rejected'],
-    rejected: [],     // terminal from admin side
-    withdrawn: [],    // student-initiated, terminal
-};
+// Admin status transitions delegated to src/utils/stateMachine.js
 
 // ============================================================================
 // HELPER — Verify job exists and belongs to college
@@ -107,6 +101,7 @@ function formatApplicationListItem(row) {
         current_round_id: row.current_round_id,
         is_eligible: row.is_eligible,
         eligibility_remarks: row.eligibility_remarks ?? null,
+        waitlist_rank: row.waitlist_rank ?? null,
         applied_at: row.applied_at,
         last_updated_at: row.last_updated_at,
         // Student info
@@ -134,6 +129,7 @@ function formatApplicationDetail(row) {
         current_round_id: row.current_round_id,
         is_eligible: row.is_eligible,
         eligibility_remarks: row.eligibility_remarks ?? null,
+        waitlist_rank: row.waitlist_rank ?? null,
         applied_at: row.applied_at,
         last_updated_at: row.last_updated_at,
         // Job info
@@ -273,6 +269,7 @@ async function getJobApplications(jobId, collegeId, filters = {}) {
         rejected: 0,
         selected: 0,
         offered: 0,
+        waitlisted: 0,
         withdrawn: 0,
     };
 
@@ -398,22 +395,8 @@ async function updateApplicationStatus(applicationId, collegeId, newStatus, rema
     const existing = await verifyApplication(applicationId, collegeId);
     const currentStatus = existing.application_status;
 
-    // 2. Same status check
-    if (currentStatus === newStatus) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.APPLICATION_ALREADY_STATUS),
-            { status: 400 }
-        );
-    }
-
-    // 3. Validate transition
-    const allowedTransitions = ADMIN_TRANSITIONS[currentStatus] ?? [];
-    if (!allowedTransitions.includes(newStatus)) {
-        throw Object.assign(
-            new Error(ERROR_MESSAGES.INVALID_APPLICATION_TRANSITION),
-            { status: 400 }
-        );
-    }
+    // 2. Validate transition (same-status + invalid both handled)
+    assertTransition('application', currentStatus, newStatus);
 
     // 4. Update
     const result = await query(
@@ -433,8 +416,26 @@ async function updateApplicationStatus(applicationId, collegeId, newStatus, rema
         collegeId,
     });
 
+    // Notify student if rejection was reversed
+    if (currentStatus === STATUS.APPLICATION.REJECTED) {
+        await query(
+            `INSERT INTO notifications
+                (college_id, recipient_type, recipient_id, title, body,
+                 notification_type, related_entity_type, related_entity_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+                collegeId, RECIPIENT_TYPE.STUDENT, existing.student_id,
+                `Application Reconsidered: ${existing.job_title}`,
+                `Your application for ${existing.job_title} at ${existing.company_name} has been reconsidered and moved to ${newStatus}.`,
+                NOTIFICATION_TYPE.APPLICATION_STATUS_CHANGED,
+                'application', applicationId,
+            ]
+        );
+    }
+
     return {
         application_id: result.rows[0].application_id,
+        student_id: result.rows[0].student_id,
         application_status: result.rows[0].application_status,
         eligibility_remarks: result.rows[0].eligibility_remarks,
         last_updated_at: result.rows[0].last_updated_at,
@@ -466,9 +467,10 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
     // Fetch all applications in one query
     const appsResult = await query(
         `SELECT a.application_id, a.application_status, a.student_id, a.job_id,
-                s.first_name, s.last_name
+                s.first_name, s.last_name, j.job_title
          FROM student_applications a
          JOIN students s ON a.student_id = s.student_id
+         JOIN job_postings j ON a.job_id = j.job_id
          WHERE a.application_id = ANY($1::UUID[]) AND a.college_id = $2`,
         [uniqueIds, collegeId]
     );
@@ -479,6 +481,7 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
     }
 
     const updated = [];
+    const transitions = [];
     const skipped = [];
     const errors = [];
 
@@ -500,8 +503,8 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
             continue;
         }
 
-        const allowedTransitions = ADMIN_TRANSITIONS[app.application_status] ?? [];
-        if (!allowedTransitions.includes(newStatus)) {
+        const isValid = validateTransition('application', app.application_status, newStatus);
+        if (!isValid) {
             skipped.push({
                 application_id: appId,
                 student_name: `${app.first_name} ${app.last_name}`,
@@ -512,6 +515,12 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
         }
 
         updated.push(appId);
+        transitions.push({
+            application_id: appId,
+            student_name: `${app.first_name} ${app.last_name}`,
+            old_status: app.application_status,
+            new_status: newStatus,
+        });
     }
 
     // Perform bulk update in a single query for valid applications
@@ -524,6 +533,33 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
              WHERE application_id = ANY($3::UUID[])`,
             [newStatus, remarks, updated]
         );
+
+        // Notify students whose rejections were reversed
+        const reversed = updated
+            .map(id => appsMap.get(id))
+            .filter(app => app.application_status === STATUS.APPLICATION.REJECTED);
+
+        if (reversed.length > 0) {
+            const notifValues = reversed.map((_, i) => {
+                const o = i * 8;
+                return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, $${o + 8})`;
+            }).join(', ');
+            const notifParams = reversed.flatMap(app => [
+                collegeId, RECIPIENT_TYPE.STUDENT, app.student_id,
+                `Application Reconsidered: ${app.job_title || 'Job'}`,
+                `Your application has been reconsidered and moved to ${newStatus}.`,
+                NOTIFICATION_TYPE.APPLICATION_STATUS_CHANGED,
+                'application', app.application_id,
+            ]);
+
+            await query(
+                `INSERT INTO notifications
+                    (college_id, recipient_type, recipient_id, title, body,
+                     notification_type, related_entity_type, related_entity_id)
+                 VALUES ${notifValues}`,
+                notifParams
+            );
+        }
 
         logger.info(`${LOG.AUTH} Bulk application status update`, {
             newStatus,
@@ -543,8 +579,184 @@ async function bulkUpdateApplicationStatus(collegeId, applicationIds, newStatus,
             errors: errors.length,
         },
         updated_ids: updated,
+        transitions,
         skipped,
         errors,
+    };
+}
+
+// ============================================================================
+// 5. SET WAITLIST — Assign waitlist ranks to applications
+// ============================================================================
+
+/**
+ * Move applications to 'waitlisted' with assigned ranks.
+ * Accepts an array of { application_id, rank } objects.
+ * Validates that all apps are shortlisted/selected (valid transitions to waitlisted).
+ * Runs in a transaction with FOR UPDATE locks.
+ *
+ * @param {string} jobId
+ * @param {string} collegeId
+ * @param {{ application_id: string, rank: number }[]} rankings
+ * @returns {{ updated, skipped, errors }}
+ */
+async function setWaitlist(jobId, collegeId, rankings) {
+    // Verify job belongs to college
+    await verifyJob(jobId, collegeId);
+
+    const appIds = rankings.map(r => r.application_id);
+    const rankMap = new Map(rankings.map(r => [r.application_id, r.rank]));
+
+    const client = await getClient();
+
+    try {
+        await client.query('BEGIN');
+
+        // Lock all target applications
+        const appsResult = await client.query(
+            `SELECT a.application_id, a.application_status, a.student_id,
+                    s.first_name, s.last_name, j.job_title, co.company_name
+             FROM student_applications a
+             JOIN students s ON a.student_id = s.student_id
+             JOIN job_postings j ON a.job_id = j.job_id
+             JOIN companies co ON j.company_id = co.company_id
+             WHERE a.application_id = ANY($1::UUID[])
+               AND a.job_id = $2
+               AND a.college_id = $3
+             FOR UPDATE OF a`,
+            [appIds, jobId, collegeId]
+        );
+
+        const appsMap = new Map();
+        for (const row of appsResult.rows) {
+            appsMap.set(row.application_id, row);
+        }
+
+        const updated = [];
+        const skipped = [];
+        const errors = [];
+
+        for (const appId of appIds) {
+            const app = appsMap.get(appId);
+            const rank = rankMap.get(appId);
+
+            if (!app) {
+                errors.push({ application_id: appId, reason: 'Application not found or not for this job' });
+                continue;
+            }
+
+            if (!validateTransition('application', app.application_status, STATUS.APPLICATION.WAITLISTED)) {
+                skipped.push({
+                    application_id: appId,
+                    student_name: `${app.first_name} ${app.last_name}`,
+                    current_status: app.application_status,
+                    reason: `Cannot waitlist from "${app.application_status}"`,
+                });
+                continue;
+            }
+
+            updated.push({ appId, rank, app });
+        }
+
+        // Bulk update all valid applications in a single query
+        if (updated.length > 0) {
+            const ids = updated.map(u => u.appId);
+            const ranks = updated.map(u => u.rank);
+            await client.query(
+                `UPDATE student_applications AS sa
+                 SET application_status = $1,
+                     waitlist_rank = v.rank,
+                     last_updated_at = NOW()
+                 FROM unnest($2::uuid[], $3::int[]) AS v(id, rank)
+                 WHERE sa.application_id = v.id`,
+                [STATUS.APPLICATION.WAITLISTED, ids, ranks]
+            );
+        }
+
+        // Notify waitlisted students
+        if (updated.length > 0) {
+            const notifValues = updated.map((_, i) => {
+                const o = i * 8;
+                return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, $${o + 8})`;
+            }).join(', ');
+            const notifParams = updated.flatMap(({ rank, app }) => [
+                collegeId, RECIPIENT_TYPE.STUDENT, app.student_id,
+                `Waitlisted (#${rank}): ${app.job_title}`,
+                `You have been placed on the waitlist (rank #${rank}) for ${app.job_title} at ${app.company_name}.`,
+                NOTIFICATION_TYPE.APPLICATION_STATUS_CHANGED,
+                'application', app.application_id,
+            ]);
+
+            await client.query(
+                `INSERT INTO notifications
+                    (college_id, recipient_type, recipient_id, title, body,
+                     notification_type, related_entity_type, related_entity_id)
+                 VALUES ${notifValues}`,
+                notifParams
+            );
+        }
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Waitlist ranks assigned`, {
+            jobId, collegeId,
+            updatedCount: updated.length,
+            skippedCount: skipped.length,
+            errorCount: errors.length,
+        });
+
+        return {
+            summary: {
+                total_requested: rankings.length,
+                updated: updated.length,
+                skipped: skipped.length,
+                errors: errors.length,
+            },
+            updated: updated.map(({ appId, rank, app }) => ({
+                application_id: appId,
+                student_name: `${app.first_name} ${app.last_name}`,
+                waitlist_rank: rank,
+            })),
+            skipped,
+            errors,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+// ============================================================================
+// 6. GET WAITLISTED APPLICATIONS (for a job, ordered by rank)
+// ============================================================================
+
+async function getWaitlistedApplications(jobId, collegeId) {
+    await verifyJob(jobId, collegeId);
+
+    const result = await query(
+        `SELECT ${APPLICATION_COLUMNS},
+                s.first_name, s.last_name, s.student_email,
+                d.dept_name,
+                p.position_name,
+                sai.roll_number, sai.enrollment_number
+         FROM student_applications a
+         JOIN students s ON a.student_id = s.student_id
+         LEFT JOIN departments d ON s.dept_id = d.dept_id
+         LEFT JOIN job_positions p ON a.position_id = p.position_id
+         LEFT JOIN student_academic_information sai ON s.student_id = sai.student_id
+         WHERE a.job_id = $1
+           AND a.college_id = $2
+           AND a.application_status = $3
+           AND a.waitlist_rank IS NOT NULL
+         ORDER BY a.waitlist_rank ASC`,
+        [jobId, collegeId, STATUS.APPLICATION.WAITLISTED]
+    );
+
+    return {
+        waitlisted: result.rows.map(formatApplicationListItem),
+        count: result.rowCount,
     };
 }
 
@@ -557,4 +769,6 @@ module.exports = {
     getApplication,
     updateApplicationStatus,
     bulkUpdateApplicationStatus,
+    setWaitlist,
+    getWaitlistedApplications,
 };

@@ -18,6 +18,7 @@
 const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
+const { maybeResetApproval } = require('../../utils/approvalResetHelper');
 
 const MAX_ACTIVITIES = 10;
 
@@ -79,13 +80,8 @@ async function addActivity(studentId, collegeId, data) {
             insertValues
         );
 
-        // 5. Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // 5. Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'activities');
 
         await client.query('COMMIT');
 
@@ -171,13 +167,8 @@ async function updateActivity(activityId, studentId, collegeId, data) {
             );
         }
 
-        // Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'activities');
 
         await client.query('COMMIT');
 
@@ -218,13 +209,8 @@ async function deleteActivity(activityId, studentId, collegeId) {
             );
         }
 
-        // Reset profile approval
-        await client.query(
-            `UPDATE students SET profile_approval_status = 'pending', profile_is_approved = false,
-             approved_by = NULL, approved_at = NULL, profile_rejection_reason = NULL, rejected_at = NULL,
-             updated_at = NOW() WHERE student_id = $1 AND college_id = $2 AND profile_approval_status != 'pending'`,
-            [studentId, collegeId]
-        );
+        // Conditionally reset profile approval (respects verification settings)
+        await maybeResetApproval(client, studentId, collegeId, 'activities');
 
         await client.query('COMMIT');
 

@@ -55,7 +55,9 @@ const config = Object.freeze({
   sysadminEmail: process.env.SYSADMIN_EMAIL,
   sysadminPassword: process.env.SYSADMIN_PASSWORD,
   jwtSecret: process.env.JWT_SECRET,
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '2h',
+  refreshTokenSecret: process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET,
+  refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '7d',
 
   // Database
   databaseUrl: process.env.DATABASE_URL,

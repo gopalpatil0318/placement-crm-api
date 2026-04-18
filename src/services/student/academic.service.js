@@ -18,6 +18,7 @@ const {
     ERROR_MESSAGES,
     DB_ERROR_CODES,
 } = require('../../config/constants');
+const { maybeResetApproval } = require('../../utils/approvalResetHelper');
 
 // Columns returned by INSERT/UPDATE (excludes internal 'id')
 const RETURNING_COLUMNS = `
@@ -93,16 +94,7 @@ async function saveAcademicInfo(studentId, collegeId, data) {
 
         // Auto-reset profile approval when student updates academic info (skip on first insert)
         if (!isNew) {
-            await client.query(
-                `UPDATE students
-                 SET profile_approval_status = 'pending', profile_is_approved = false,
-                     approved_by = NULL, approved_at = NULL,
-                     profile_rejection_reason = NULL, rejected_at = NULL,
-                     updated_at = NOW()
-                 WHERE student_id = $1 AND college_id = $2
-                   AND profile_approval_status != 'pending'`,
-                [studentId, collegeId]
-            );
+            await maybeResetApproval(client, studentId, collegeId, 'academic_info');
         }
 
         await client.query('COMMIT');

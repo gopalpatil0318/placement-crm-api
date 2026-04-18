@@ -34,7 +34,7 @@ const RESULT_RETURNING_COLUMNS = [
 async function verifyRound(roundId, collegeId) {
     const result = await query(
         `SELECT jr.round_id, jr.job_id, jr.round_number, jr.round_name, jr.round_description,
-                jr.round_type, jr.round_date, jr.round_venue, jr.round_status, jr.created_at,
+                jr.round_type, jr.round_date, jr.round_venue, jr.round_status, jr.is_processed, jr.created_at,
                 j.job_title, j.job_status, j.college_id, c.company_name
          FROM job_rounds jr
          JOIN job_postings j ON jr.job_id = j.job_id
@@ -59,7 +59,7 @@ async function verifyResult(resultId, collegeId) {
     const result = await query(
         `SELECT rr.result_id, rr.application_id, rr.round_id, rr.student_id, rr.result_status,
                 rr.score, rr.remarks, rr.attended, rr.scheduled_at, rr.completed_at, rr.created_at,
-                jr.round_name, jr.round_number, jr.round_status, jr.job_id,
+                jr.round_name, jr.round_number, jr.round_status, jr.is_processed, jr.job_id,
                 j.job_title, j.job_status,
                 c.company_name,
                 s.first_name, s.last_name, s.student_email
@@ -103,12 +103,12 @@ async function verifyApplication(applicationId, jobId, collegeId) {
 }
 
 // ============================================================================
-// HELPER — Check round/job not cancelled (throws on cancelled)
+// HELPER — Check round is eligible for result entry (throws on invalid)
 // ============================================================================
 
-const NON_RESULT_STATUSES = [STATUS.APPLICATION.REJECTED, STATUS.APPLICATION.WITHDRAWN];
+const NON_RESULT_STATUSES = new Set([STATUS.APPLICATION.REJECTED, STATUS.APPLICATION.WITHDRAWN]);
 
-function checkRoundAndJobNotCancelled(round, context = 'add') {
+function checkRoundEligibleForResults(round, context = 'add') {
     if (round.round_status === STATUS.ROUND.CANCELLED) {
         const msg = context === 'update'
             ? ERROR_MESSAGES.CANNOT_UPDATE_RESULT_CANCELLED_ROUND
@@ -121,6 +121,80 @@ function checkRoundAndJobNotCancelled(round, context = 'add') {
             : ERROR_MESSAGES.CANNOT_ADD_RESULT_CANCELLED_JOB;
         throw Object.assign(new Error(msg), { status: 400 });
     }
+    // Results can only be added/updated when round is in_progress or completed
+    if (round.round_status === STATUS.ROUND.PENDING) {
+        throw Object.assign(new Error(ERROR_MESSAGES.ROUND_NOT_STARTED), { status: 400 });
+    }
+    // Cannot add new results after round has been processed/finalized
+    if (context === 'add' && round.is_processed) {
+        throw Object.assign(new Error('Cannot add results to a processed round. Unprocess the round first or update existing results.'), { status: 400 });
+    }
+}
+
+// ============================================================================
+// HELPER — Check student passed the previous round (for round_number > 1)
+// ============================================================================
+
+async function checkPreviousRoundPassed(applicationId, jobId, currentRoundNumber) {
+    if (currentRoundNumber <= 1) return; // No previous round to check
+
+    // Find the previous round and check for a passed result
+    const result = await query(
+        `SELECT rr.result_status
+         FROM student_round_results rr
+         JOIN job_rounds jr ON rr.round_id = jr.round_id
+         WHERE jr.job_id = $1 AND jr.round_number = $2 AND rr.application_id = $3
+         LIMIT 1`,
+        [jobId, currentRoundNumber - 1, applicationId]
+    );
+
+    if (!result.rows.length) {
+        throw Object.assign(
+            new Error(`${ERROR_MESSAGES.PREVIOUS_ROUND_NOT_PASSED} (no result found in round ${currentRoundNumber - 1})`),
+            { status: 400 }
+        );
+    }
+
+    const prevStatus = result.rows[0].result_status;
+    if (prevStatus !== STATUS.ROUND_RESULT.PASSED && prevStatus !== STATUS.ROUND_RESULT.ON_HOLD) {
+        throw Object.assign(
+            new Error(`${ERROR_MESSAGES.PREVIOUS_ROUND_NOT_PASSED} (result: ${prevStatus})`),
+            { status: 400 }
+        );
+    }
+}
+
+// ============================================================================
+// HELPER — Batch-check previous round results for bulk operations
+// Returns a Map<application_id, { passed: boolean, reason: string }>
+// ============================================================================
+
+async function batchCheckPreviousRound(applicationIds, jobId, currentRoundNumber) {
+    if (currentRoundNumber <= 1) return null; // No gate needed
+
+    const result = await query(
+        `SELECT rr.application_id, rr.result_status
+         FROM student_round_results rr
+         JOIN job_rounds jr ON rr.round_id = jr.round_id
+         WHERE jr.job_id = $1 AND jr.round_number = $2 AND rr.application_id = ANY($3)`,
+        [jobId, currentRoundNumber - 1, applicationIds]
+    );
+
+    const prevResults = new Map(result.rows.map(r => [r.application_id, r.result_status]));
+    const gateMap = new Map();
+
+    for (const appId of applicationIds) {
+        const status = prevResults.get(appId);
+        if (!status) {
+            gateMap.set(appId, { passed: false, reason: `No result in round ${currentRoundNumber - 1}` });
+        } else if (status === STATUS.ROUND_RESULT.PASSED || status === STATUS.ROUND_RESULT.ON_HOLD) {
+            gateMap.set(appId, { passed: true, reason: null });
+        } else {
+            gateMap.set(appId, { passed: false, reason: `Result in round ${currentRoundNumber - 1}: ${status}` });
+        }
+    }
+
+    return gateMap;
 }
 
 // ============================================================================
@@ -140,7 +214,7 @@ function validateResultDates(scheduledAt, completedAt) {
 // HELPER — Categorize bulk items into toInsert / skipped / errors
 // ============================================================================
 
-function categorizeResults(items, appsMap, existingSet) {
+function categorizeResults(items, appsMap, existingSet, previousRoundGate = null) {
     const toInsert = [];
     const skipped = [];
     const errors = [];
@@ -153,13 +227,26 @@ function categorizeResults(items, appsMap, existingSet) {
             continue;
         }
 
-        if (NON_RESULT_STATUSES.includes(app.application_status)) {
+        if (NON_RESULT_STATUSES.has(app.application_status)) {
             skipped.push({
                 application_id: item.application_id,
                 student_name: `${app.first_name} ${app.last_name}`,
                 reason: `Application is ${app.application_status}`,
             });
             continue;
+        }
+
+        // Gate: check previous round result
+        if (previousRoundGate) {
+            const gate = previousRoundGate.get(item.application_id);
+            if (gate && !gate.passed) {
+                skipped.push({
+                    application_id: item.application_id,
+                    student_name: `${app.first_name} ${app.last_name}`,
+                    reason: `Did not pass previous round (${gate.reason})`,
+                });
+                continue;
+            }
         }
 
         if (existingSet.has(item.application_id)) {
@@ -229,7 +316,7 @@ function mapResultRow(row) {
         round_id: row.round_id,
         student_id: row.student_id,
         result_status: row.result_status,
-        score: row.score !== null ? Number.parseFloat(row.score) : null,
+        score: row.score === null ? null : Number.parseFloat(row.score),
         remarks: row.remarks ?? null,
         attended: row.attended,
         scheduled_at: row.scheduled_at,
@@ -258,7 +345,7 @@ function mapResultRow(row) {
  */
 async function addRoundResult(roundId, collegeId, data) {
     const round = await verifyRound(roundId, collegeId);
-    checkRoundAndJobNotCancelled(round, 'add');
+    checkRoundEligibleForResults(round, 'add');
 
     // Verify application belongs to this job
     const app = await verifyApplication(data.application_id, round.job_id, collegeId);
@@ -266,12 +353,15 @@ async function addRoundResult(roundId, collegeId, data) {
         throw Object.assign(new Error(ERROR_MESSAGES.INVALID_APPLICATION_FOR_RESULT), { status: 404 });
     }
 
-    if (NON_RESULT_STATUSES.includes(app.application_status)) {
+    if (NON_RESULT_STATUSES.has(app.application_status)) {
         throw Object.assign(
             new Error(`Cannot add round result for a ${app.application_status} application`),
             { status: 400 }
         );
     }
+
+    // Gate: student must have passed the previous round
+    await checkPreviousRoundPassed(data.application_id, round.job_id, round.round_number);
 
     // Check duplicate (unique: application_id + round_id)
     const dup = await query(
@@ -331,30 +421,32 @@ async function addRoundResult(roundId, collegeId, data) {
  */
 async function bulkAddRoundResults(roundId, collegeId, results) {
     const round = await verifyRound(roundId, collegeId);
-    checkRoundAndJobNotCancelled(round, 'add');
+    checkRoundEligibleForResults(round, 'add');
 
     // Batch-fetch applications + existing results (prevents N+1)
     const applicationIds = [...new Set(results.map(r => r.application_id))];
 
-    const appsResult = await query(
-        `SELECT a.application_id, a.student_id, a.application_status,
-                s.first_name, s.last_name
-         FROM student_applications a
-         JOIN students s ON a.student_id = s.student_id
-         WHERE a.application_id = ANY($1) AND a.job_id = $2 AND a.college_id = $3`,
-        [applicationIds, round.job_id, collegeId]
-    );
+    const [appsResult, existingResults, previousRoundGate] = await Promise.all([
+        query(
+            `SELECT a.application_id, a.student_id, a.application_status,
+                    s.first_name, s.last_name
+             FROM student_applications a
+             JOIN students s ON a.student_id = s.student_id
+             WHERE a.application_id = ANY($1) AND a.job_id = $2 AND a.college_id = $3`,
+            [applicationIds, round.job_id, collegeId]
+        ),
+        query(
+            `SELECT application_id FROM student_round_results
+             WHERE round_id = $1 AND application_id = ANY($2)`,
+            [roundId, applicationIds]
+        ),
+        batchCheckPreviousRound(applicationIds, round.job_id, round.round_number),
+    ]);
     const appsMap = new Map(appsResult.rows.map(r => [r.application_id, r]));
-
-    const existingResults = await query(
-        `SELECT application_id FROM student_round_results
-         WHERE round_id = $1 AND application_id = ANY($2)`,
-        [roundId, applicationIds]
-    );
     const existingSet = new Set(existingResults.rows.map(r => r.application_id));
 
     // Categorize via extracted helper
-    const { toInsert, skipped, errors } = categorizeResults(results, appsMap, existingSet);
+    const { toInsert, skipped, errors } = categorizeResults(results, appsMap, existingSet, previousRoundGate);
 
     // Bulk insert inside transaction
     const created = [];
@@ -495,7 +587,8 @@ async function getRoundResults(roundId, collegeId, filters = {}) {
         total: Number.parseInt(countResult.rows[0]?.total ?? '0', 10),
         page, limit,
         round_name: round.round_name, round_number: round.round_number,
-        round_status: round.round_status, job_title: round.job_title,
+        round_status: round.round_status, is_processed: !!round.is_processed,
+        job_title: round.job_title,
         company_name: round.company_name,
         status_summary: buildStatusSummary(summaryResult.rows),
     };
@@ -516,11 +609,11 @@ async function getRoundResults(roundId, collegeId, filters = {}) {
  */
 async function updateRoundResult(resultId, collegeId, data) {
     const existing = await verifyResult(resultId, collegeId);
-    checkRoundAndJobNotCancelled(existing, 'update');
+    checkRoundEligibleForResults(existing, 'update');
 
     // Validate dates (merge existing + new)
-    const effectiveScheduled = data.scheduled_at !== undefined ? data.scheduled_at : existing.scheduled_at;
-    const effectiveCompleted = data.completed_at !== undefined ? data.completed_at : existing.completed_at;
+    const effectiveScheduled = data.scheduled_at === undefined ? existing.scheduled_at : data.scheduled_at;
+    const effectiveCompleted = data.completed_at === undefined ? existing.completed_at : data.completed_at;
     const dateError = validateResultDates(effectiveScheduled, effectiveCompleted);
     if (dateError) {
         throw Object.assign(new Error(dateError), { status: 400 });
@@ -548,7 +641,7 @@ async function updateRoundResult(resultId, collegeId, data) {
 
     return {
         ...result.rows[0],
-        score: result.rows[0].score !== null ? Number.parseFloat(result.rows[0].score) : null,
+        score: result.rows[0].score === null ? null : Number.parseFloat(result.rows[0].score),
         student_name: `${existing.first_name} ${existing.last_name}`,
         student_email: existing.student_email,
         round_name: existing.round_name, round_number: existing.round_number,
