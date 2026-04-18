@@ -25,6 +25,9 @@ const { CLEAR_COOKIE_OPTIONS, CLEAR_REFRESH_COOKIE_OPTIONS } = require('../../co
 const { issueTokenPair } = require('../auth.controller');
 const { hashRefreshToken, findRefreshToken, revokeRefreshToken } = require('../../utils/jwtHelper');
 
+// Fixed UUID for sysadmin user (singleton account)
+const SYSADMIN_USER_ID = '00000000-0000-0000-0000-000000000001';
+
 // ============================================================================
 // 1. POST /api/sysadmin/login
 // ============================================================================
@@ -37,8 +40,8 @@ async function login(req, res) {
     // B21: Issue access + refresh token pair
     await issueTokenPair(
         res,
-        { id: 'sysadmin', role: result.role, email: result.email },
-        'sysadmin',
+        { id: SYSADMIN_USER_ID, role: result.role, email: result.email },
+        SYSADMIN_USER_ID,
         'sysadmin'
     );
 
