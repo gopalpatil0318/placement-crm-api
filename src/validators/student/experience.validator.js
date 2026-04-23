@@ -155,21 +155,19 @@ const addExperienceSchema = Joi.object({
         }),
 
     offer_letter_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Offer letter URL must be a valid URL',
+            'string.max': 'Offer letter path cannot exceed 500 characters',
         }),
 
     completion_certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 }).custom((value, helpers) => {
     // B24: end_date required when not currently working
@@ -313,21 +311,19 @@ const updateExperienceSchema = Joi.object({
         }),
 
     offer_letter_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Offer letter URL must be a valid URL',
+            'string.max': 'Offer letter path cannot exceed 500 characters',
         }),
 
     completion_certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 }).min(1).custom((value, helpers) => {
     // B24: end_date required when not currently working (only if is_current was provided)

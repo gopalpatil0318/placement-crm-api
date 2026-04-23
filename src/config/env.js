@@ -22,7 +22,7 @@ dotenv.config({
 // REQUIRED ENV VALIDATION
 // ============================================================================
 
-const REQUIRED_VARS = ['DATABASE_URL', 'JWT_SECRET', 'SYSADMIN_EMAIL', 'SYSADMIN_PASSWORD'];
+const REQUIRED_VARS = ['DATABASE_URL', 'JWT_SECRET', 'SYSADMIN_EMAIL', 'SYSADMIN_PASSWORD', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
 
 const missing = REQUIRED_VARS.filter((key) => !process.env[key]);
 if (missing.length > 0) {
@@ -86,6 +86,10 @@ const config = Object.freeze({
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   smtpFrom: process.env.SMTP_FROM || '"PlaceNex" <noreply@placenex.in>',
+
+  // Supabase Storage
+  supabaseUrl: process.env.SUPABASE_URL,
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
 });
 
 module.exports = config;

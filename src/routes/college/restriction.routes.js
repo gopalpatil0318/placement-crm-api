@@ -16,11 +16,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/restriction.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     addRestrictionSchema,
@@ -31,8 +31,8 @@ const {
     restrictionIdParamSchema,
 } = require('../../validators/college/restriction.validator');
 
-// All restriction routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All restriction routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -40,6 +40,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_student_restriction/:studentId',
+    requirePermission(PERMISSIONS.RESTRICTIONS_CREATE),
     validate(studentIdParamSchema, 'params'),
     validate(addRestrictionSchema),
     asyncHandler(controller.addRestriction)
@@ -47,12 +48,14 @@ router.post(
 
 router.get(
     '/get_all_restrictions',
+    requirePermission(PERMISSIONS.RESTRICTIONS_VIEW),
     validate(listRestrictionsSchema, 'query'),
     asyncHandler(controller.getAllRestrictions)
 );
 
 router.get(
     '/get_student_restrictions/:studentId',
+    requirePermission(PERMISSIONS.RESTRICTIONS_VIEW),
     validate(studentIdParamSchema, 'params'),
     validate(listStudentRestrictionsSchema, 'query'),
     asyncHandler(controller.getStudentRestrictions)
@@ -60,6 +63,7 @@ router.get(
 
 router.patch(
     '/update_restriction/:restrictionId',
+    requirePermission(PERMISSIONS.RESTRICTIONS_UPDATE),
     validate(restrictionIdParamSchema, 'params'),
     validate(updateRestrictionSchema),
     asyncHandler(controller.updateRestriction)

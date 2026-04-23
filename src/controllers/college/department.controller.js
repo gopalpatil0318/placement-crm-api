@@ -50,7 +50,8 @@ async function createDepartment(req, res) {
 async function getAllDepartments(req, res) {
     const { departments, total, page, limit } = await departmentService.getAllDepartments(
         req.user.college_id,
-        req.validated
+        req.validated,
+        req.deptScope
     );
 
     return sendPaginated(res, departments, total, { page, limit }, SUCCESS_MESSAGES.DEPARTMENTS_RETRIEVED);
@@ -64,7 +65,8 @@ async function getDepartment(req, res) {
     const result = await departmentService.getDepartmentById(
         req.params.deptId,
         req.user.college_id,
-        req.validated || {}
+        req.validated || {},
+        req.deptScope
     );
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.DEPARTMENT_RETRIEVED);
@@ -78,7 +80,8 @@ async function updateDepartment(req, res) {
     const result = await departmentService.updateDepartment(
         req.params.deptId,
         req.user.college_id,
-        req.validated
+        req.validated,
+        req.deptScope
     );
 
     logAudit(query, {
@@ -108,7 +111,8 @@ async function toggleDepartmentStatus(req, res) {
     const result = await departmentService.toggleDepartmentStatus(
         req.params.deptId,
         req.user.college_id,
-        is_active
+        is_active,
+        req.deptScope
     );
 
     logAudit(query, {

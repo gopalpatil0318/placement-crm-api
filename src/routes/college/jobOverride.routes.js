@@ -16,11 +16,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/jobOverride.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     listJobOverridesSchema,
@@ -31,8 +31,8 @@ const {
     overrideIdParamSchema,
 } = require('../../validators/college/jobOverride.validator');
 
-// All routes require COLLEGEADMIN, TPO, or TPC
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO, ROLES.TPC));
+// All routes require authentication
+router.use(authenticate);
 router.use(apiLimiter);
 
 // ============================================================================
@@ -42,6 +42,7 @@ router.use(apiLimiter);
 // List override requests for a specific job
 router.get(
     '/get_job_override_requests/:jobId',
+    requirePermission(PERMISSIONS.OVERRIDES_VIEW),
     validate(jobIdParamSchema, 'params'),
     validate(listJobOverridesSchema, 'query'),
     asyncHandler(controller.getJobOverrideRequests)
@@ -50,6 +51,7 @@ router.get(
 // Dashboard — all override requests across all jobs
 router.get(
     '/get_all_override_requests',
+    requirePermission(PERMISSIONS.OVERRIDES_VIEW),
     validate(listAllOverridesSchema, 'query'),
     asyncHandler(controller.getAllOverrideRequests)
 );
@@ -57,6 +59,7 @@ router.get(
 // Review a single override request (approve or reject)
 router.patch(
     '/review_override_request/:overrideId',
+    requirePermission(PERMISSIONS.OVERRIDES_REVIEW),
     validate(overrideIdParamSchema, 'params'),
     validate(reviewOverrideSchema),
     asyncHandler(controller.reviewOverrideRequest)
@@ -65,6 +68,7 @@ router.patch(
 // Bulk review override requests
 router.post(
     '/bulk_review_overrides',
+    requirePermission(PERMISSIONS.OVERRIDES_REVIEW),
     validate(bulkReviewOverrideSchema),
     asyncHandler(controller.bulkReviewOverrides)
 );

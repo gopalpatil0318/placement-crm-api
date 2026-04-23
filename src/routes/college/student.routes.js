@@ -20,11 +20,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/student.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     registerStudentSchema,
@@ -37,8 +37,8 @@ const {
     studentIdParamSchema,
 } = require('../../validators/college/student.validator');
 
-// All student management routes require COLLEGEADMIN
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN), apiLimiter);
+// All student management routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -46,30 +46,35 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN), apiLimiter);
 
 router.post(
     '/register_student',
+    requirePermission(PERMISSIONS.STUDENTS_CREATE),
     validate(registerStudentSchema),
     asyncHandler(controller.registerStudent)
 );
 
 router.post(
     '/bulk_register_students',
+    requirePermission(PERMISSIONS.STUDENTS_CREATE),
     validate(bulkRegisterStudentsSchema),
     asyncHandler(controller.bulkRegisterStudents)
 );
 
 router.get(
     '/get_all_students',
+    requirePermission(PERMISSIONS.STUDENTS_VIEW),
     validate(listStudentsSchema, 'query'),
     asyncHandler(controller.getAllStudents)
 );
 
 router.get(
     '/get_student/:studentId',
+    requirePermission(PERMISSIONS.STUDENTS_VIEW),
     validate(studentIdParamSchema, 'params'),
     asyncHandler(controller.getStudent)
 );
 
 router.get(
     '/get_student_full_profile/:studentId',
+    requirePermission(PERMISSIONS.STUDENTS_VIEW),
     validate(studentIdParamSchema, 'params'),
     validate(getStudentFullProfileQuerySchema, 'query'),
     asyncHandler(controller.getStudentFullProfile)
@@ -77,6 +82,7 @@ router.get(
 
 router.put(
     '/update_student/:studentId',
+    requirePermission(PERMISSIONS.STUDENTS_UPDATE),
     validate(studentIdParamSchema, 'params'),
     validate(updateStudentSchema),
     asyncHandler(controller.updateStudent)
@@ -84,6 +90,7 @@ router.put(
 
 router.patch(
     '/toggle_student_status/:studentId',
+    requirePermission(PERMISSIONS.STUDENTS_UPDATE),
     validate(studentIdParamSchema, 'params'),
     validate(toggleStudentStatusSchema),
     asyncHandler(controller.toggleStudentStatus)
@@ -91,6 +98,7 @@ router.patch(
 
 router.patch(
     '/approve_student_profile/:studentId',
+    requirePermission(PERMISSIONS.STUDENTS_APPROVE),
     validate(studentIdParamSchema, 'params'),
     validate(approveStudentProfileSchema),
     asyncHandler(controller.approveStudentProfile)

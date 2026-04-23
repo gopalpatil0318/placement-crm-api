@@ -25,13 +25,13 @@ const RESTRICTION_SELECT_COLUMNS = `
     sr.restriction_id, sr.student_id, sr.college_id, sr.restriction_type,
     sr.reason, sr.details, sr.restricted_by, sr.applied_on, sr.valid_until,
     sr.is_active, sr.appeal_submitted, sr.appeal_notes, sr.appeal_resolved_at,
-    sr.resolved_by, sr.created_at, sr.updated_at`;
+    sr.resolved_by, sr.created_at, sr.updated_at, sr.company_id`;
 
 const RESTRICTION_RETURNING_COLUMNS = `
     restriction_id, student_id, college_id, restriction_type,
     reason, details, restricted_by, applied_on, valid_until,
     is_active, appeal_submitted, appeal_notes, appeal_resolved_at,
-    resolved_by, created_at, updated_at`;
+    resolved_by, created_at, updated_at, company_id`;
 
 // ============================================================================
 // 1. ADD RESTRICTION
@@ -47,7 +47,7 @@ const RESTRICTION_RETURNING_COLUMNS = `
  * @returns {Object} Created restriction with enriched data
  */
 async function addRestriction(studentId, collegeId, restrictedBy, data) {
-    const { restriction_type, reason, details = null, valid_until = null } = data;
+    const { restriction_type, reason, details = null, valid_until = null, company_id = null } = data;
 
     // 1. Verify student exists and belongs to this college
     const studentCheck = await query(
@@ -65,13 +65,23 @@ async function addRestriction(studentId, collegeId, restrictedBy, data) {
     }
 
     // 2. Check for duplicate active restriction of same type
-    const duplicateCheck = await query(
-        `SELECT restriction_id FROM student_restrictions
-         WHERE student_id = $1 AND college_id = $2
-           AND restriction_type = $3 AND is_active = true
-         LIMIT 1`,
-        [studentId, collegeId, restriction_type]
-    );
+    // CF1: For bar_from_company, also match company_id (can bar from multiple companies)
+    const duplicateQuery = restriction_type === 'bar_from_company' && company_id
+        ? {
+            text: `SELECT restriction_id FROM student_restrictions
+                   WHERE student_id = $1 AND college_id = $2
+                     AND restriction_type = $3 AND company_id = $4 AND is_active = true
+                   LIMIT 1`,
+            params: [studentId, collegeId, restriction_type, company_id],
+        }
+        : {
+            text: `SELECT restriction_id FROM student_restrictions
+                   WHERE student_id = $1 AND college_id = $2
+                     AND restriction_type = $3 AND is_active = true
+                   LIMIT 1`,
+            params: [studentId, collegeId, restriction_type],
+        };
+    const duplicateCheck = await query(duplicateQuery.text, duplicateQuery.params);
 
     if (duplicateCheck.rows.length) {
         throw Object.assign(
@@ -97,11 +107,11 @@ async function addRestriction(studentId, collegeId, restrictedBy, data) {
     const result = await query(
         `INSERT INTO student_restrictions
            (student_id, college_id, restriction_type, reason, details,
-            restricted_by, valid_until)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+            restricted_by, valid_until, company_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING ${RESTRICTION_RETURNING_COLUMNS}`,
         [studentId, collegeId, restriction_type, reason, details,
-            restrictedBy, valid_until]
+            restrictedBy, valid_until, company_id]
     );
 
     const restriction = result.rows[0];
@@ -193,12 +203,14 @@ async function getAllRestrictions(collegeId, filters = {}) {
                     s.student_passout_year,
                     d.dept_name,
                     u.user_name AS restricted_by_name,
-                    ru.user_name AS resolved_by_name
+                    ru.user_name AS resolved_by_name,
+                    co.company_name
              FROM student_restrictions sr
              JOIN students s ON sr.student_id = s.student_id
              LEFT JOIN departments d ON s.dept_id = d.dept_id
              LEFT JOIN users u ON sr.restricted_by = u.user_id
              LEFT JOIN users ru ON sr.resolved_by = ru.user_id
+             LEFT JOIN companies co ON sr.company_id = co.company_id
              WHERE ${whereClause}
              ORDER BY sr.is_active DESC, sr.created_at DESC
              LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -260,10 +272,12 @@ async function getStudentRestrictions(studentId, collegeId, filters = {}) {
     const restrictionResult = await query(
         `SELECT ${RESTRICTION_SELECT_COLUMNS},
                 u.user_name AS restricted_by_name,
-                ru.user_name AS resolved_by_name
+                ru.user_name AS resolved_by_name,
+                co.company_name
          FROM student_restrictions sr
          LEFT JOIN users u ON sr.restricted_by = u.user_id
          LEFT JOIN users ru ON sr.resolved_by = ru.user_id
+         LEFT JOIN companies co ON sr.company_id = co.company_id
          WHERE ${whereClause}
          ORDER BY sr.is_active DESC, sr.created_at DESC
          LIMIT 100`,

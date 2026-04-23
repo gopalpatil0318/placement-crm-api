@@ -21,7 +21,11 @@ const {
     STATUS,
     ERROR_MESSAGES,
     DB_ERROR_CODES,
+    CONFIGURABLE_ROLES,
+    DEFAULT_ROLE_PERMISSIONS,
 } = require('../../config/constants');
+const { BUCKETS, resolveFileUrls } = require('../../utils/storageHelper');
+const { cleanupOldFile } = require('../../utils/fileCleanupHelper');
 
 // ============================================================================
 // LOGIN
@@ -139,6 +143,26 @@ async function createCollege(data) {
 
         const admin = userResult.rows[0];
 
+        // 4. Seed default role permissions for all configurable roles
+        for (const role of CONFIGURABLE_ROLES) {
+            const defaults = DEFAULT_ROLE_PERMISSIONS[role];
+            if (!defaults) {
+                logger.error(`${LOG.TRANSACTION} Missing default permissions for role: ${role}`);
+                continue;
+            }
+            await client.query(
+                `INSERT INTO college_role_permissions (college_id, role, permissions, dept_scoped)
+                 VALUES ($1, $2, $3::jsonb, $4)
+                 ON CONFLICT (college_id, role) DO NOTHING`,
+                [
+                    college.college_id,
+                    role,
+                    JSON.stringify(defaults.permissions),
+                    defaults.dept_scoped,
+                ]
+            );
+        }
+
         await client.query('COMMIT');
 
         logger.info(`${LOG.TRANSACTION} College created with admin`, {
@@ -164,15 +188,7 @@ async function createCollege(data) {
         });
 
         // Friendly error messages for constraint violations
-        if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
-            if (err.constraint?.includes('subdomain')) {
-                throw Object.assign(new Error(ERROR_MESSAGES.SUBDOMAIN_ALREADY_EXISTS), { status: 409 });
-            }
-            if (err.constraint?.includes('email')) {
-                throw Object.assign(new Error(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS), { status: 409 });
-            }
-            throw Object.assign(new Error(ERROR_MESSAGES.DUPLICATE_ENTRY), { status: 409 });
-        }
+        handleUniqueViolation(err);
 
         throw err;
     } finally {
@@ -217,19 +233,34 @@ async function getAllColleges({ page, limit, offset, status, type, search }) {
         ),
         query(
             `SELECT
-       college_id, college_name, college_subdomain, college_type,
-       college_status, enabled_features, default_academic_year,
-       college_city, college_state, college_logo_url,
-       created_at, updated_at
-     FROM colleges
+       c.college_id, c.college_name, c.college_subdomain, c.college_type,
+       c.college_status, c.enabled_features, c.default_academic_year,
+       c.college_city, c.college_state, c.college_logo_url,
+       c.subscription_status,
+       c.created_at, c.updated_at,
+       cs.student_quota,
+       (SELECT COUNT(*)::int FROM students s
+        WHERE s.college_id = c.college_id AND s.student_status != 'dropout') AS students_used
+     FROM colleges c
+     LEFT JOIN LATERAL (
+       SELECT sub.student_quota FROM college_subscriptions sub
+       WHERE sub.college_id = c.college_id
+         AND sub.subscription_status IN ('trial', 'active')
+       ORDER BY sub.valid_from DESC LIMIT 1
+     ) cs ON true
      ${whereClause}
-     ORDER BY created_at DESC
+     ORDER BY c.created_at DESC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
             [...values, limit, offset]
         ),
     ]);
 
     const total = Number.parseInt(countResult.rows[0].total, 10);
+
+    // Resolve college_logo_url storage paths to public CDN URLs
+    await resolveFileUrls(listResult.rows, [
+        { field: 'college_logo_url', bucket: BUCKETS.PUBLIC },
+    ]);
 
     return { colleges: listResult.rows, total };
 }
@@ -266,7 +297,28 @@ async function getCollegeById(collegeId) {
         throw Object.assign(new Error(ERROR_MESSAGES.COLLEGE_NOT_FOUND), { status: 404 });
     }
 
+    // Resolve college_logo_url storage path to public CDN URL
+    await resolveFileUrls(result.rows, [
+        { field: 'college_logo_url', bucket: BUCKETS.PUBLIC },
+    ]);
+
     return result.rows[0];
+}
+
+// ============================================================================
+// SHARED ERROR HANDLER FOR UNIQUE VIOLATIONS
+// ============================================================================
+
+function handleUniqueViolation(err) {
+    if (err.code !== DB_ERROR_CODES.UNIQUE_VIOLATION) return;
+
+    if (err.constraint?.includes('subdomain')) {
+        throw Object.assign(new Error(ERROR_MESSAGES.SUBDOMAIN_ALREADY_EXISTS), { status: 409 });
+    }
+    if (err.constraint?.includes('email')) {
+        throw Object.assign(new Error(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS), { status: 409 });
+    }
+    throw Object.assign(new Error(ERROR_MESSAGES.DUPLICATE_ENTRY), { status: 409 });
 }
 
 // ============================================================================
@@ -274,6 +326,16 @@ async function getCollegeById(collegeId) {
 // ============================================================================
 
 async function updateCollege(collegeId, data) {
+    // Fetch old logo path for cleanup if logo is being changed
+    let oldLogoUrl = null;
+    if (data.college_logo_url !== undefined) {
+        const oldResult = await query(
+            `SELECT college_logo_url FROM colleges WHERE college_id = $1 LIMIT 1`,
+            [collegeId]
+        );
+        oldLogoUrl = oldResult.rows[0]?.college_logo_url || null;
+    }
+
     // Build dynamic SET clause from provided fields
     const allowedFields = [
         'college_name', 'college_subdomain', 'college_type',
@@ -322,17 +384,15 @@ async function updateCollege(collegeId, data) {
         }
 
         logger.info(`${LOG.DB_QUERY} College updated`, { collegeId });
+
+        // Cleanup old logo if replaced (fire-and-forget, after UPDATE)
+        if (data.college_logo_url !== undefined) {
+            cleanupOldFile(BUCKETS.PUBLIC, oldLogoUrl, data.college_logo_url);
+        }
+
         return result.rows[0];
     } catch (err) {
-        if (err.code === DB_ERROR_CODES.UNIQUE_VIOLATION) {
-            if (err.constraint?.includes('subdomain')) {
-                throw Object.assign(new Error(ERROR_MESSAGES.SUBDOMAIN_ALREADY_EXISTS), { status: 409 });
-            }
-            if (err.constraint?.includes('email')) {
-                throw Object.assign(new Error(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS), { status: 409 });
-            }
-            throw Object.assign(new Error(ERROR_MESSAGES.DUPLICATE_ENTRY), { status: 409 });
-        }
+        handleUniqueViolation(err);
         throw err;
     }
 }

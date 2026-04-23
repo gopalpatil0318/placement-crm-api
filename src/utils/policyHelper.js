@@ -51,7 +51,8 @@ function getPromoter() {
  * @returns {{ allowed, reason?, policy_info }}
  */
 async function checkApplyPolicy(studentId, collegeId, jobId, passoutYear) {
-    // 1. Get student's current active placement (accepted/joined) with tier info
+    // 1. Get student's current active on-campus/pool-campus placement (accepted/joined) with tier info
+    //    Off-campus placements are unlimited and don't block on-campus applications
     const placementResult = await query(
         `SELECT pr.placement_id, pr.placement_status, pr.job_id,
                 j.tier_id, ct.tier_level, ct.tier_name,
@@ -62,6 +63,7 @@ async function checkApplyPolicy(studentId, collegeId, jobId, passoutYear) {
          LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
          WHERE pr.student_id = $1 AND pr.college_id = $2
            AND pr.placement_status IN ($3, $4)
+           AND j.drive_type IN ('on_campus', 'pool_campus')
          ORDER BY ct.tier_level DESC NULLS LAST
          LIMIT 1`,
         [studentId, collegeId, STATUS.PLACEMENT.ACCEPTED, STATUS.PLACEMENT.JOINED]
@@ -181,10 +183,13 @@ async function checkApplyPolicy(studentId, collegeId, jobId, passoutYear) {
 async function checkOfferPolicy(studentId, collegeId, passoutYear, client = null) {
     const db = client || { query: (...args) => query(...args) };
     // 1. Get current active offers/placements count (offered + accepted + joined)
+    //    Only count on_campus + pool_campus — off_campus placements are unlimited
     const countResult = await db.query(
-        `SELECT COUNT(*) AS cnt FROM placement_results
-         WHERE student_id = $1 AND college_id = $2
-           AND placement_status IN ($3, $4, $5)`,
+        `SELECT COUNT(*) AS cnt FROM placement_results pr
+         JOIN job_postings j ON pr.job_id = j.job_id
+         WHERE pr.student_id = $1 AND pr.college_id = $2
+           AND pr.placement_status IN ($3, $4, $5)
+           AND j.drive_type IN ('on_campus', 'pool_campus')`,
         [studentId, collegeId, STATUS.PLACEMENT.OFFERED, STATUS.PLACEMENT.ACCEPTED, STATUS.PLACEMENT.JOINED]
     );
 
@@ -298,9 +303,9 @@ async function checkVacancy(jobId, positionId, client = null) {
  * @returns {{ withdrawn_apps, revoked_placements, notifications_sent }}
  */
 async function runAcceptanceCascade(client, placementId, studentId, collegeId, passoutYear) {
-    // 1. Get the accepted placement's tier
+    // 1. Get the accepted placement's tier and drive type
     const acceptedResult = await client.query(
-        `SELECT pr.job_id, j.tier_id, ct.tier_level, ct.tier_name,
+        `SELECT pr.job_id, j.tier_id, j.drive_type, ct.tier_level, ct.tier_name,
                 j.job_title, c.company_name
          FROM placement_results pr
          JOIN job_postings j ON pr.job_id = j.job_id
@@ -312,6 +317,15 @@ async function runAcceptanceCascade(client, placementId, studentId, collegeId, p
 
     const accepted = acceptedResult.rows[0];
     const acceptedTierLevel = accepted?.tier_level ?? 0;
+    const acceptedDriveType = accepted?.drive_type ?? 'off_campus';
+
+    // Off-campus placements are unlimited — no cascade needed
+    if (acceptedDriveType === 'off_campus') {
+        return { withdrawn_apps: 0, revoked_placements: 0, notifications_sent: 0 };
+    }
+
+    // For on_campus/pool_campus, cascade only affects same group (on_campus + pool_campus)
+    const driveTypeFilter = "AND j.drive_type IN ('on_campus', 'pool_campus')";
 
     // 2. Get auto_withdrawal_rule from settings
     const settingsResult = await client.query(
@@ -345,6 +359,7 @@ async function runAcceptanceCascade(client, placementId, studentId, collegeId, p
     }
 
     // 4. Auto-withdraw active applications (not for the accepted job)
+    //    Only cascade within same drive_type group (on_campus/pool_campus)
     const withdrawResult = await client.query(
         `UPDATE student_applications
          SET application_status = $${tierParams.length + 1},
@@ -358,11 +373,13 @@ async function runAcceptanceCascade(client, placementId, studentId, collegeId, p
            AND student_applications.job_id != $3
            AND student_applications.application_status IN ('pending', 'under_review', 'shortlisted', 'selected', 'waitlisted')
            AND ${tierCondition}
+           ${driveTypeFilter}
          RETURNING student_applications.application_id, student_applications.job_id, j.job_title`,
         [...tierParams, STATUS.APPLICATION.AUTO_WITHDRAWN, `Auto-withdrawn: accepted ${accepted?.company_name} (${accepted?.tier_name || 'N/A'} tier)`]
     );
 
     // 5. Auto-revoke other active OFFERED placements (not for the accepted job)
+    //    Only cascade within same drive_type group (on_campus/pool_campus)
     const revokeResult = await client.query(
         `UPDATE placement_results
          SET placement_status = $${tierParams.length + 1},
@@ -376,6 +393,7 @@ async function runAcceptanceCascade(client, placementId, studentId, collegeId, p
            AND placement_results.job_id != $3
            AND placement_results.placement_status = $${tierParams.length + 3}
            AND ${tierCondition}
+           ${driveTypeFilter}
          RETURNING placement_results.placement_id, placement_results.job_id, j.job_title`,
         [...tierParams, STATUS.PLACEMENT.REVOKED, `Auto-revoked: student accepted ${accepted?.company_name}`, STATUS.PLACEMENT.OFFERED]
     );
@@ -679,10 +697,56 @@ async function sweepExpiredOffers(collegeId) {
     }
 }
 
+// ============================================================================
+// 7. MAX ACTIVE APPLICATIONS — CF1: Limit concurrent applications per student
+// ============================================================================
+
+/**
+ * Check if a student has reached the max active applications limit.
+ * Active = pending, under_review, shortlisted, selected, offered, waitlisted
+ *
+ * @returns {{ allowed, reason?, active_count, max_allowed }}
+ */
+async function checkMaxApplications(studentId, collegeId, passoutYear) {
+    const settingsResult = await query(
+        `SELECT max_active_applications FROM placement_settings
+         WHERE college_id = $1 AND passout_year = $2 LIMIT 1`,
+        [collegeId, passoutYear]
+    );
+
+    const maxApps = settingsResult.rows[0]?.max_active_applications ?? null;
+
+    // NULL = unlimited — no limit configured
+    if (maxApps == null) {
+        return { allowed: true, active_count: 0, max_allowed: null };
+    }
+
+    const countResult = await query(
+        `SELECT COUNT(*) AS cnt FROM student_applications
+         WHERE student_id = $1 AND college_id = $2
+           AND application_status IN ('pending', 'under_review', 'shortlisted', 'selected', 'offered', 'waitlisted')`,
+        [studentId, collegeId]
+    );
+
+    const activeCount = Number.parseInt(countResult.rows[0].cnt, 10);
+
+    if (activeCount >= maxApps) {
+        return {
+            allowed: false,
+            reason: `You have ${activeCount} active application(s). Maximum allowed: ${maxApps}.`,
+            active_count: activeCount,
+            max_allowed: maxApps,
+        };
+    }
+
+    return { allowed: true, active_count: activeCount, max_allowed: maxApps };
+}
+
 module.exports = {
     checkApplyPolicy,
     checkOfferPolicy,
     checkVacancy,
+    checkMaxApplications,
     runAcceptanceCascade,
     autoFillPositions,
     reactivatePositions,

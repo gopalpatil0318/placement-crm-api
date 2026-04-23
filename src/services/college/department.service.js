@@ -17,6 +17,7 @@ const {
     LOG,
     ERROR_MESSAGES,
 } = require('../../config/constants');
+const { buildDeptFilter, assertInScope } = require('../../utils/deptScopeHelper');
 
 // ============================================================================
 // 1. CREATE DEPARTMENT
@@ -83,12 +84,20 @@ async function createDepartment(data, collegeId) {
  * @param {Object} filters - { is_active?, search?, page, limit }
  * @returns {{ departments: Array, total: number, page, limit }}
  */
-async function getAllDepartments(collegeId, filters = {}) {
+async function getAllDepartments(collegeId, filters = {}, deptScope = null) {
     const { page, limit, offset } = getPagination(filters);
 
     const conditions = ['d.college_id = $1'];
     const params = [collegeId];
     let paramIndex = 2;
+
+    // Department scope enforcement
+    const scopeFilter = buildDeptFilter(deptScope, paramIndex, 'd', 'dept_id');
+    if (scopeFilter.clause) {
+        conditions.push(scopeFilter.clause);
+        params.push(...scopeFilter.params);
+        paramIndex = scopeFilter.nextIndex;
+    }
 
     // Filter by active status
     if (filters.is_active !== undefined) {
@@ -161,7 +170,9 @@ async function getAllDepartments(collegeId, filters = {}) {
  * @param {string} collegeId
  * @returns {Object} Department with user and student counts
  */
-async function getDepartmentById(deptId, collegeId, filters = {}) {
+async function getDepartmentById(deptId, collegeId, filters = {}, deptScope = null) {
+    assertInScope(deptScope, deptId);
+
     let studentJoinExtra = '';
     const params = [deptId, collegeId];
 
@@ -203,7 +214,9 @@ async function getDepartmentById(deptId, collegeId, filters = {}) {
  * @param {Object} data - { dept_name?, dept_code?, dept_type?, program_duration_years?, total_semesters? }
  * @returns {Object} Updated department
  */
-async function updateDepartment(deptId, collegeId, data) {
+async function updateDepartment(deptId, collegeId, data, deptScope = null) {
+    assertInScope(deptScope, deptId);
+
     // 1. Verify exists
     const existing = await query(
         `SELECT dept_id FROM departments
@@ -272,7 +285,9 @@ async function updateDepartment(deptId, collegeId, data) {
  * @param {boolean} isActive
  * @returns {Object} Updated department
  */
-async function toggleDepartmentStatus(deptId, collegeId, isActive) {
+async function toggleDepartmentStatus(deptId, collegeId, isActive, deptScope = null) {
+    assertInScope(deptScope, deptId);
+
     // 1. Verify exists
     const existing = await query(
         `SELECT dept_id, is_active FROM departments

@@ -17,11 +17,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/companyTier.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createTierSchema,
@@ -30,7 +30,7 @@ const {
     tierIdParamSchema,
 } = require('../../validators/college/companyTier.validator');
 
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -38,24 +38,28 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/create_tier',
+    requirePermission(PERMISSIONS.SETTINGS_MANAGE),
     validate(createTierSchema),
     asyncHandler(controller.createTier)
 );
 
 router.get(
     '/get_all_tiers',
+    requirePermission(PERMISSIONS.SETTINGS_VIEW),
     validate(listTiersSchema, 'query'),
     asyncHandler(controller.getAllTiers)
 );
 
 router.get(
     '/get_tier/:tierId',
+    requirePermission(PERMISSIONS.SETTINGS_VIEW),
     validate(tierIdParamSchema, 'params'),
     asyncHandler(controller.getTier)
 );
 
 router.put(
     '/update_tier/:tierId',
+    requirePermission(PERMISSIONS.SETTINGS_MANAGE),
     validate(tierIdParamSchema, 'params'),
     validate(updateTierSchema),
     asyncHandler(controller.updateTier)
@@ -63,6 +67,7 @@ router.put(
 
 router.delete(
     '/delete_tier/:tierId',
+    requirePermission(PERMISSIONS.SETTINGS_MANAGE),
     validate(tierIdParamSchema, 'params'),
     asyncHandler(controller.deleteTier)
 );

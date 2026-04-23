@@ -20,6 +20,8 @@ const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG, ERROR_MESSAGES } = require('../../config/constants');
 const { maybeResetApproval } = require('../../utils/approvalResetHelper');
+const { BUCKETS, resolveFileUrls } = require('../../utils/storageHelper');
+const { cleanupOldFile, cleanupRecordFiles } = require('../../utils/fileCleanupHelper');
 
 const MAX_EXPERIENCE = 10;
 
@@ -137,6 +139,12 @@ async function getAllExperience(studentId, collegeId) {
         [studentId, collegeId]
     );
 
+    // Resolve storage paths to signed download URLs
+    await resolveFileUrls(result.rows, [
+        { field: 'offer_letter_url', bucket: BUCKETS.PRIVATE },
+        { field: 'completion_certificate_url', bucket: BUCKETS.PRIVATE },
+    ]);
+
     return {
         total_experience: result.rows.length,
         max_experience: MAX_EXPERIENCE,
@@ -201,6 +209,14 @@ async function updateExperience(experienceId, studentId, collegeId, data) {
     try {
         await client.query('BEGIN');
 
+        // Fetch old file paths for cleanup after update
+        const oldResult = await client.query(
+            `SELECT offer_letter_url, completion_certificate_url FROM student_experience
+             WHERE experience_id = $1 AND student_id = $2 AND college_id = $3 LIMIT 1`,
+            [experienceId, studentId, collegeId]
+        );
+        const oldRow = oldResult.rows[0] || {};
+
         const result = await client.query(
             `UPDATE student_experience
              SET ${setClauses.join(', ')}
@@ -220,6 +236,14 @@ async function updateExperience(experienceId, studentId, collegeId, data) {
         await maybeResetApproval(client, studentId, collegeId, 'experience');
 
         await client.query('COMMIT');
+
+        // Cleanup old files if replaced (fire-and-forget, after COMMIT)
+        if (data.offer_letter_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.offer_letter_url, data.offer_letter_url);
+        }
+        if (data.completion_certificate_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.completion_certificate_url, data.completion_certificate_url);
+        }
 
         logger.info(`${LOG.API_END} Experience updated`, {
             studentId,
@@ -247,7 +271,7 @@ async function deleteExperience(experienceId, studentId, collegeId) {
         const result = await client.query(
             `DELETE FROM student_experience
              WHERE experience_id = $1 AND student_id = $2 AND college_id = $3
-             RETURNING experience_id, company_name, position_title`,
+             RETURNING experience_id, company_name, position_title, offer_letter_url, completion_certificate_url`,
             [experienceId, studentId, collegeId]
         );
 
@@ -262,6 +286,9 @@ async function deleteExperience(experienceId, studentId, collegeId) {
         await maybeResetApproval(client, studentId, collegeId, 'experience');
 
         await client.query('COMMIT');
+
+        // Cleanup files from storage (fire-and-forget, after COMMIT)
+        cleanupRecordFiles(BUCKETS.PRIVATE, result.rows[0], ['offer_letter_url', 'completion_certificate_url']);
 
         logger.info(`${LOG.API_END} Experience deleted`, {
             studentId,

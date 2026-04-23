@@ -55,13 +55,11 @@ const createCompanySchema = Joi.object({
         }),
 
     company_logo: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Please provide a valid logo URL',
-            'string.max': 'Logo URL cannot exceed 500 characters',
+            'string.max': 'Logo path cannot exceed 500 characters',
         }),
 });
 
@@ -157,13 +155,11 @@ const updateCompanySchema = Joi.object({
         }),
 
     company_logo: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Please provide a valid logo URL',
-            'string.max': 'Logo URL cannot exceed 500 characters',
+            'string.max': 'Logo path cannot exceed 500 characters',
         }),
 }).min(1).messages({
     'object.min': 'At least one field must be provided to update',

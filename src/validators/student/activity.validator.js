@@ -102,16 +102,15 @@ const addActivitySchema = Joi.object({
         }),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 
     proof_urls: Joi.array()
-        .items(Joi.string().uri().max(500))
+        .items(Joi.string().max(500))
         .max(5)
         .optional()
         .allow(null)
@@ -200,16 +199,15 @@ const updateActivitySchema = Joi.object({
         }),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 
     proof_urls: Joi.array()
-        .items(Joi.string().uri().max(500))
+        .items(Joi.string().max(500))
         .max(5)
         .optional()
         .allow(null)

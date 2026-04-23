@@ -15,11 +15,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/jobRound.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     addRoundSchema,
@@ -29,8 +29,8 @@ const {
     roundIdParamSchema,
 } = require('../../validators/college/jobRound.validator');
 
-// All round routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All round routes require authentication
+router.use(authenticate, requirePermission(PERMISSIONS.JOBS_UPDATE), apiLimiter);
 
 // ============================================================================
 // ROUTES

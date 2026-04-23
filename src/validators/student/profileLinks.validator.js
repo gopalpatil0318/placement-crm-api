@@ -12,7 +12,7 @@
 
 const Joi = require('joi');
 
-// URL validation helper — optional, allow null/empty
+// URL validation helper — optional, allow null/empty (for actual URLs like websites)
 const optionalUrl = (label) =>
     Joi.string()
         .uri()
@@ -24,6 +24,16 @@ const optionalUrl = (label) =>
             'string.max': `${label} cannot exceed 500 characters`,
         });
 
+// File/storage path helper — accepts storage paths OR legacy URLs
+const optionalFilePath = (label) =>
+    Joi.string()
+        .max(500)
+        .optional()
+        .allow(null, '')
+        .messages({
+            'string.max': `${label} cannot exceed 500 characters`,
+        });
+
 // ============================================================================
 // SAVE PROFILE LINKS (upsert — create or update)
 // ============================================================================
@@ -31,8 +41,8 @@ const optionalUrl = (label) =>
 const saveProfileLinksSchema = Joi.object({
     // ── PORTFOLIO & RESUME ──
     personal_portfolio_url: optionalUrl('Portfolio URL'),
-    resume_url: optionalUrl('Resume URL'),
-    profile_image_url: optionalUrl('Profile image URL'),
+    resume_url: optionalFilePath('Resume URL'),
+    profile_image_url: optionalFilePath('Profile image URL'),
 
     // ── PROFESSIONAL PLATFORMS ──
     github_url: optionalUrl('GitHub URL'),

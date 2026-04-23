@@ -59,7 +59,7 @@ const CRITERIA_COLUMNS = [
     'min_tenth_percentage', 'min_twelfth_percentage', 'min_diploma_percentage',
     'allowed_genders', 'allowed_departments', 'allowed_gap_statuses',
     'passout_years', 'min_existing_package', 'max_existing_package',
-    'exclude_already_placed', 'created_at',
+    'min_skill_match_percentage', 'exclude_already_placed', 'created_at',
 ].join(', ');
 
 const ROUND_COLUMNS = [
@@ -73,6 +73,56 @@ const QUESTION_COLUMNS = [
 ].join(', ');
 
 // Status transitions delegated to src/utils/stateMachine.js
+
+// ============================================================================
+// HELPER — Insert eligibility criteria + required skills (within transaction)
+// ============================================================================
+
+async function insertJobCriteria(client, jobId, passoutYears, eligibilityCriteria) {
+    if (!eligibilityCriteria) return null;
+
+    const ec = eligibilityCriteria;
+    const criteriaResult = await client.query(
+        `INSERT INTO job_eligibility_criteria
+           (job_id, min_overall_cgpa, max_live_kts,
+            min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
+            allowed_genders, allowed_departments, allowed_gap_statuses,
+            passout_years, min_existing_package, max_existing_package,
+            min_skill_match_percentage, exclude_already_placed)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         RETURNING ${CRITERIA_COLUMNS}`,
+        [
+            jobId,
+            ec.min_overall_cgpa ?? null,
+            ec.max_live_kts ?? null,
+            ec.min_tenth_percentage ?? null,
+            ec.min_twelfth_percentage ?? null,
+            ec.min_diploma_percentage ?? null,
+            ec.allowed_genders ?? null,
+            ec.allowed_departments ?? null,
+            ec.allowed_gap_statuses ?? null,
+            passoutYears,
+            ec.min_existing_package ?? null,
+            ec.max_existing_package ?? null,
+            ec.min_skill_match_percentage ?? null,
+            ec.exclude_already_placed ?? false,
+        ]
+    );
+    const insertedCriteria = criteriaResult.rows[0];
+
+    // Insert required skills for skill-based matching
+    if (ec.required_skills && ec.required_skills.length > 0) {
+        const skillIds = [...new Set(ec.required_skills.map(s => s.skill_id))];
+        await client.query(
+            `INSERT INTO job_required_skills (job_id, skill_id)
+             SELECT $1, unnest($2::uuid[])
+             ON CONFLICT (job_id, skill_id) DO NOTHING`,
+            [jobId, skillIds]
+        );
+    }
+
+    return insertedCriteria;
+}
 
 // ============================================================================
 // 1. CREATE JOB (Transaction: job + positions + criteria + rounds + questions)
@@ -178,36 +228,7 @@ async function createJob(collegeId, userId, data) {
         const insertedPositions = posResult.rows;
 
         // 4c. Insert eligibility criteria (optional, 1 per job)
-        let insertedCriteria = null;
-        if (eligibility_criteria) {
-            const ec = eligibility_criteria;
-            const criteriaResult = await client.query(
-                `INSERT INTO job_eligibility_criteria
-                   (job_id, min_overall_cgpa, max_live_kts,
-                    min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
-                    allowed_genders, allowed_departments, allowed_gap_statuses,
-                    passout_years, min_existing_package, max_existing_package,
-                    exclude_already_placed)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                 RETURNING ${CRITERIA_COLUMNS}`,
-                [
-                    jobId,
-                    ec.min_overall_cgpa ?? null,
-                    ec.max_live_kts ?? 0,
-                    ec.min_tenth_percentage ?? null,
-                    ec.min_twelfth_percentage ?? null,
-                    ec.min_diploma_percentage ?? null,
-                    ec.allowed_genders ?? null,
-                    ec.allowed_departments ?? null,
-                    ec.allowed_gap_statuses ?? null,
-                    passout_years,
-                    ec.min_existing_package ?? null,
-                    ec.max_existing_package ?? null,
-                    ec.exclude_already_placed ?? false,
-                ]
-            );
-            insertedCriteria = criteriaResult.rows[0];
-        }
+        const insertedCriteria = await insertJobCriteria(client, jobId, passout_years, eligibility_criteria);
 
         // 4d. Insert rounds (optional) — multi-row INSERT
         let insertedRounds = [];
@@ -294,7 +315,7 @@ async function createJob(collegeId, userId, data) {
  * @param {Object} filters
  * @returns {{ jobs, total, page, limit }}
  */
-async function getAllJobs(collegeId, filters = {}) {
+async function getAllJobs(collegeId, filters = {}, deptScope = null) {
     // Auto-close applications past deadline (check-on-access)
     await enforceDeadlines(collegeId);
 
@@ -303,6 +324,17 @@ async function getAllJobs(collegeId, filters = {}) {
     const conditions = ['j.college_id = $1'];
     const params = [collegeId];
     let paramIndex = 2;
+
+    // Department scope: show jobs targeting the requester's depts or college-wide jobs
+    let deptJoin = '';
+    if (deptScope) {
+        deptJoin = ' LEFT JOIN job_eligibility_criteria jec_scope ON j.job_id = jec_scope.job_id';
+        conditions.push(
+            `(jec_scope.allowed_departments IS NULL OR jec_scope.allowed_departments && $${paramIndex}::uuid[])`
+        );
+        params.push(deptScope);
+        paramIndex++;
+    }
 
     if (filters.passout_year) {
         conditions.push(`$${paramIndex} = ANY(j.passout_years)`);
@@ -358,7 +390,7 @@ async function getAllJobs(collegeId, filters = {}) {
         query(
             `SELECT COUNT(*) AS total
              FROM job_postings j
-             JOIN companies c ON j.company_id = c.company_id
+             JOIN companies c ON j.company_id = c.company_id${deptJoin}
              WHERE ${whereClause}`,
             params
         ),
@@ -372,7 +404,7 @@ async function getAllJobs(collegeId, filters = {}) {
                     COALESCE(app.cnt, 0) AS applications_count,
                     u.user_name AS created_by_name
              FROM job_postings j
-             JOIN companies c ON j.company_id = c.company_id
+             JOIN companies c ON j.company_id = c.company_id${deptJoin}
              LEFT JOIN company_tiers ct ON j.tier_id = ct.tier_id
              LEFT JOIN users u ON j.created_by = u.user_id
              LEFT JOIN (
@@ -437,7 +469,7 @@ async function getJobById(jobId, collegeId) {
     }
 
     // 2. Fetch all related data — chunked to max 3 connections at a time
-    const [positionsRes, criteriaRes, roundsRes, questionsRes, applicationsCountRes] = await chunkedQuery([
+    const [positionsRes, criteriaRes, roundsRes, questionsRes, applicationsCountRes, requiredSkillsRes] = await chunkedQuery([
         {
             text: `SELECT ${POSITION_COLUMNS} FROM job_positions
              WHERE job_id = $1
@@ -472,15 +504,26 @@ async function getJobById(jobId, collegeId) {
              WHERE job_id = $1 AND college_id = $2`,
             params: [jobId, collegeId],
         },
+        {
+            text: `SELECT jrs.skill_id, sk.skill_name, sk.skill_category
+             FROM job_required_skills jrs
+             JOIN skills sk ON jrs.skill_id = sk.skill_id
+             WHERE jrs.job_id = $1
+             ORDER BY sk.skill_name ASC`,
+            params: [jobId],
+        },
     ], 3);
 
     const job = jobResult.rows[0];
     const appStats = applicationsCountRes.rows[0];
+    const criteriaRow = criteriaRes.rows[0] || null;
 
     return {
         ...job,
         positions: positionsRes.rows,
-        eligibility_criteria: criteriaRes.rows[0] || null,
+        eligibility_criteria: criteriaRow
+            ? { ...criteriaRow, required_skills: requiredSkillsRes.rows }
+            : null,
         rounds: roundsRes.rows,
         questions: questionsRes.rows,
         application_stats: {

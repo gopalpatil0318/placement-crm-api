@@ -119,18 +119,13 @@ const addCertificateSchema = Joi.object({
         }),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 });
-
-// ============================================================================
-// UPDATE CERTIFICATE (all fields optional, at least 1 required)
-// ============================================================================
 
 const updateCertificateSchema = Joi.object({
     certificate_name: Joi.string()
@@ -225,12 +220,11 @@ const updateCertificateSchema = Joi.object({
         }),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 }).min(1).messages({
     'object.min': 'At least one field must be provided to update',

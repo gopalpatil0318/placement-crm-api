@@ -15,7 +15,7 @@ const SETTINGS_RETURNING_COLUMNS = `
     max_active_offers, allow_dream_upgrade,
     auto_withdrawal_rule, default_offer_days,
     exclude_placed_by_default, auto_reject_on_round_fail,
-    allow_reapply_after_withdrawal,
+    allow_reapply_after_withdrawal, max_active_applications,
     created_by, created_at, updated_at`;
 
 // ============================================================================
@@ -48,8 +48,9 @@ async function upsertSettings(collegeId, userId, data) {
         `INSERT INTO placement_settings
             (college_id, passout_year, max_active_offers, allow_dream_upgrade,
              auto_withdrawal_rule, default_offer_days, exclude_placed_by_default,
-             auto_reject_on_round_fail, allow_reapply_after_withdrawal, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             auto_reject_on_round_fail, allow_reapply_after_withdrawal,
+             max_active_applications, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (college_id, passout_year)
          DO UPDATE SET
             max_active_offers = EXCLUDED.max_active_offers,
@@ -59,6 +60,7 @@ async function upsertSettings(collegeId, userId, data) {
             exclude_placed_by_default = EXCLUDED.exclude_placed_by_default,
             auto_reject_on_round_fail = EXCLUDED.auto_reject_on_round_fail,
             allow_reapply_after_withdrawal = EXCLUDED.allow_reapply_after_withdrawal,
+            max_active_applications = EXCLUDED.max_active_applications,
             updated_at = NOW()
          RETURNING ${SETTINGS_RETURNING_COLUMNS}`,
         [
@@ -71,6 +73,7 @@ async function upsertSettings(collegeId, userId, data) {
             data.exclude_placed_by_default ?? true,
             data.auto_reject_on_round_fail ?? true,
             data.allow_reapply_after_withdrawal ?? false,
+            data.max_active_applications ?? null,
             userId,
         ]
     );
@@ -94,6 +97,7 @@ function getDefaults(collegeId, passoutYear) {
         exclude_placed_by_default: true,
         auto_reject_on_round_fail: true,
         allow_reapply_after_withdrawal: false,
+        max_active_applications: null,
         created_by: null,
         created_at: null,
         updated_at: null,
@@ -113,6 +117,7 @@ function formatSettings(row) {
         exclude_placed_by_default: row.exclude_placed_by_default,
         auto_reject_on_round_fail: row.auto_reject_on_round_fail,
         allow_reapply_after_withdrawal: row.allow_reapply_after_withdrawal,
+        max_active_applications: row.max_active_applications ?? null,
         created_by: row.created_by ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,

@@ -166,8 +166,13 @@ const createUserSchema = Joi.object({
 
     dept_id: Joi.string()
         .uuid()
-        .optional()
-        .allow(null)
+        .when('user_role', {
+            is: Joi.valid(ROLES.HOD, ROLES.TEACHER),
+            then: Joi.required().messages({
+                'any.required': 'Department is required for HOD and Teacher roles',
+            }),
+            otherwise: Joi.optional().allow(null),
+        })
         .messages({
             'string.guid': 'Invalid department ID format',
         }),
@@ -204,6 +209,12 @@ const updateUserSchema = Joi.object({
         .uuid()
         .optional()
         .allow(null)
+        .when('user_role', {
+            is: Joi.valid(ROLES.HOD, ROLES.TEACHER),
+            then: Joi.required().messages({
+                'any.required': 'Department is required for HOD and Teacher roles',
+            }),
+        })
         .messages({
             'string.guid': 'Invalid department ID format',
         }),

@@ -17,11 +17,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/company.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createCompanySchema,
@@ -31,8 +31,8 @@ const {
     companyIdParamSchema,
 } = require('../../validators/college/company.validator');
 
-// All company routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All company routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -40,24 +40,28 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/create_company',
+    requirePermission(PERMISSIONS.COMPANIES_CREATE),
     validate(createCompanySchema),
     asyncHandler(controller.createCompany)
 );
 
 router.get(
     '/get_all_companies',
+    requirePermission(PERMISSIONS.COMPANIES_VIEW),
     validate(listCompaniesSchema, 'query'),
     asyncHandler(controller.getAllCompanies)
 );
 
 router.get(
     '/get_company/:companyId',
+    requirePermission(PERMISSIONS.COMPANIES_VIEW),
     validate(companyIdParamSchema, 'params'),
     asyncHandler(controller.getCompany)
 );
 
 router.put(
     '/update_company/:companyId',
+    requirePermission(PERMISSIONS.COMPANIES_UPDATE),
     validate(companyIdParamSchema, 'params'),
     validate(updateCompanySchema),
     asyncHandler(controller.updateCompany)
@@ -65,6 +69,7 @@ router.put(
 
 router.patch(
     '/toggle_company_status/:companyId',
+    requirePermission(PERMISSIONS.COMPANIES_UPDATE),
     validate(companyIdParamSchema, 'params'),
     validate(toggleCompanyStatusSchema),
     asyncHandler(controller.toggleCompanyStatus)

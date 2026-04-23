@@ -152,7 +152,8 @@ async function createUser(req, res) {
 async function getAllUsers(req, res) {
     const { users, total, page, limit } = await userService.getAllUsers(
         req.user.college_id,
-        req.validated
+        req.validated,
+        req.deptScope
     );
 
     return sendPaginated(res, users, total, { page, limit }, 'Users retrieved successfully');
@@ -163,7 +164,7 @@ async function getAllUsers(req, res) {
 // ============================================================================
 
 async function getUser(req, res) {
-    const result = await userService.getUserById(req.params.userId, req.user.college_id);
+    const result = await userService.getUserById(req.params.userId, req.user.college_id, req.deptScope);
 
     return sendSuccess(res, result, 'User retrieved successfully');
 }
@@ -176,7 +177,8 @@ async function updateUser(req, res) {
     const result = await userService.updateUser(
         req.params.userId,
         req.user.college_id,
-        req.validated
+        req.validated,
+        req.deptScope
     );
 
     logAudit(query, {
@@ -206,7 +208,8 @@ async function toggleUserStatus(req, res) {
     const result = await userService.toggleUserStatus(
         req.params.userId,
         req.user.college_id,
-        user_status
+        user_status,
+        req.deptScope
     );
 
     logAudit(query, {

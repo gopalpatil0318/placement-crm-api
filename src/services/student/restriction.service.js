@@ -23,7 +23,7 @@ const VERIFY_SELECT_COLUMNS = `
     sr.restriction_id, sr.restriction_type, sr.reason, sr.details,
     sr.applied_on, sr.valid_until, sr.is_active,
     sr.appeal_submitted, sr.appeal_notes, sr.appeal_resolved_at,
-    sr.created_at, sr.updated_at,
+    sr.created_at, sr.updated_at, sr.company_id,
     u.user_name AS restricted_by_name,
     ru.user_name AS resolved_by_name`;
 
@@ -37,10 +37,12 @@ const APPEAL_RETURNING_COLUMNS = `restriction_id, restriction_type, reason,
 
 async function verifyStudentRestriction(restrictionId, studentId, collegeId) {
     const result = await query(
-        `SELECT ${VERIFY_SELECT_COLUMNS}
+        `SELECT ${VERIFY_SELECT_COLUMNS},
+                co.company_name
          FROM student_restrictions sr
          LEFT JOIN users u ON sr.restricted_by = u.user_id
          LEFT JOIN users ru ON sr.resolved_by = ru.user_id
+         LEFT JOIN companies co ON sr.company_id = co.company_id
          WHERE sr.restriction_id = $1 AND sr.student_id = $2 AND sr.college_id = $3
          LIMIT 1`,
         [restrictionId, studentId, collegeId]
@@ -102,12 +104,14 @@ async function getMyRestrictions(studentId, collegeId, filters = {}) {
                 sr.applied_on, sr.valid_until, sr.is_active,
                 sr.appeal_submitted, sr.appeal_notes,
                 sr.appeal_resolved_at,
-                sr.created_at, sr.updated_at,
+                sr.created_at, sr.updated_at, sr.company_id,
                 u.user_name AS restricted_by_name,
-                ru.user_name AS resolved_by_name
+                ru.user_name AS resolved_by_name,
+                co.company_name
          FROM student_restrictions sr
          LEFT JOIN users u ON sr.restricted_by = u.user_id
          LEFT JOIN users ru ON sr.resolved_by = ru.user_id
+         LEFT JOIN companies co ON sr.company_id = co.company_id
          WHERE ${whereClause}
          ORDER BY sr.is_active DESC, ${sortCol} ${sortOrd}
          LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,

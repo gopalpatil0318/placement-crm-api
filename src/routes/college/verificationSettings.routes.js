@@ -14,18 +14,18 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/verificationSettings.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     updateVerificationSettingsSchema,
 } = require('../../validators/college/verificationSettings.validator');
 
-// All routes require COLLEGEADMIN
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN), apiLimiter);
+// All routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -33,11 +33,13 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN), apiLimiter);
 
 router.get(
     '/get_verification_settings',
+    requirePermission(PERMISSIONS.SETTINGS_VIEW),
     asyncHandler(controller.getVerificationSettings)
 );
 
 router.patch(
     '/update_verification_settings',
+    requirePermission(PERMISSIONS.SETTINGS_MANAGE),
     validate(updateVerificationSettingsSchema),
     asyncHandler(controller.updateVerificationSettings)
 );

@@ -28,6 +28,9 @@ const listAvailableJobsSchema = Joi.object({
     drive_type: Joi.string().valid(...DRIVE_TYPES).optional(),
     company_name: Joi.string().max(200).optional().allow(''),
 
+    // Eligibility filter
+    eligible_only: Joi.string().valid('true', 'false').optional(),
+
     // Sorting
     sort_by: Joi.string()
         .valid('application_deadline', 'created_at', 'job_title', 'company_name', 'salary_min')

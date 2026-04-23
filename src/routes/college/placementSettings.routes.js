@@ -14,18 +14,18 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/placementSettings.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     upsertSettingsSchema,
     getSettingsSchema,
 } = require('../../validators/college/placementSettings.validator');
 
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -33,12 +33,14 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.get(
     '/get_placement_settings',
+    requirePermission(PERMISSIONS.SETTINGS_VIEW),
     validate(getSettingsSchema, 'query'),
     asyncHandler(controller.getSettings)
 );
 
 router.put(
     '/upsert_placement_settings',
+    requirePermission(PERMISSIONS.SETTINGS_MANAGE),
     validate(upsertSettingsSchema),
     asyncHandler(controller.upsertSettings)
 );

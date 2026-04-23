@@ -15,6 +15,8 @@ const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG, ERROR_MESSAGES } = require('../../config/constants');
 const { maybeResetApproval } = require('../../utils/approvalResetHelper');
+const { BUCKETS, resolveFileUrl } = require('../../utils/storageHelper');
+const { cleanupOldFile } = require('../../utils/fileCleanupHelper');
 
 // All upsertable columns
 const LINK_FIELDS = [
@@ -49,13 +51,21 @@ async function saveProfileLinks(studentId, collegeId, data) {
             throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
         }
 
-        // 2. Build column lists for insert
+        // 2. Fetch old file paths for cleanup after update
+        const oldResult = await client.query(
+            `SELECT profile_image_url, resume_url FROM student_profile_links
+             WHERE student_id = $1 LIMIT 1`,
+            [studentId]
+        );
+        const oldRow = oldResult.rows[0] || {};
+
+        // 3. Build column lists for insert
         const fieldsPresent = LINK_FIELDS.filter(f => data[f] !== undefined);
         const insertColumns = ['student_id', 'college_id', ...fieldsPresent];
         const insertValues = [studentId, collegeId, ...fieldsPresent.map(f => data[f])];
         const placeholders = insertValues.map((_, i) => `$${i + 1}`);
 
-        // 3. Build SET clause for ON CONFLICT — update only provided fields
+        // 4. Build SET clause for ON CONFLICT — update only provided fields
         const updateSet = fieldsPresent
             .map((field, index) => `${field} = $${index + 3}`)
             .concat(['updated_at = NOW()']);
@@ -77,10 +87,18 @@ async function saveProfileLinks(studentId, collegeId, data) {
             is_new: isNew,
         });
 
-        // 4. Conditionally reset profile approval (respects verification settings)
+        // 5. Conditionally reset profile approval (respects verification settings)
         await maybeResetApproval(client, studentId, collegeId, 'profile_links');
 
         await client.query('COMMIT');
+
+        // 6. Cleanup old files if replaced (fire-and-forget, after COMMIT)
+        if (data.profile_image_url !== undefined) {
+            cleanupOldFile(BUCKETS.PUBLIC, oldRow.profile_image_url, data.profile_image_url);
+        }
+        if (data.resume_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.resume_url, data.resume_url);
+        }
 
         return {
             is_new: isNew,
@@ -110,7 +128,17 @@ async function getProfileLinks(studentId, collegeId) {
         return null;
     }
 
-    return result.rows[0];
+    const row = result.rows[0];
+
+    // Resolve storage paths to accessible URLs
+    if (row.profile_image_url) {
+        row.profile_image_url = await resolveFileUrl(row.profile_image_url, BUCKETS.PUBLIC);
+    }
+    if (row.resume_url) {
+        row.resume_url = await resolveFileUrl(row.resume_url, BUCKETS.PRIVATE);
+    }
+
+    return row;
 }
 
 // ============================================================================

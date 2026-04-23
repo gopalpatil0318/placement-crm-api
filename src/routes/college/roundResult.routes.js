@@ -16,11 +16,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/roundResult.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     addRoundResultSchema,
@@ -31,8 +31,8 @@ const {
     resultIdParamSchema,
 } = require('../../validators/college/roundResult.validator');
 
-// All routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+// All routes require authentication
+router.use(authenticate);
 
 // ============================================================================
 // ROUTES
@@ -40,6 +40,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 
 router.post(
     '/add_round_result/:roundId',
+    requirePermission(PERMISSIONS.ROUND_RESULTS_MANAGE),
     apiLimiter,
     validate(roundIdParamSchema, 'params'),
     validate(addRoundResultSchema),
@@ -48,6 +49,7 @@ router.post(
 
 router.post(
     '/bulk_add_round_results/:roundId',
+    requirePermission(PERMISSIONS.ROUND_RESULTS_MANAGE),
     apiLimiter,
     validate(roundIdParamSchema, 'params'),
     validate(bulkAddRoundResultsSchema),
@@ -56,6 +58,7 @@ router.post(
 
 router.get(
     '/get_round_results/:roundId',
+    requirePermission(PERMISSIONS.ROUND_RESULTS_VIEW),
     validate(roundIdParamSchema, 'params'),
     validate(listRoundResultsSchema, 'query'),
     asyncHandler(controller.getRoundResults)
@@ -63,6 +66,7 @@ router.get(
 
 router.put(
     '/update_round_result/:resultId',
+    requirePermission(PERMISSIONS.ROUND_RESULTS_MANAGE),
     apiLimiter,
     validate(resultIdParamSchema, 'params'),
     validate(updateRoundResultSchema),

@@ -16,11 +16,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/companyContact.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     addContactSchema,
@@ -31,8 +31,8 @@ const {
     contactIdParamSchema,
 } = require('../../validators/college/companyContact.validator');
 
-// All contact routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All contact routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -40,6 +40,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_company_contact/:companyId',
+    requirePermission(PERMISSIONS.COMPANIES_CREATE),
     validate(companyIdParamSchema, 'params'),
     validate(addContactSchema),
     asyncHandler(controller.addContact)
@@ -47,6 +48,7 @@ router.post(
 
 router.get(
     '/get_company_contacts/:companyId',
+    requirePermission(PERMISSIONS.COMPANIES_VIEW),
     validate(companyIdParamSchema, 'params'),
     validate(listContactsSchema, 'query'),
     asyncHandler(controller.getCompanyContacts)
@@ -54,6 +56,7 @@ router.get(
 
 router.put(
     '/update_contact/:contactId',
+    requirePermission(PERMISSIONS.COMPANIES_UPDATE),
     validate(contactIdParamSchema, 'params'),
     validate(updateContactSchema),
     asyncHandler(controller.updateContact)
@@ -61,6 +64,7 @@ router.put(
 
 router.patch(
     '/toggle_contact_status/:contactId',
+    requirePermission(PERMISSIONS.COMPANIES_UPDATE),
     validate(contactIdParamSchema, 'params'),
     validate(toggleContactStatusSchema),
     asyncHandler(controller.toggleContactStatus)

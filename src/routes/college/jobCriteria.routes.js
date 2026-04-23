@@ -15,11 +15,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/jobCriteria.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     setCriteriaSchema,
@@ -28,8 +28,8 @@ const {
     jobIdParamSchema,
 } = require('../../validators/college/jobCriteria.validator');
 
-// All criteria routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All criteria routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -37,6 +37,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/set_job_criteria/:jobId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(jobIdParamSchema, 'params'),
     validate(setCriteriaSchema),
     asyncHandler(controller.setCriteria)
@@ -44,6 +45,7 @@ router.post(
 
 router.put(
     '/update_job_criteria/:jobId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(jobIdParamSchema, 'params'),
     validate(updateCriteriaSchema),
     asyncHandler(controller.updateCriteria)
@@ -51,9 +53,17 @@ router.put(
 
 router.get(
     '/get_eligible_students/:jobId',
+    requirePermission(PERMISSIONS.JOBS_VIEW),
     validate(jobIdParamSchema, 'params'),
     validate(getEligibleStudentsSchema, 'query'),
     asyncHandler(controller.getEligibleStudents)
+);
+
+router.get(
+    '/get_job_criteria_history/:jobId',
+    requirePermission(PERMISSIONS.JOBS_VIEW),
+    validate(jobIdParamSchema, 'params'),
+    asyncHandler(controller.getCriteriaHistory)
 );
 
 module.exports = router;

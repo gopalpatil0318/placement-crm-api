@@ -16,11 +16,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/jobQuestion.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     addQuestionSchema,
@@ -30,8 +30,8 @@ const {
     questionIdParamSchema,
 } = require('../../validators/college/jobQuestion.validator');
 
-// All question routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All question routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -39,6 +39,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_job_question/:jobId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(jobIdParamSchema, 'params'),
     validate(addQuestionSchema),
     asyncHandler(controller.addQuestion)
@@ -46,6 +47,7 @@ router.post(
 
 router.get(
     '/get_job_questions/:jobId',
+    requirePermission(PERMISSIONS.JOBS_VIEW),
     validate(jobIdParamSchema, 'params'),
     validate(listQuestionsSchema, 'query'),
     asyncHandler(controller.getJobQuestions)
@@ -53,6 +55,7 @@ router.get(
 
 router.put(
     '/update_question/:questionId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(questionIdParamSchema, 'params'),
     validate(updateQuestionSchema),
     asyncHandler(controller.updateQuestion)
@@ -60,6 +63,7 @@ router.put(
 
 router.delete(
     '/delete_question/:questionId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(questionIdParamSchema, 'params'),
     asyncHandler(controller.deleteQuestion)
 );

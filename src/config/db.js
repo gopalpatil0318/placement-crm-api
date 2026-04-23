@@ -90,6 +90,23 @@ function isPoolExhaustedError(err) {
   );
 }
 
+/**
+ * Detect transient connection errors that are safe to retry.
+ * PgBouncer can terminate idle connections that pg still considers alive.
+ */
+function isTransientConnectionError(err) {
+  const msg = (err.message || '').toLowerCase();
+  return (
+    msg.includes('connection terminated unexpectedly') ||
+    msg.includes('connection terminated') ||
+    msg.includes('connection reset') ||
+    msg.includes('econnreset') ||
+    msg.includes('client has encountered a connection error') ||
+    err.code === 'ECONNRESET' ||
+    err.code === '57P01' // admin_shutdown
+  );
+}
+
 // ============================================================================
 // query() — Convenience wrapper with slow-query logging
 // ============================================================================
@@ -103,40 +120,57 @@ function isPoolExhaustedError(err) {
  * @returns {Promise<import('pg').QueryResult>}
  */
 async function query(text, params) {
-  const start = Date.now();
-  try {
-    const result = await mainPool.query(text, params);
-    const duration = Date.now() - start;
+  const MAX_RETRIES = 1;
+  let lastErr;
 
-    if (duration > SLOW_QUERY_THRESHOLD) {
-      logger.warn(`${LOG.DB_SLOW} Query took ${duration}ms`, {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const start = Date.now();
+    try {
+      const result = await mainPool.query(text, params);
+      const duration = Date.now() - start;
+
+      if (duration > SLOW_QUERY_THRESHOLD) {
+        logger.warn(`${LOG.DB_SLOW} Query took ${duration}ms`, {
+          query: text.substring(0, 200),
+          duration,
+        });
+      } else {
+        logger.debug(`${LOG.DB_QUERY} ${duration}ms | rows=${result.rowCount}`, {
+          query: text.substring(0, 120),
+        });
+      }
+
+      return result;
+    } catch (err) {
+      const duration = Date.now() - start;
+      lastErr = err;
+
+      // Retry once on transient PgBouncer connection drops
+      if (attempt < MAX_RETRIES && isTransientConnectionError(err)) {
+        logger.warn(`${LOG.DB_ERROR} Transient connection error, retrying (attempt ${attempt + 1})`, {
+          query: text.substring(0, 200),
+          error: err.message,
+          duration,
+        });
+        continue;
+      }
+
+      logger.error(`${LOG.DB_ERROR} Query failed after ${duration}ms`, {
         query: text.substring(0, 200),
-        duration,
-      });
-    } else {
-      logger.debug(`${LOG.DB_QUERY} ${duration}ms | rows=${result.rowCount}`, {
-        query: text.substring(0, 120),
+        error: err.message,
+        code: err.code,
       });
     }
-
-    return result;
-  } catch (err) {
-    const duration = Date.now() - start;
-    logger.error(`${LOG.DB_ERROR} Query failed after ${duration}ms`, {
-      query: text.substring(0, 200),
-      error: err.message,
-      code: err.code,
-    });
-
-    // Pool exhaustion → 503 Service Unavailable instead of generic 500
-    if (isPoolExhaustedError(err)) {
-      const poolErr = new Error('Server is busy. Please try again shortly.');
-      poolErr.status = 503;
-      throw poolErr;
-    }
-
-    throw err;
   }
+
+  // Pool exhaustion → 503 Service Unavailable instead of generic 500
+  if (isPoolExhaustedError(lastErr)) {
+    const poolErr = new Error('Server is busy. Please try again shortly.');
+    poolErr.status = 503;
+    throw poolErr;
+  }
+
+  throw lastErr;
 }
 
 // ============================================================================

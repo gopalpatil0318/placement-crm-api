@@ -17,11 +17,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/department.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createDepartmentSchema,
@@ -32,8 +32,8 @@ const {
     deptDetailQuerySchema,
 } = require('../../validators/college/department.validator');
 
-// All department routes require COLLEGEADMIN
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN), apiLimiter);
+// All department routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -41,18 +41,21 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN), apiLimiter);
 
 router.post(
     '/create_department',
+    requirePermission(PERMISSIONS.DEPARTMENTS_MANAGE),
     validate(createDepartmentSchema),
     asyncHandler(controller.createDepartment)
 );
 
 router.get(
     '/get_all_departments',
+    requirePermission(PERMISSIONS.DEPARTMENTS_VIEW),
     validate(listDepartmentsSchema, 'query'),
     asyncHandler(controller.getAllDepartments)
 );
 
 router.get(
     '/get_department/:deptId',
+    requirePermission(PERMISSIONS.DEPARTMENTS_VIEW),
     validate(deptIdParamSchema, 'params'),
     validate(deptDetailQuerySchema, 'query'),
     asyncHandler(controller.getDepartment)
@@ -60,6 +63,7 @@ router.get(
 
 router.put(
     '/update_department/:deptId',
+    requirePermission(PERMISSIONS.DEPARTMENTS_MANAGE),
     validate(deptIdParamSchema, 'params'),
     validate(updateDepartmentSchema),
     asyncHandler(controller.updateDepartment)
@@ -67,6 +71,7 @@ router.put(
 
 router.patch(
     '/toggle_department_status/:deptId',
+    requirePermission(PERMISSIONS.DEPARTMENTS_MANAGE),
     validate(deptIdParamSchema, 'params'),
     validate(toggleDepartmentSchema),
     asyncHandler(controller.toggleDepartmentStatus)

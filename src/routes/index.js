@@ -15,6 +15,11 @@ const router = express.Router();
 
 // Route groups — Sysadmin
 const sysadminRoutes = require('./sysadmin/sysadmin.routes');
+const sysadminSubscriptionRoutes = require('./sysadmin/subscription.routes');
+const sysadminSubmissionRoutes = require('./sysadmin/submissions.routes');
+
+// Route groups — Public (no auth)
+const publicSubmissionRoutes = require('./public/submissions.routes');
 
 // Route groups — College
 const collegeUserRoutes = require('./college/user.routes');
@@ -46,6 +51,8 @@ const collegeJobOverrideRoutes = require('./college/jobOverride.routes');
 const collegeResolveRoutes = require('./college/resolve.routes');
 const collegeRoundProcessingRoutes = require('./college/roundProcessing.routes');
 const collegeAuditRoutes = require('./college/audit.routes');
+const collegePermissionRoutes = require('./college/permission.routes');
+const collegeProfileRoutes = require('./college/profile.routes');
 
 // Route groups — Student
 const studentAuthRoutes = require('./student/auth.routes');
@@ -67,9 +74,17 @@ const studentTrainingRoutes = require('./student/training.routes');
 const studentNotificationRoutes = require('./student/notification.routes');
 const studentFeedbackRoutes = require('./student/feedback.routes');
 const studentJobOverrideRoutes = require('./student/jobOverride.routes');
+const studentPlacementPolicyRoutes = require('./student/placementPolicy.routes');
+const studentSelfReportRoutes = require('./student/selfReport.routes');
+const studentCompanySearchRoutes = require('./student/companySearch.routes');
+const studentCompanyJobsRoutes = require('./student/companyJobs.routes');
+const studentDashboardRoutes = require('./student/dashboard.routes');
 
 // Route groups — Shared Auth
 const authRoutes = require('./auth.routes');
+
+// Route groups — Storage
+const storageRoutes = require('./storage.routes');
 
 // ============================================================================
 // MOUNT ROUTES
@@ -78,12 +93,21 @@ const authRoutes = require('./auth.routes');
 // Shared auth (token refresh) — no role-specific prefix
 router.use('/auth', authRoutes);
 
+// Storage — any authenticated user
+router.use('/storage', storageRoutes);
+
 router.use('/sysadmin', sysadminRoutes);
+router.use('/sysadmin', sysadminSubscriptionRoutes);
+router.use('/sysadmin', sysadminSubmissionRoutes);
+
+// Public routes (no auth required)
+router.use('/public', publicSubmissionRoutes);
 
 // PUBLIC college routes FIRST (no auth required) — must be before authenticated routes
 router.use('/college', collegeResolveRoutes);
 
 // Authenticated college routes
+router.use('/college', collegeProfileRoutes);
 router.use('/college', collegeUserRoutes);
 router.use('/college', collegeDepartmentRoutes);
 router.use('/college', collegeStudentRoutes);
@@ -112,6 +136,7 @@ router.use('/college', collegeVerificationSettingsRoutes);
 router.use('/college', collegeJobOverrideRoutes);
 router.use('/college', collegeRoundProcessingRoutes);
 router.use('/college', collegeAuditRoutes);
+router.use('/college', collegePermissionRoutes);
 router.use('/student', studentAuthRoutes);
 router.use('/student', studentProfileRoutes);
 router.use('/student', studentPersonalRoutes);
@@ -131,5 +156,10 @@ router.use('/student', studentTrainingRoutes);
 router.use('/student', studentNotificationRoutes);
 router.use('/student', studentFeedbackRoutes);
 router.use('/student', studentJobOverrideRoutes);
+router.use('/student', studentPlacementPolicyRoutes);
+router.use('/student/self-report', studentSelfReportRoutes);
+router.use('/student/companies', studentCompanySearchRoutes);
+router.use('/student/company-jobs', studentCompanyJobsRoutes);
+router.use('/student', studentDashboardRoutes);
 
 module.exports = router;

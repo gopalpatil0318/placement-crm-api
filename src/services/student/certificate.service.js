@@ -19,6 +19,8 @@ const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
 const { maybeResetApproval } = require('../../utils/approvalResetHelper');
+const { BUCKETS, resolveFileUrls } = require('../../utils/storageHelper');
+const { cleanupOldFile, cleanupRecordFiles } = require('../../utils/fileCleanupHelper');
 
 const MAX_CERTIFICATES = 15;
 
@@ -120,6 +122,11 @@ async function getAllCertificates(studentId, collegeId) {
         [studentId, collegeId]
     );
 
+    // Resolve storage paths to signed download URLs
+    await resolveFileUrls(result.rows, [
+        { field: 'certificate_url', bucket: BUCKETS.PRIVATE },
+    ]);
+
     return {
         total_certificates: result.rows.length,
         max_certificates: MAX_CERTIFICATES,
@@ -183,6 +190,14 @@ async function updateCertificate(certificateId, studentId, collegeId, data) {
     try {
         await client.query('BEGIN');
 
+        // Fetch old file paths for cleanup after update
+        const oldResult = await client.query(
+            `SELECT certificate_url FROM student_certificates
+             WHERE certificate_id = $1 AND student_id = $2 AND college_id = $3 LIMIT 1`,
+            [certificateId, studentId, collegeId]
+        );
+        const oldRow = oldResult.rows[0] || {};
+
         const result = await client.query(
             `UPDATE student_certificates
              SET ${setClauses.join(', ')}
@@ -202,6 +217,11 @@ async function updateCertificate(certificateId, studentId, collegeId, data) {
         await maybeResetApproval(client, studentId, collegeId, 'certificates');
 
         await client.query('COMMIT');
+
+        // Cleanup old file if replaced (fire-and-forget, after COMMIT)
+        if (data.certificate_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.certificate_url, data.certificate_url);
+        }
 
         logger.info(`${LOG.API_END} Certificate updated`, {
             studentId,
@@ -229,7 +249,7 @@ async function deleteCertificate(certificateId, studentId, collegeId) {
         const result = await client.query(
             `DELETE FROM student_certificates
              WHERE certificate_id = $1 AND student_id = $2 AND college_id = $3
-             RETURNING certificate_id, certificate_name`,
+             RETURNING certificate_id, certificate_name, certificate_url`,
             [certificateId, studentId, collegeId]
         );
 
@@ -244,6 +264,9 @@ async function deleteCertificate(certificateId, studentId, collegeId) {
         await maybeResetApproval(client, studentId, collegeId, 'certificates');
 
         await client.query('COMMIT');
+
+        // Cleanup files from storage (fire-and-forget, after COMMIT)
+        cleanupRecordFiles(BUCKETS.PRIVATE, result.rows[0], ['certificate_url']);
 
         logger.info(`${LOG.API_END} Certificate deleted`, {
             studentId,

@@ -19,6 +19,8 @@ const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
 const { maybeResetApproval } = require('../../utils/approvalResetHelper');
+const { BUCKETS, resolveFileUrls, resolveFileUrl } = require('../../utils/storageHelper');
+const { cleanupOldFile, cleanupOldFiles, cleanupRecordFiles } = require('../../utils/fileCleanupHelper');
 
 const MAX_ACTIVITIES = 10;
 
@@ -112,6 +114,28 @@ async function getAllActivities(studentId, collegeId) {
         [studentId, collegeId]
     );
 
+    // Resolve storage paths to signed download URLs
+    await resolveFileUrls(result.rows, [
+        { field: 'certificate_url', bucket: BUCKETS.PRIVATE },
+    ]);
+    // Resolve proof_urls arrays (each row has an array of paths)
+    const proofTasks = [];
+    for (const row of result.rows) {
+        if (Array.isArray(row.proof_urls) && row.proof_urls.length > 0) {
+            for (let i = 0; i < row.proof_urls.length; i++) {
+                const url = row.proof_urls[i];
+                proofTasks.push(
+                    resolveFileUrl(url, BUCKETS.PRIVATE).then((resolved) => {
+                        row.proof_urls[i] = resolved;
+                    })
+                );
+            }
+        }
+    }
+    if (proofTasks.length > 0) {
+        await Promise.all(proofTasks);
+    }
+
     return {
         total_activities: result.rows.length,
         max_activities: MAX_ACTIVITIES,
@@ -152,6 +176,14 @@ async function updateActivity(activityId, studentId, collegeId, data) {
     try {
         await client.query('BEGIN');
 
+        // Fetch old file paths for cleanup after update
+        const oldResult = await client.query(
+            `SELECT certificate_url, proof_urls FROM student_activities
+             WHERE activity_id = $1 AND student_id = $2 AND college_id = $3 LIMIT 1`,
+            [activityId, studentId, collegeId]
+        );
+        const oldRow = oldResult.rows[0] || {};
+
         const result = await client.query(
             `UPDATE student_activities
              SET ${setClauses.join(', ')}
@@ -171,6 +203,14 @@ async function updateActivity(activityId, studentId, collegeId, data) {
         await maybeResetApproval(client, studentId, collegeId, 'activities');
 
         await client.query('COMMIT');
+
+        // Cleanup old files if replaced (fire-and-forget, after COMMIT)
+        if (data.certificate_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.certificate_url, data.certificate_url);
+        }
+        if (data.proof_urls !== undefined) {
+            cleanupOldFiles(BUCKETS.PRIVATE, oldRow.proof_urls, data.proof_urls);
+        }
 
         logger.info(`${LOG.API_END} Activity updated`, {
             studentId,
@@ -198,7 +238,7 @@ async function deleteActivity(activityId, studentId, collegeId) {
         const result = await client.query(
             `DELETE FROM student_activities
              WHERE activity_id = $1 AND student_id = $2 AND college_id = $3
-             RETURNING activity_id, activity_name`,
+             RETURNING activity_id, activity_name, certificate_url, proof_urls`,
             [activityId, studentId, collegeId]
         );
 
@@ -213,6 +253,9 @@ async function deleteActivity(activityId, studentId, collegeId) {
         await maybeResetApproval(client, studentId, collegeId, 'activities');
 
         await client.query('COMMIT');
+
+        // Cleanup files from storage (fire-and-forget, after COMMIT)
+        cleanupRecordFiles(BUCKETS.PRIVATE, result.rows[0], ['certificate_url', 'proof_urls']);
 
         logger.info(`${LOG.API_END} Activity deleted`, {
             studentId,

@@ -39,6 +39,25 @@ async function getOverview(collegeId, passoutYear) {
               AND student_passout_year = $2
               AND ${NOT_DROPOUT}
         ),
+        all_student_count AS (
+            SELECT COUNT(*)::int AS total
+            FROM students
+            WHERE college_id = $1
+              AND ${NOT_DROPOUT}
+        ),
+        quota_info AS (
+            SELECT
+                cs.student_quota,
+                cs.subscription_status,
+                cs.allowed_passout_years,
+                cs.valid_to,
+                cs.trial_ends_at
+            FROM college_subscriptions cs
+            WHERE cs.college_id = $1
+              AND cs.subscription_status IN ('trial', 'active')
+            ORDER BY cs.valid_from DESC
+            LIMIT 1
+        ),
         placement_agg AS (
             SELECT
                 COUNT(DISTINCT student_id)::int AS placed_count,
@@ -86,8 +105,20 @@ async function getOverview(collegeId, passoutYear) {
             mc.median_package,
             (GREATEST(sc.total - pa.placed_count, 0))::int AS unplaced_count,
             ca.total_companies,
-            ca.total_job_postings
-        FROM student_count sc, placement_agg pa, median_calc mc, company_agg ca
+            ca.total_job_postings,
+            qi.student_quota,
+            qi.subscription_status,
+            qi.allowed_passout_years,
+            qi.valid_to,
+            qi.trial_ends_at,
+            asc_t.total          AS total_students_all_years,
+            CASE WHEN qi.student_quota IS NOT NULL
+                THEN GREATEST(qi.student_quota - asc_t.total, 0)
+                ELSE NULL
+            END                  AS students_remaining
+        FROM student_count sc, placement_agg pa, median_calc mc,
+             company_agg ca, all_student_count asc_t
+        LEFT JOIN quota_info qi ON true
     `;
 
     const { rows } = await query(sql, [collegeId, passoutYear]);
@@ -101,7 +132,7 @@ async function getOverview(collegeId, passoutYear) {
 async function getPlacementStats(collegeId, passoutYear) {
     const params = [collegeId, passoutYear];
 
-    const [slabResult, offerResult, internshipResult] = await Promise.all([
+    const [slabResult, offerResult, internshipResult, campusResult, selfReportResult] = await Promise.all([
         // Package slab distribution
         query(`
             SELECT
@@ -151,12 +182,40 @@ async function getPlacementStats(collegeId, passoutYear) {
               AND ${VALID_PLACEMENT}
               AND placement_type IN ('${PLACEMENT_TYPES[1]}', '${PLACEMENT_TYPES[2]}')
         `, params),
+
+        // Campus breakdown (on_campus / off_campus / pool_campus)
+        query(`
+            SELECT
+                COALESCE(jp.drive_type, 'on_campus') AS drive_type,
+                COUNT(*)::int AS count
+            FROM placement_results pr
+            JOIN job_postings jp ON jp.job_id = pr.job_id
+            WHERE pr.college_id = $1 AND pr.passout_year = $2
+              AND pr.${VALID_PLACEMENT}
+            GROUP BY jp.drive_type
+        `, params),
+
+        // Self-report pending count
+        query(`
+            SELECT COUNT(*)::int AS pending
+            FROM self_reported_placements
+            WHERE college_id = $1 AND passout_year = $2
+              AND verification_status = 'pending'
+        `, params),
     ]);
+
+    // Pivot campus breakdown rows → { on_campus, off_campus, pool_campus }
+    const campusBreakdown = { on_campus: 0, off_campus: 0, pool_campus: 0 };
+    for (const row of campusResult.rows) {
+        campusBreakdown[row.drive_type] = row.count;
+    }
 
     return {
         package_slabs: slabResult.rows[0],
         offer_breakdown: offerResult.rows[0],
         internship_stats: internshipResult.rows[0],
+        campus_breakdown: campusBreakdown,
+        self_report_pending: selfReportResult.rows[0].pending,
     };
 }
 

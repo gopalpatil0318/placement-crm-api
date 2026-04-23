@@ -18,11 +18,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/placementPolicy.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createPolicySchema,
@@ -32,8 +32,8 @@ const {
     policyIdParamSchema,
 } = require('../../validators/college/placementPolicy.validator');
 
-// All routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -41,24 +41,28 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/create_policy',
+    requirePermission(PERMISSIONS.POLICIES_MANAGE),
     validate(createPolicySchema),
     asyncHandler(controller.createPolicy)
 );
 
 router.get(
     '/get_all_policies',
+    requirePermission(PERMISSIONS.POLICIES_VIEW),
     validate(listPoliciesSchema, 'query'),
     asyncHandler(controller.getAllPolicies)
 );
 
 router.get(
     '/get_policy/:policyId',
+    requirePermission(PERMISSIONS.POLICIES_VIEW),
     validate(policyIdParamSchema, 'params'),
     asyncHandler(controller.getPolicy)
 );
 
 router.put(
     '/update_policy/:policyId',
+    requirePermission(PERMISSIONS.POLICIES_MANAGE),
     validate(policyIdParamSchema, 'params'),
     validate(updatePolicySchema),
     asyncHandler(controller.updatePolicy)
@@ -66,6 +70,7 @@ router.put(
 
 router.patch(
     '/toggle_policy_status/:policyId',
+    requirePermission(PERMISSIONS.POLICIES_MANAGE),
     validate(policyIdParamSchema, 'params'),
     validate(togglePolicyStatusSchema),
     asyncHandler(controller.togglePolicyStatus)
@@ -73,6 +78,7 @@ router.patch(
 
 router.delete(
     '/delete_policy/:policyId',
+    requirePermission(PERMISSIONS.POLICIES_MANAGE),
     validate(policyIdParamSchema, 'params'),
     asyncHandler(controller.deletePolicy)
 );

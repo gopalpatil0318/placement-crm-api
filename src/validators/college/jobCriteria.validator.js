@@ -89,6 +89,19 @@ const setCriteriaSchema = Joi.object({
     exclude_already_placed: Joi.boolean()
         .optional()
         .default(false),
+    required_skills: Joi.array()
+        .items(Joi.object({
+            skill_id: Joi.string().uuid().required(),
+        }))
+        .max(50)
+        .optional()
+        .allow(null),
+    min_skill_match_percentage: Joi.number()
+        .integer()
+        .min(0)
+        .max(100)
+        .optional()
+        .allow(null),
 }).min(1).messages({
     'object.min': 'At least one eligibility criterion must be provided',
 });

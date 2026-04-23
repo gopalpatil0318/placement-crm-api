@@ -15,11 +15,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/notification.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     sendNotificationSchema,
@@ -27,8 +27,8 @@ const {
     listSentNotificationsSchema,
 } = require('../../validators/college/notification.validator');
 
-// All notification routes require COLLEGEADMIN or TPO + rate limiting
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All notification routes require authentication + rate limiting
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // NOTIFICATION ROUTES
@@ -37,6 +37,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 // Send notification to specific recipients
 router.post(
     '/send_notification',
+    requirePermission(PERMISSIONS.NOTIFICATIONS_SEND),
     validate(sendNotificationSchema),
     asyncHandler(controller.sendNotification)
 );
@@ -44,6 +45,7 @@ router.post(
 // Send bulk notification with filters
 router.post(
     '/send_bulk_notification',
+    requirePermission(PERMISSIONS.NOTIFICATIONS_SEND),
     validate(sendBulkNotificationSchema),
     asyncHandler(controller.sendBulkNotification)
 );
@@ -51,6 +53,7 @@ router.post(
 // List sent notifications
 router.get(
     '/get_sent_notifications',
+    requirePermission(PERMISSIONS.NOTIFICATIONS_VIEW),
     validate(listSentNotificationsSchema, 'query'),
     asyncHandler(controller.getSentNotifications)
 );

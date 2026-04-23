@@ -26,11 +26,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/training.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createTrainingSchema,
@@ -50,8 +50,8 @@ const {
     studentIdParamSchema,
 } = require('../../validators/college/training.validator');
 
-// All training routes require COLLEGEADMIN or TPO + rate limiting
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+// All training routes require authentication + rate limiting
+router.use(authenticate);
 router.use(apiLimiter);
 
 // ============================================================================
@@ -61,6 +61,7 @@ router.use(apiLimiter);
 // #89 — Create training program
 router.post(
     '/create_training_program',
+    requirePermission(PERMISSIONS.TRAINING_MANAGE),
     validate(createTrainingSchema),
     asyncHandler(controller.createTrainingProgram)
 );
@@ -68,6 +69,7 @@ router.post(
 // #90 — List all training programs
 router.get(
     '/get_all_training_programs',
+    requirePermission(PERMISSIONS.TRAINING_VIEW),
     validate(listTrainingsSchema, 'query'),
     asyncHandler(controller.getAllTrainingPrograms)
 );
@@ -75,6 +77,7 @@ router.get(
 // #91 — Get training program details
 router.get(
     '/get_training_program/:programId',
+    requirePermission(PERMISSIONS.TRAINING_VIEW),
     validate(programIdParamSchema, 'params'),
     asyncHandler(controller.getTrainingProgram)
 );
@@ -82,6 +85,7 @@ router.get(
 // #92 — Update training program
 router.put(
     '/update_training_program/:programId',
+    requirePermission(PERMISSIONS.TRAINING_MANAGE),
     validate(programIdParamSchema, 'params'),
     validate(updateTrainingSchema),
     asyncHandler(controller.updateTrainingProgram)
@@ -90,6 +94,7 @@ router.put(
 // #93 — Toggle training status
 router.patch(
     '/toggle_training_status/:programId',
+    requirePermission(PERMISSIONS.TRAINING_MANAGE),
     validate(programIdParamSchema, 'params'),
     validate(toggleTrainingStatusSchema),
     asyncHandler(controller.toggleTrainingStatus)
@@ -98,6 +103,7 @@ router.patch(
 // Toggle enrollment access (open/close enrollment independently of status)
 router.patch(
     '/toggle_enrollment_access/:programId',
+    requirePermission(PERMISSIONS.TRAINING_MANAGE),
     validate(programIdParamSchema, 'params'),
     validate(toggleEnrollmentAccessSchema),
     asyncHandler(controller.toggleEnrollmentAccess)
@@ -106,6 +112,7 @@ router.patch(
 // #94 — List enrollments for a program
 router.get(
     '/get_training_enrollments/:programId',
+    requirePermission(PERMISSIONS.TRAINING_VIEW),
     validate(programIdParamSchema, 'params'),
     validate(listEnrollmentsSchema, 'query'),
     asyncHandler(controller.getTrainingEnrollments)
@@ -114,6 +121,7 @@ router.get(
 // #95 — Update enrollment
 router.patch(
     '/update_enrollment/:enrollmentId',
+    requirePermission(PERMISSIONS.TRAINING_MANAGE),
     validate(enrollmentIdParamSchema, 'params'),
     validate(updateEnrollmentSchema),
     asyncHandler(controller.updateEnrollment)
@@ -122,6 +130,7 @@ router.patch(
 // MF3 — Bulk update enrollments
 router.patch(
     '/bulk_update_enrollments/:programId',
+    requirePermission(PERMISSIONS.TRAINING_MANAGE),
     validate(programIdParamSchema, 'params'),
     validate(bulkUpdateEnrollmentsSchema),
     asyncHandler(controller.bulkUpdateEnrollments)
@@ -130,6 +139,7 @@ router.patch(
 // GAP-1 — Student training report
 router.get(
     '/student_training_report/:studentId',
+    requirePermission(PERMISSIONS.TRAINING_VIEW),
     validate(studentIdParamSchema, 'params'),
     asyncHandler(controller.getStudentTrainingReport)
 );
@@ -137,6 +147,7 @@ router.get(
 // B16 — Create training session
 router.post(
     '/training/:programId/sessions',
+    requirePermission(PERMISSIONS.TRAINING_SESSIONS),
     validate(programIdParamSchema, 'params'),
     validate(createSessionSchema),
     asyncHandler(controller.createTrainingSession)
@@ -145,6 +156,7 @@ router.post(
 // B16 — List training sessions
 router.get(
     '/training/:programId/sessions',
+    requirePermission(PERMISSIONS.TRAINING_VIEW),
     validate(programIdParamSchema, 'params'),
     asyncHandler(controller.getTrainingSessions)
 );
@@ -152,6 +164,7 @@ router.get(
 // B16 — Update training session
 router.put(
     '/training/sessions/:sessionId',
+    requirePermission(PERMISSIONS.TRAINING_SESSIONS),
     validate(sessionIdParamSchema, 'params'),
     validate(updateSessionSchema),
     asyncHandler(controller.updateTrainingSession)
@@ -160,6 +173,7 @@ router.put(
 // B16 — Delete training session
 router.delete(
     '/training/sessions/:sessionId',
+    requirePermission(PERMISSIONS.TRAINING_SESSIONS),
     validate(sessionIdParamSchema, 'params'),
     asyncHandler(controller.deleteTrainingSession)
 );
@@ -167,6 +181,7 @@ router.delete(
 // B16 — Mark session attendance
 router.post(
     '/training/sessions/:sessionId/attendance',
+    requirePermission(PERMISSIONS.TRAINING_ATTENDANCE),
     validate(sessionIdParamSchema, 'params'),
     validate(markAttendanceSchema),
     asyncHandler(controller.markSessionAttendance)
@@ -175,6 +190,7 @@ router.post(
 // Get session attendance records (per-student, for pre-populating attendance sheet)
 router.get(
     '/training/sessions/:sessionId/attendance',
+    requirePermission(PERMISSIONS.TRAINING_VIEW),
     validate(sessionIdParamSchema, 'params'),
     asyncHandler(controller.getSessionAttendance)
 );

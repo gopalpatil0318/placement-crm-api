@@ -53,6 +53,15 @@ const STATUS = Object.freeze({
     INACTIVE: 'inactive',
   }),
 
+  // colleges.subscription_status
+  SUBSCRIPTION: Object.freeze({
+    NONE: 'none',
+    TRIAL: 'trial',
+    ACTIVE: 'active',
+    EXPIRED: 'expired',
+    SUSPENDED: 'suspended',
+  }),
+
   // users.user_status
   USER: Object.freeze({
     ACTIVE: 'active',
@@ -188,6 +197,10 @@ const STATUS = Object.freeze({
     AUTO_WITHDRAWN: 'auto_withdrawn',
     WAITLIST_PROMOTED: 'waitlist_promoted',
     ROUND_PROCESSING_COMPLETE: 'round_processing_complete',
+    // CF8: Self-report notification types
+    SELF_REPORT_SUBMITTED: 'self_report_submitted',
+    SELF_REPORT_APPROVED: 'self_report_approved',
+    SELF_REPORT_REJECTED: 'self_report_rejected',
   }),
 
   // notifications.recipient_type
@@ -259,8 +272,19 @@ const ERROR_MESSAGES = Object.freeze({
   INVALID_CREDENTIALS: 'Incorrect email or password',
   UNAUTHORIZED: 'You must be logged in to access this resource',
   FORBIDDEN: 'You do not have permission to perform this action',
+  DEPT_SCOPE_DENIED: 'This resource is outside your department scope',
   ACCOUNT_INACTIVE: 'Your account has been deactivated. Contact your administrator',
   COLLEGE_INACTIVE: 'Your college account is deactivated. Contact system administrator',
+
+  // Subscription & Quota
+  SUBSCRIPTION_EXPIRED: 'Your subscription has expired. Student registration is paused. Contact the Placenex team to renew',
+  SUBSCRIPTION_SUSPENDED: 'Your college account is suspended. Contact the Placenex team',
+  QUOTA_EXCEEDED: 'Student quota exceeded. Your college has reached its registered student limit. Contact the Placenex team to increase your quota',
+  QUOTA_EXCEEDED_BULK: 'Cannot register students. Not enough quota slots remaining. Reduce the import size or contact the Placenex team to increase your quota',
+  TRIAL_PASSOUT_YEAR_RESTRICTED: 'Trial accounts can only register students for the default academic year. Upgrade your subscription to add students from other passout years',
+  SUBSCRIPTION_NOT_FOUND: 'Subscription not found',
+  SUBSCRIPTION_DUPLICATE_PERIOD: 'A subscription already exists for this college with the same start date',
+  PAYMENT_AMOUNT_INVALID: 'Payment amount must be greater than zero',
 
   // Validation
   MISSING_REQUIRED_FIELDS: 'Please fill in all required fields',
@@ -392,6 +416,8 @@ const ERROR_MESSAGES = Object.freeze({
   DEADLINE_PASSED: 'The application deadline has passed',
   JOB_NOT_PUBLISHED: 'This job is not currently accepting applications',
   STUDENT_RESTRICTED: 'You are currently restricted from applying to placements',
+  STUDENT_RESTRICTED_COMPANY: 'You are currently restricted from applying to this company',
+  MAX_ACTIVE_APPLICATIONS_REACHED: 'You have reached the maximum number of active applications allowed',
   MAX_PLACEMENTS_REACHED: 'Maximum allowed placements reached',
   ROUND_SEQUENCE_INVALID: 'Student must pass previous round before proceeding',
   ALREADY_ENROLLED: 'You are already enrolled in this program',
@@ -521,6 +547,23 @@ const ERROR_MESSAGES = Object.freeze({
   SERVER_ERROR: 'Something went wrong. Please try again later',
   RATE_LIMIT_EXCEEDED: 'Too many requests. Please slow down and try again',
   INVALID_REQUEST: 'Invalid request. Please check your input',
+
+  // Self-Report
+  SELF_REPORT_NOT_FOUND: 'Self-report not found',
+  SELF_REPORT_ALREADY_REVIEWED: 'Self-report has already been reviewed',
+  SELF_REPORT_ONLY_ACTIVE_STUDENTS: 'Only active students can submit self-reports',
+  SELF_REPORT_DUPLICATE: 'You already have a pending or approved report for this company and job title',
+  SELF_REPORT_CANCEL_PENDING_ONLY: 'Can only cancel pending reports',
+  SELF_REPORT_COMPANY_NOT_FOUND: 'Selected company not found or inactive',
+  SELF_REPORT_COMPANY_NOT_ACTIVE: 'Selected company not found or inactive in this college',
+
+  // Demo & Contact Submissions
+  DEMO_REQUEST_NOT_FOUND: 'Demo request not found',
+  DEMO_REQUEST_DUPLICATE: 'A demo request with this email was already submitted recently. We will get back to you shortly',
+  DEMO_REQUEST_INVALID_TRANSITION: 'Cannot change status from the current state to the requested state',
+  CONTACT_INQUIRY_NOT_FOUND: 'Contact inquiry not found',
+  CONTACT_INQUIRY_DUPLICATE: 'This inquiry was already submitted recently. We will respond shortly',
+  CONTACT_INQUIRY_INVALID_TRANSITION: 'Cannot change status from the current state to the requested state',
 });
 
 // ============================================================================
@@ -541,6 +584,16 @@ const SUCCESS_MESSAGES = Object.freeze({
   COLLEGE_DEACTIVATED: 'College deactivated successfully',
   COLLEGE_FEATURES_UPDATED: 'College features updated successfully',
   ACADEMIC_YEAR_UPDATED: 'Academic year updated successfully',
+
+  // Subscription & Billing
+  SUBSCRIPTION_CREATED: 'Subscription created successfully',
+  SUBSCRIPTION_UPDATED: 'Subscription updated successfully',
+  SUBSCRIPTION_RETRIEVED: 'Subscription details retrieved',
+  SUBSCRIPTIONS_RETRIEVED: 'Subscriptions retrieved successfully',
+  PAYMENT_RECORDED: 'Payment recorded successfully',
+  PAYMENTS_RETRIEVED: 'Payment history retrieved successfully',
+  BILLING_OVERVIEW_RETRIEVED: 'Billing overview retrieved',
+  COLLEGE_QUOTA_RETRIEVED: 'Quota information retrieved',
 
   // User
   USER_CREATED: 'User created successfully',
@@ -608,6 +661,7 @@ const SUCCESS_MESSAGES = Object.freeze({
   // Criteria
   CRITERIA_SET: 'Eligibility criteria set successfully',
   CRITERIA_UPDATED: 'Eligibility criteria updated successfully',
+  CRITERIA_HISTORY_RETRIEVED: 'Criteria change history retrieved successfully',
   ELIGIBLE_STUDENTS_RETRIEVED: 'Eligible students retrieved successfully',
   JOB_DENIALS_RETRIEVED: 'Job denials retrieved successfully',
 
@@ -788,6 +842,19 @@ const SUCCESS_MESSAGES = Object.freeze({
   // Audit Trail
   AUDIT_LOGS_RETRIEVED: 'Audit logs retrieved successfully',
 
+  // Demo & Contact Submissions
+  DEMO_REQUEST_SUBMITTED: 'Thank you! We will contact you shortly to schedule your demo',
+  DEMO_REQUESTS_RETRIEVED: 'Demo requests retrieved successfully',
+  DEMO_REQUEST_RETRIEVED: 'Demo request retrieved successfully',
+  DEMO_REQUEST_STATUS_UPDATED: 'Demo request status updated successfully',
+  DEMO_REQUEST_NOTE_ADDED: 'Note added successfully',
+  CONTACT_INQUIRY_SUBMITTED: 'Thank you for reaching out! We will respond within 24 hours',
+  CONTACT_INQUIRIES_RETRIEVED: 'Contact inquiries retrieved successfully',
+  CONTACT_INQUIRY_RETRIEVED: 'Contact inquiry retrieved successfully',
+  CONTACT_INQUIRY_STATUS_UPDATED: 'Contact inquiry status updated successfully',
+  CONTACT_INQUIRY_NOTE_ADDED: 'Note added successfully',
+  SUBMISSION_STATS_RETRIEVED: 'Submission statistics retrieved successfully',
+
   // Generic
   FETCHED_SUCCESSFULLY: 'Data retrieved successfully',
   DELETED_SUCCESSFULLY: 'Record deleted successfully',
@@ -934,6 +1001,16 @@ const ROUND_TYPES = Object.freeze(['aptitude', 'technical', 'hr', 'group_discuss
 const DRIVE_TYPES = Object.freeze(['on_campus', 'off_campus', 'pool_campus']);
 
 // ============================================================================
+// SUBSCRIPTION STATUSES (matches colleges.subscription_status CHECK)
+// ============================================================================
+const SUBSCRIPTION_STATUSES = Object.freeze(['none', 'trial', 'active', 'expired', 'suspended']);
+
+// ============================================================================
+// PAYMENT METHODS (matches subscription_payments.payment_method CHECK)
+// ============================================================================
+const PAYMENT_METHODS = Object.freeze(['bank_transfer', 'cheque', 'upi', 'cash', 'other']);
+
+// ============================================================================
 // APPLICATION STATUSES (matches student_applications.application_status CHECK)
 // ============================================================================
 const APPLICATION_STATUSES = Object.freeze([
@@ -1025,6 +1102,424 @@ const SKILL_CATEGORY_GROUPS = Object.freeze({
 });
 
 // ============================================================================
+// DYNAMIC ROLE PERMISSIONS (matches college_role_permissions table)
+// ============================================================================
+// 20 modules × 2-4 actions each = ~45 permission keys.
+// College admin always has full access (hardcoded bypass — not stored in DB).
+// These constants are the single source of truth for all permission checks.
+// ============================================================================
+
+// Roles that can be configured via the permission manager
+const CONFIGURABLE_ROLES = Object.freeze([ROLES.TPO, ROLES.TPC, ROLES.HOD, ROLES.TEACHER]);
+
+// Flat permission key strings — used in requirePermission() middleware and frontend
+const PERMISSIONS = Object.freeze({
+  // Dashboard
+  DASHBOARD_VIEW: 'dashboard.view',
+
+  // Student Management
+  STUDENTS_VIEW: 'students.view',
+  STUDENTS_CREATE: 'students.create',
+  STUDENTS_UPDATE: 'students.update',
+  STUDENTS_APPROVE: 'students.approve',
+
+  // Company Management (includes contacts)
+  COMPANIES_VIEW: 'companies.view',
+  COMPANIES_CREATE: 'companies.create',
+  COMPANIES_UPDATE: 'companies.update',
+
+  // Job Postings (includes positions, criteria, rounds, questions)
+  JOBS_VIEW: 'jobs.view',
+  JOBS_CREATE: 'jobs.create',
+  JOBS_UPDATE: 'jobs.update',
+  JOBS_MANAGE_STATUS: 'jobs.manage_status',
+
+  // Applications & Waitlist
+  APPLICATIONS_VIEW: 'applications.view',
+  APPLICATIONS_MANAGE: 'applications.manage',
+
+  // Round Results & Processing
+  ROUND_RESULTS_VIEW: 'round_results.view',
+  ROUND_RESULTS_MANAGE: 'round_results.manage',
+  ROUND_RESULTS_PROCESS: 'round_results.process',
+
+  // Placements & Offers
+  PLACEMENTS_VIEW: 'placements.view',
+  PLACEMENTS_CREATE: 'placements.create',
+  PLACEMENTS_MANAGE: 'placements.manage',
+
+  // Off-Campus Self Reports
+  SELF_REPORTS_VIEW: 'self_reports.view',
+  SELF_REPORTS_REVIEW: 'self_reports.review',
+
+  // Eligibility Override Requests
+  OVERRIDES_VIEW: 'overrides.view',
+  OVERRIDES_REVIEW: 'overrides.review',
+
+  // Training Programs
+  TRAINING_VIEW: 'training.view',
+  TRAINING_MANAGE: 'training.manage',
+  TRAINING_SESSIONS: 'training.sessions',
+  TRAINING_ATTENDANCE: 'training.attendance',
+
+  // Student Data Verification
+  VERIFICATION_VIEW: 'verification.view',
+  VERIFICATION_VERIFY: 'verification.verify',
+
+  // Student Restrictions
+  RESTRICTIONS_VIEW: 'restrictions.view',
+  RESTRICTIONS_CREATE: 'restrictions.create',
+  RESTRICTIONS_UPDATE: 'restrictions.update',
+
+  // Notifications
+  NOTIFICATIONS_VIEW: 'notifications.view',
+  NOTIFICATIONS_SEND: 'notifications.send',
+
+  // Feedback & Interview Questions
+  FEEDBACK_VIEW: 'feedback.view',
+  FEEDBACK_APPROVE: 'feedback.approve',
+
+  // Skills Master
+  SKILLS_VIEW: 'skills.view',
+  SKILLS_MANAGE: 'skills.manage',
+
+  // Department Management
+  DEPARTMENTS_VIEW: 'departments.view',
+  DEPARTMENTS_MANAGE: 'departments.manage',
+
+  // User Management
+  USERS_VIEW: 'users.view',
+  USERS_MANAGE: 'users.manage',
+
+  // Audit Logs
+  AUDIT_VIEW: 'audit.view',
+
+  // Placement Policies
+  POLICIES_VIEW: 'policies.view',
+  POLICIES_MANAGE: 'policies.manage',
+
+  // Settings (placement settings, company tiers, verification settings)
+  SETTINGS_VIEW: 'settings.view',
+  SETTINGS_MANAGE: 'settings.manage',
+});
+
+// All valid permission values as a frozen array (for validation)
+const ALL_PERMISSION_KEYS = Object.freeze(Object.values(PERMISSIONS));
+
+// ============================================================================
+// PERMISSION MODULES — UI labels, descriptions, and grouping for the
+// Permission Manager matrix page. Frontend uses this for rendering.
+// ============================================================================
+const PERMISSION_MODULES = Object.freeze([
+  {
+    group: 'Overview',
+    modules: [
+      {
+        key: 'dashboard',
+        label: 'Dashboard',
+        description: 'View dashboard statistics and analytics',
+        actions: [
+          { key: 'dashboard.view', label: 'View Dashboard', description: 'Access dashboard overview, stats, and charts' },
+        ],
+      },
+    ],
+  },
+  {
+    group: 'Recruitment & Jobs',
+    modules: [
+      {
+        key: 'companies',
+        label: 'Companies',
+        description: 'Manage recruiting companies and contacts',
+        actions: [
+          { key: 'companies.view', label: 'View Companies', description: 'View company list, details, and contacts' },
+          { key: 'companies.create', label: 'Create Companies', description: 'Add new companies and contacts' },
+          { key: 'companies.update', label: 'Update Companies', description: 'Edit company info, toggle status, manage contacts' },
+        ],
+      },
+      {
+        key: 'jobs',
+        label: 'Job Postings',
+        description: 'Manage job postings, criteria, rounds, and questions',
+        actions: [
+          { key: 'jobs.view', label: 'View Jobs', description: 'View job postings, positions, criteria, and rounds' },
+          { key: 'jobs.create', label: 'Create Jobs', description: 'Create new job postings with positions and criteria' },
+          { key: 'jobs.update', label: 'Update Jobs', description: 'Edit job details, positions, criteria, rounds, and questions' },
+          { key: 'jobs.manage_status', label: 'Manage Job Status', description: 'Publish, close, or cancel job postings' },
+        ],
+      },
+      {
+        key: 'applications',
+        label: 'Applications',
+        description: 'Manage student applications and waitlists',
+        actions: [
+          { key: 'applications.view', label: 'View Applications', description: 'View application list, details, eligible/not-applied, and denials' },
+          { key: 'applications.manage', label: 'Manage Applications', description: 'Update application status, manage waitlist, bulk operations' },
+        ],
+      },
+      {
+        key: 'round_results',
+        label: 'Round Results',
+        description: 'Manage selection round results and processing',
+        actions: [
+          { key: 'round_results.view', label: 'View Results', description: 'View round results and processing previews' },
+          { key: 'round_results.manage', label: 'Manage Results', description: 'Add and update round results (single and bulk)' },
+          { key: 'round_results.process', label: 'Process Rounds', description: 'Execute round processing to advance/reject students' },
+        ],
+      },
+      {
+        key: 'overrides',
+        label: 'Eligibility Overrides',
+        description: 'Review student eligibility override requests',
+        actions: [
+          { key: 'overrides.view', label: 'View Overrides', description: 'View override requests per job and across all jobs' },
+          { key: 'overrides.review', label: 'Review Overrides', description: 'Approve or reject override requests (single and bulk)' },
+        ],
+      },
+    ],
+  },
+  {
+    group: 'Placements',
+    modules: [
+      {
+        key: 'placements',
+        label: 'Placements & Offers',
+        description: 'Manage placement records, offer letters, and joining letters',
+        actions: [
+          { key: 'placements.view', label: 'View Placements', description: 'View placement list, details, and letter verification status' },
+          { key: 'placements.create', label: 'Create Placements', description: 'Create offers, bulk offers, and record external placements' },
+          { key: 'placements.manage', label: 'Manage Placements', description: 'Update status, verify letters, revert applications' },
+        ],
+      },
+      {
+        key: 'self_reports',
+        label: 'Self Reports',
+        description: 'Review off-campus self-reported placements',
+        actions: [
+          { key: 'self_reports.view', label: 'View Self Reports', description: 'View pending self-reports and statistics' },
+          { key: 'self_reports.review', label: 'Review Self Reports', description: 'Approve or reject self-reported placements' },
+        ],
+      },
+    ],
+  },
+  {
+    group: 'Student Management',
+    modules: [
+      {
+        key: 'students',
+        label: 'Students',
+        description: 'Manage student records, profiles, and approvals',
+        actions: [
+          { key: 'students.view', label: 'View Students', description: 'View student list, profiles, and full details' },
+          { key: 'students.create', label: 'Register Students', description: 'Register students individually or via bulk CSV' },
+          { key: 'students.update', label: 'Update Students', description: 'Edit student info and toggle active/inactive status' },
+          { key: 'students.approve', label: 'Approve Profiles', description: 'Approve or reject student profile submissions' },
+        ],
+      },
+      {
+        key: 'verification',
+        label: 'Verification Center',
+        description: 'Verify student profiles, experience, achievements, and certificates',
+        actions: [
+          { key: 'verification.view', label: 'View Pending', description: 'View pending verification counts and items' },
+          { key: 'verification.verify', label: 'Verify Items', description: 'Approve or reject student data (single and bulk)' },
+        ],
+      },
+      {
+        key: 'restrictions',
+        label: 'Student Restrictions',
+        description: 'Manage placement restrictions, warnings, and bans',
+        actions: [
+          { key: 'restrictions.view', label: 'View Restrictions', description: 'View all restrictions and per-student restrictions' },
+          { key: 'restrictions.create', label: 'Add Restrictions', description: 'Apply new restrictions to students' },
+          { key: 'restrictions.update', label: 'Update Restrictions', description: 'Modify or resolve existing restrictions' },
+        ],
+      },
+    ],
+  },
+  {
+    group: 'Training & Academics',
+    modules: [
+      {
+        key: 'training',
+        label: 'Training Programs',
+        description: 'Manage training programs, sessions, enrollments, and attendance',
+        actions: [
+          { key: 'training.view', label: 'View Programs', description: 'View training programs, enrollments, and reports' },
+          { key: 'training.manage', label: 'Manage Programs', description: 'Create/update programs, manage enrollments and status' },
+          { key: 'training.sessions', label: 'Manage Sessions', description: 'Create, update, and delete training sessions' },
+          { key: 'training.attendance', label: 'Mark Attendance', description: 'Record session attendance for enrolled students' },
+        ],
+      },
+      {
+        key: 'skills',
+        label: 'Skills Master',
+        description: 'Manage the college-wide skills catalog',
+        actions: [
+          { key: 'skills.view', label: 'View Skills', description: 'View skills list and categories' },
+          { key: 'skills.manage', label: 'Manage Skills', description: 'Create, update, and delete skills' },
+        ],
+      },
+      {
+        key: 'feedback',
+        label: 'Feedback & Reviews',
+        description: 'Review student feedback and interview questions',
+        actions: [
+          { key: 'feedback.view', label: 'View Feedback', description: 'View submitted feedback and interview questions' },
+          { key: 'feedback.approve', label: 'Approve Feedback', description: 'Approve or reject feedback and interview questions' },
+        ],
+      },
+    ],
+  },
+  {
+    group: 'Communication',
+    modules: [
+      {
+        key: 'notifications',
+        label: 'Notifications',
+        description: 'Send notifications to students',
+        actions: [
+          { key: 'notifications.view', label: 'View Notifications', description: 'View sent notification history' },
+          { key: 'notifications.send', label: 'Send Notifications', description: 'Send individual and bulk notifications' },
+        ],
+      },
+    ],
+  },
+  {
+    group: 'Administration',
+    modules: [
+      {
+        key: 'departments',
+        label: 'Departments',
+        description: 'Manage college departments',
+        actions: [
+          { key: 'departments.view', label: 'View Departments', description: 'View department list and details' },
+          { key: 'departments.manage', label: 'Manage Departments', description: 'Create, update, and toggle department status' },
+        ],
+      },
+      {
+        key: 'users',
+        label: 'User Management',
+        description: 'Manage college staff user accounts',
+        actions: [
+          { key: 'users.view', label: 'View Users', description: 'View staff user list and details' },
+          { key: 'users.manage', label: 'Manage Users', description: 'Create, update, and deactivate staff accounts' },
+        ],
+      },
+      {
+        key: 'audit',
+        label: 'Audit Trail',
+        description: 'View audit log of all system changes',
+        actions: [
+          { key: 'audit.view', label: 'View Audit Logs', description: 'View audit entries with diffs and filters' },
+        ],
+      },
+      {
+        key: 'policies',
+        label: 'Placement Policies',
+        description: 'Manage placement policy rules',
+        actions: [
+          { key: 'policies.view', label: 'View Policies', description: 'View placement policy list and details' },
+          { key: 'policies.manage', label: 'Manage Policies', description: 'Create, update, toggle, and delete policies' },
+        ],
+      },
+      {
+        key: 'settings',
+        label: 'Settings',
+        description: 'Manage placement settings, company tiers, and verification settings',
+        actions: [
+          { key: 'settings.view', label: 'View Settings', description: 'View placement settings, tiers, and verification config' },
+          { key: 'settings.manage', label: 'Manage Settings', description: 'Update settings, create/edit/delete tiers, update verification config' },
+        ],
+      },
+    ],
+  },
+]);
+
+// ============================================================================
+// DEFAULT ROLE PERMISSION TEMPLATES
+// ============================================================================
+// Used when a new college is created (Phase 6) and for "Reset to Default".
+// Must match exactly the seed data in migration 018.
+// ============================================================================
+const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
+  [ROLES.TPO]: {
+    dept_scoped: false,
+    permissions: [
+      'dashboard.view',
+      'students.view', 'students.create', 'students.update', 'students.approve',
+      'companies.view', 'companies.create', 'companies.update',
+      'jobs.view', 'jobs.create', 'jobs.update', 'jobs.manage_status',
+      'applications.view', 'applications.manage',
+      'round_results.view', 'round_results.manage', 'round_results.process',
+      'placements.view', 'placements.create', 'placements.manage',
+      'self_reports.view', 'self_reports.review',
+      'overrides.view', 'overrides.review',
+      'training.view', 'training.manage', 'training.sessions', 'training.attendance',
+      'verification.view', 'verification.verify',
+      'restrictions.view', 'restrictions.create', 'restrictions.update',
+      'notifications.view', 'notifications.send',
+      'feedback.view', 'feedback.approve',
+      'skills.view', 'skills.manage',
+      'departments.view',
+      'users.view',
+      'audit.view',
+      'policies.view', 'policies.manage',
+      'settings.view',
+    ],
+  },
+  [ROLES.TPC]: {
+    dept_scoped: false,
+    permissions: [
+      'dashboard.view',
+      'students.view',
+      'companies.view',
+      'jobs.view', 'jobs.create', 'jobs.update',
+      'applications.view',
+      'round_results.view', 'round_results.manage',
+      'placements.view',
+      'self_reports.view', 'self_reports.review',
+      'overrides.view', 'overrides.review',
+      'training.view', 'training.manage', 'training.sessions', 'training.attendance',
+      'verification.view', 'verification.verify',
+      'feedback.view',
+      'skills.view',
+      'notifications.view', 'notifications.send',
+      'policies.view',
+    ],
+  },
+  [ROLES.HOD]: {
+    dept_scoped: true,
+    permissions: [
+      'dashboard.view',
+      'students.view', 'students.approve',
+      'companies.view',
+      'jobs.view',
+      'applications.view',
+      'placements.view',
+      'training.view',
+      'verification.view', 'verification.verify',
+      'restrictions.view',
+      'feedback.view',
+      'skills.view',
+      'notifications.view', 'notifications.send',
+    ],
+  },
+  [ROLES.TEACHER]: {
+    dept_scoped: true,
+    permissions: [
+      'dashboard.view',
+      'students.view',
+      'jobs.view',
+      'training.view', 'training.sessions', 'training.attendance',
+      'verification.view', 'verification.verify',
+      'feedback.view',
+      'skills.view',
+    ],
+  },
+});
+
+// ============================================================================
 // AUDIT TRAIL — B23 enums (match CHECK constraints on audit_log table)
 // ============================================================================
 const AUDIT_ACTIONS = Object.freeze({
@@ -1052,6 +1547,13 @@ const AUDIT_RESOURCE_TYPES = Object.freeze({
   COMPANY_TIER: 'company_tier',
   PLACEMENT_SETTING: 'placement_setting',
   JOB_ROUND: 'job_round',
+  SUBSCRIPTION: 'subscription',
+  SELF_REPORT: 'self_report',
+  JOB_CRITERIA: 'job_criteria',
+  ROLE_PERMISSION: 'role_permission',
+  USER_PERMISSION: 'user_permission',
+  DEMO_REQUEST: 'demo_request',
+  CONTACT_INQUIRY: 'contact_inquiry',
 });
 
 // ============================================================================
@@ -1096,6 +1598,13 @@ module.exports = {
   DRIVE_TYPES,
   APPLICATION_STATUSES,
   AUTO_WITHDRAWAL_RULES,
+  SUBSCRIPTION_STATUSES,
+  PAYMENT_METHODS,
   NOTIFICATION_TYPE: STATUS.NOTIFICATION_TYPE,
   RECIPIENT_TYPE: STATUS.RECIPIENT_TYPE,
+  CONFIGURABLE_ROLES,
+  PERMISSIONS,
+  ALL_PERMISSION_KEYS,
+  PERMISSION_MODULES,
+  DEFAULT_ROLE_PERMISSIONS,
 };

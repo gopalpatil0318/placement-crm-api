@@ -66,7 +66,8 @@ async function getAllJobs(req, res) {
     try {
         const { jobs, total, page, limit } = await jobService.getAllJobs(
             req.user.college_id,
-            req.validated
+            req.validated,
+            req.deptScope
         );
 
         return sendPaginated(res, jobs, total, { page, limit }, SUCCESS_MESSAGES.JOBS_RETRIEVED);

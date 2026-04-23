@@ -51,7 +51,22 @@ const addRestrictionSchema = Joi.object({
         .messages({
             'date.format': 'Valid until must be a valid date in ISO format (YYYY-MM-DD)',
         }),
-});
+
+    // CF1: company_id required when restriction_type = 'bar_from_company'
+    company_id: Joi.string()
+        .uuid()
+        .optional()
+        .allow(null)
+        .messages({
+            'string.guid': 'Company ID must be a valid UUID',
+        }),
+})
+    .custom((value, helpers) => {
+        if (value.restriction_type === 'bar_from_company' && !value.company_id) {
+            return helpers.error('any.custom', { message: 'Company ID is required for bar_from_company restriction type' });
+        }
+        return value;
+    });
 
 // ============================================================================
 // LIST ALL RESTRICTIONS (query params) — passout_year required

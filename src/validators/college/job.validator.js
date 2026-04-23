@@ -58,7 +58,7 @@ const criteriaSchema = Joi.object({
         .min(0)
         .max(20)
         .optional()
-        .default(0)
+        .allow(null)
         .messages({
             'number.min': 'Live KTs cannot be negative',
         }),
@@ -103,6 +103,19 @@ const criteriaSchema = Joi.object({
     exclude_already_placed: Joi.boolean()
         .optional()
         .default(false),
+    required_skills: Joi.array()
+        .items(Joi.object({
+            skill_id: Joi.string().uuid().required(),
+        }))
+        .max(50)
+        .optional()
+        .allow(null),
+    min_skill_match_percentage: Joi.number()
+        .integer()
+        .min(0)
+        .max(100)
+        .optional()
+        .allow(null),
 });
 
 const roundSchema = Joi.object({

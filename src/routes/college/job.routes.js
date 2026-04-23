@@ -17,11 +17,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/job.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createJobSchema,
@@ -31,8 +31,8 @@ const {
     jobIdParamSchema,
 } = require('../../validators/college/job.validator');
 
-// All job routes require COLLEGEADMIN, TPO, or TPC
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO, ROLES.TPC), apiLimiter);
+// All job routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -40,24 +40,28 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO, ROLES.TPC), 
 
 router.post(
     '/create_job',
+    requirePermission(PERMISSIONS.JOBS_CREATE),
     validate(createJobSchema),
     asyncHandler(controller.createJob)
 );
 
 router.get(
     '/get_all_jobs',
+    requirePermission(PERMISSIONS.JOBS_VIEW),
     validate(listJobsSchema, 'query'),
     asyncHandler(controller.getAllJobs)
 );
 
 router.get(
     '/get_job/:jobId',
+    requirePermission(PERMISSIONS.JOBS_VIEW),
     validate(jobIdParamSchema, 'params'),
     asyncHandler(controller.getJob)
 );
 
 router.put(
     '/update_job/:jobId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(jobIdParamSchema, 'params'),
     validate(updateJobSchema),
     asyncHandler(controller.updateJob)
@@ -65,6 +69,7 @@ router.put(
 
 router.patch(
     '/update_job_status/:jobId',
+    requirePermission(PERMISSIONS.JOBS_MANAGE_STATUS),
     validate(jobIdParamSchema, 'params'),
     validate(updateJobStatusSchema),
     asyncHandler(controller.updateJobStatus)

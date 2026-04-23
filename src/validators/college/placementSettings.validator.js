@@ -16,6 +16,7 @@ const upsertSettingsSchema = Joi.object({
     exclude_placed_by_default: Joi.boolean().optional().default(true),
     auto_reject_on_round_fail: Joi.boolean().optional().default(true),
     allow_reapply_after_withdrawal: Joi.boolean().optional().default(false),
+    max_active_applications: Joi.number().integer().min(1).max(100).optional().allow(null).default(null),
 }).options({ allowUnknown: false });
 
 const getSettingsSchema = Joi.object({

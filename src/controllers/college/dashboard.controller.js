@@ -18,6 +18,7 @@
  */
 
 const dashboardService = require('../../services/college/dashboard.service');
+const subscriptionService = require('../../services/sysadmin/subscription.service');
 const { sendSuccess } = require('../../utils/responseHelper');
 const { SUCCESS_MESSAGES } = require('../../config/constants');
 
@@ -132,6 +133,17 @@ async function getYearComparison(req, res) {
     return sendSuccess(res, data, SUCCESS_MESSAGES.YEAR_COMPARISON_RETRIEVED);
 }
 
+// ============================================================================
+// SUBSCRIPTION CURRENT — Quota info for college admin dashboard
+// ============================================================================
+
+async function getSubscriptionCurrent(req, res) {
+    const data = await subscriptionService.getCurrentSubscription(
+        req.user.college_id
+    );
+    return sendSuccess(res, data, SUCCESS_MESSAGES.SUBSCRIPTION_RETRIEVED);
+}
+
 module.exports = {
     getOverview,
     getPlacementStats,
@@ -142,4 +154,5 @@ module.exports = {
     getDepartmentWise,
     getCompanyWise,
     getYearComparison,
+    getSubscriptionCurrent,
 };

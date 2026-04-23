@@ -19,6 +19,8 @@ const { query, getClient } = require('../../config/db');
 const logger = require('../../config/logger');
 const { LOG } = require('../../config/constants');
 const { maybeResetApproval } = require('../../utils/approvalResetHelper');
+const { BUCKETS, resolveFileUrls } = require('../../utils/storageHelper');
+const { cleanupOldFile, cleanupRecordFiles } = require('../../utils/fileCleanupHelper');
 
 const MAX_ACHIEVEMENTS = 10;
 
@@ -117,6 +119,12 @@ async function getAllAchievements(studentId, collegeId) {
         [studentId, collegeId]
     );
 
+    // Resolve storage paths to signed download URLs
+    await resolveFileUrls(result.rows, [
+        { field: 'certificate_url', bucket: BUCKETS.PRIVATE },
+        { field: 'proof_url', bucket: BUCKETS.PRIVATE },
+    ]);
+
     return {
         total_achievements: result.rows.length,
         max_achievements: MAX_ACHIEVEMENTS,
@@ -175,6 +183,14 @@ async function updateAchievement(achievementId, studentId, collegeId, data) {
     try {
         await client.query('BEGIN');
 
+        // Fetch old file paths for cleanup after update
+        const oldResult = await client.query(
+            `SELECT certificate_url, proof_url FROM student_achievements
+             WHERE achievement_id = $1 AND student_id = $2 AND college_id = $3 LIMIT 1`,
+            [achievementId, studentId, collegeId]
+        );
+        const oldRow = oldResult.rows[0] || {};
+
         const result = await client.query(
             `UPDATE student_achievements
              SET ${setClauses.join(', ')}
@@ -194,6 +210,14 @@ async function updateAchievement(achievementId, studentId, collegeId, data) {
         await maybeResetApproval(client, studentId, collegeId, 'achievements');
 
         await client.query('COMMIT');
+
+        // Cleanup old files if replaced (fire-and-forget, after COMMIT)
+        if (data.certificate_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.certificate_url, data.certificate_url);
+        }
+        if (data.proof_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldRow.proof_url, data.proof_url);
+        }
 
         logger.info(`${LOG.API_END} Achievement updated`, {
             studentId,
@@ -221,7 +245,7 @@ async function deleteAchievement(achievementId, studentId, collegeId) {
         const result = await client.query(
             `DELETE FROM student_achievements
              WHERE achievement_id = $1 AND student_id = $2 AND college_id = $3
-             RETURNING achievement_id, achievement_title`,
+             RETURNING achievement_id, achievement_title, certificate_url, proof_url`,
             [achievementId, studentId, collegeId]
         );
 
@@ -236,6 +260,9 @@ async function deleteAchievement(achievementId, studentId, collegeId) {
         await maybeResetApproval(client, studentId, collegeId, 'achievements');
 
         await client.query('COMMIT');
+
+        // Cleanup files from storage (fire-and-forget, after COMMIT)
+        cleanupRecordFiles(BUCKETS.PRIVATE, result.rows[0], ['certificate_url', 'proof_url']);
 
         logger.info(`${LOG.API_END} Achievement deleted`, {
             studentId,

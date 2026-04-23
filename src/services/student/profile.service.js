@@ -550,4 +550,5 @@ module.exports = {
     getBasicInfo,
     getFullProfile,
     getProfileCompletion,
+    calculateProfileCompletion,
 };

@@ -15,11 +15,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/eligibleDenial.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     listEligibleNotAppliedSchema,
@@ -28,8 +28,8 @@ const {
     jobIdParamSchema,
 } = require('../../validators/college/eligibleDenial.validator');
 
-// All routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+// All routes require authentication
+router.use(authenticate);
 
 // ============================================================================
 // ROUTES
@@ -37,6 +37,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 
 router.get(
     '/get_eligible_not_applied/:jobId',
+    requirePermission(PERMISSIONS.APPLICATIONS_VIEW),
     validate(jobIdParamSchema, 'params'),
     validate(listEligibleNotAppliedSchema, 'query'),
     asyncHandler(controller.getEligibleNotApplied)
@@ -44,6 +45,7 @@ router.get(
 
 router.post(
     '/notify_eligible_students/:jobId',
+    requirePermission(PERMISSIONS.NOTIFICATIONS_SEND),
     apiLimiter,
     validate(jobIdParamSchema, 'params'),
     validate(notifyEligibleSchema),
@@ -52,6 +54,7 @@ router.post(
 
 router.get(
     '/get_job_denials/:jobId',
+    requirePermission(PERMISSIONS.APPLICATIONS_VIEW),
     validate(jobIdParamSchema, 'params'),
     validate(listDenialsSchema, 'query'),
     asyncHandler(controller.getJobDenials)

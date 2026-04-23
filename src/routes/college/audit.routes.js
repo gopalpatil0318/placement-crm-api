@@ -14,11 +14,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/audit.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     getAuditLogsSchema,
@@ -26,9 +26,9 @@ const {
 } = require('../../validators/college/audit.validator');
 
 // ============================================================================
-// AUTH MIDDLEWARE — Only COLLEGEADMIN can view audit trail
+// AUTH MIDDLEWARE — Requires audit.view permission
 // ============================================================================
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN));
+router.use(authenticate, requirePermission(PERMISSIONS.AUDIT_VIEW));
 
 // ============================================================================
 // ROUTES

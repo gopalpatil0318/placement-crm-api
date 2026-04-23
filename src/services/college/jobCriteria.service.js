@@ -8,21 +8,25 @@
  * ============================================================================
  */
 
-const { query } = require('../../config/db');
+const { query, getClient } = require('../../config/db');
 const { getPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
+const { logAudit, computeAuditDiff } = require('../../utils/auditHelper');
 const {
     LOG,
     ERROR_MESSAGES,
     STATUS,
+    AUDIT_ACTIONS,
+    AUDIT_RESOURCE_TYPES,
 } = require('../../config/constants');
 
-// All criteria columns
+// All criteria columns (on job_eligibility_criteria table)
 const CRITERIA_FIELDS = [
     'min_overall_cgpa', 'max_live_kts',
     'min_tenth_percentage', 'min_twelfth_percentage', 'min_diploma_percentage',
     'allowed_genders', 'allowed_departments', 'allowed_gap_statuses',
-    'min_existing_package', 'max_existing_package', 'exclude_already_placed',
+    'min_existing_package', 'max_existing_package', 'min_skill_match_percentage',
+    'exclude_already_placed',
 ];
 
 // Columns returned by INSERT/UPDATE on job_eligibility_criteria
@@ -31,8 +35,8 @@ const CRITERIA_RETURNING_COLUMNS = [
     'min_overall_cgpa', 'max_live_kts',
     'min_tenth_percentage', 'min_twelfth_percentage', 'min_diploma_percentage',
     'allowed_genders', 'allowed_departments', 'allowed_gap_statuses',
-    'min_existing_package', 'max_existing_package', 'exclude_already_placed',
-    'created_at',
+    'min_existing_package', 'max_existing_package', 'min_skill_match_percentage',
+    'exclude_already_placed', 'created_at',
 ].join(', ');
 
 // ============================================================================
@@ -57,6 +61,62 @@ async function verifyJob(jobId, collegeId) {
     return result.rows[0];
 }
 
+// PostgreSQL error code for FK constraint violation
+const PG_FK_VIOLATION = '23503';
+
+/**
+ * Insert required skills for a job within a transaction client.
+ * Deduplicates skill_ids and uses ON CONFLICT DO NOTHING.
+ * @returns {Array} Array of { skill_id, skill_name, skill_category }
+ */
+async function insertAndFetchSkills(client, jobId, requiredSkills) {
+    if (!requiredSkills || requiredSkills.length === 0) return [];
+
+    const skillIds = [...new Set(requiredSkills.map(s => s.skill_id))];
+    await client.query(
+        `INSERT INTO job_required_skills (job_id, skill_id)
+         SELECT $1, unnest($2::uuid[])
+         ON CONFLICT (job_id, skill_id) DO NOTHING`,
+        [jobId, skillIds]
+    );
+
+    const fetchResult = await client.query(
+        `SELECT jrs.skill_id, sk.skill_name, sk.skill_category
+         FROM job_required_skills jrs
+         JOIN skills sk ON jrs.skill_id = sk.skill_id
+         WHERE jrs.job_id = $1 ORDER BY sk.skill_name ASC`,
+        [jobId]
+    );
+    return fetchResult.rows;
+}
+
+/**
+ * Fetches current required skills for a job.
+ */
+async function fetchJobSkills(queryFn, jobId) {
+    const result = await queryFn(
+        `SELECT jrs.skill_id, sk.skill_name, sk.skill_category
+         FROM job_required_skills jrs
+         JOIN skills sk ON jrs.skill_id = sk.skill_id
+         WHERE jrs.job_id = $1 ORDER BY sk.skill_name ASC`,
+        [jobId]
+    );
+    return result.rows;
+}
+
+/**
+ * Rethrows FK violations on skills as a 400 with a friendly message.
+ */
+function handleSkillFkError(err) {
+    if (err.code === PG_FK_VIOLATION && err.constraint?.includes('skill')) {
+        throw Object.assign(
+            new Error('One or more skill IDs do not exist in the skills catalog'),
+            { status: 400 }
+        );
+    }
+    throw err;
+}
+
 // ============================================================================
 // 1. SET CRITERIA
 // ============================================================================
@@ -70,7 +130,7 @@ async function verifyJob(jobId, collegeId) {
  * @param {Object} data
  * @returns {Object} Created criteria
  */
-async function setCriteria(jobId, collegeId, data) {
+async function setCriteria(jobId, collegeId, data, auditCtx) {
     // 1. Verify job exists
     const job = await verifyJob(jobId, collegeId);
 
@@ -92,18 +152,32 @@ async function setCriteria(jobId, collegeId, data) {
     const fieldsToInsert = CRITERIA_FIELDS.filter(f => data[f] !== undefined);
     const columns = ['job_id', 'passout_years', ...fieldsToInsert];
     const placeholders = columns.map((_, i) => `$${i + 1}`);
-    const values = [jobId, job.passout_years, ...fieldsToInsert.map(f => {
-        // Arrays need to be handled for PostgreSQL
-        if (Array.isArray(data[f])) return data[f];
-        return data[f];
-    })];
+    const values = [jobId, job.passout_years, ...fieldsToInsert.map(f => data[f])];
 
-    const result = await query(
-        `INSERT INTO job_eligibility_criteria (${columns.join(', ')})
-         VALUES (${placeholders.join(', ')})
-         RETURNING ${CRITERIA_RETURNING_COLUMNS}`,
-        values
-    );
+    // Use transaction for criteria + skills atomicity
+    const client = await getClient();
+    let result;
+    let requiredSkills = [];
+
+    try {
+        await client.query('BEGIN');
+
+        result = await client.query(
+            `INSERT INTO job_eligibility_criteria (${columns.join(', ')})
+             VALUES (${placeholders.join(', ')})
+             RETURNING ${CRITERIA_RETURNING_COLUMNS}`,
+            values
+        );
+
+        requiredSkills = await insertAndFetchSkills(client, jobId, data.required_skills);
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        handleSkillFkError(err);
+    } finally {
+        client.release();
+    }
 
     logger.info(`${LOG.AUTH} Eligibility criteria set for job`, {
         criteriaId: result.rows[0].criteria_id,
@@ -113,8 +187,29 @@ async function setCriteria(jobId, collegeId, data) {
         collegeId,
     });
 
+    // Audit trail — criteria creation
+    if (auditCtx) {
+        const auditNewValue = { ...result.rows[0] };
+        if (requiredSkills.length > 0) {
+            auditNewValue.required_skills = requiredSkills;
+        }
+        logAudit(query, {
+            collegeId,
+            userId: auditCtx.userId,
+            userName: auditCtx.userName,
+            userRole: auditCtx.userRole,
+            action: AUDIT_ACTIONS.CREATE,
+            resourceType: AUDIT_RESOURCE_TYPES.JOB_CRITERIA,
+            resourceId: jobId,
+            summary: `Set eligibility criteria for job: ${job.job_title}`,
+            newValue: auditNewValue,
+            ipAddress: auditCtx.ipAddress,
+        });
+    }
+
     return {
         ...result.rows[0],
+        required_skills: requiredSkills,
         job_title: job.job_title,
         company_name: job.company_name,
     };
@@ -132,13 +227,14 @@ async function setCriteria(jobId, collegeId, data) {
  * @param {Object} data
  * @returns {Object} Updated criteria
  */
-async function updateCriteria(jobId, collegeId, data) {
+async function updateCriteria(jobId, collegeId, data, auditCtx) {
     // 1. Verify job exists
     const job = await verifyJob(jobId, collegeId);
 
-    // 2. Check criteria exists
+    // 2. Fetch full old criteria (for audit diff)
     const existing = await query(
-        `SELECT criteria_id FROM job_eligibility_criteria
+        `SELECT ${CRITERIA_RETURNING_COLUMNS}
+         FROM job_eligibility_criteria
          WHERE job_id = $1 LIMIT 1`,
         [jobId]
     );
@@ -150,34 +246,100 @@ async function updateCriteria(jobId, collegeId, data) {
         );
     }
 
-    // 3. Build dynamic UPDATE
-    const fieldsToUpdate = CRITERIA_FIELDS.filter(f => data[f] !== undefined);
+    const oldCriteria = existing.rows[0];
 
-    if (!fieldsToUpdate.length) {
+    // 3. Build dynamic UPDATE for criteria table fields
+    const fieldsToUpdate = CRITERIA_FIELDS.filter(f => data[f] !== undefined);
+    const hasSkillChanges = data.required_skills !== undefined;
+
+    if (!fieldsToUpdate.length && !hasSkillChanges) {
         throw Object.assign(new Error(ERROR_MESSAGES.NO_FIELDS_TO_UPDATE), { status: 400 });
     }
 
-    const setClauses = fieldsToUpdate
-        .map((field, index) => `${field} = $${index + 2}`)
-        .join(', ');
-    const values = [jobId, ...fieldsToUpdate.map(f => data[f])];
+    // Fetch old skills BEFORE any mutations (for audit diff)
+    const oldSkills = await fetchJobSkills(query, jobId);
 
-    const result = await query(
-        `UPDATE job_eligibility_criteria
-         SET ${setClauses}
-         WHERE job_id = $1
-         RETURNING ${CRITERIA_RETURNING_COLUMNS}`,
-        values
-    );
+    // Use transaction for criteria + skills atomicity
+    const client = await getClient();
+    let newCriteria = oldCriteria;
+    let requiredSkills = [];
+
+    try {
+        await client.query('BEGIN');
+
+        if (fieldsToUpdate.length) {
+            const setClauses = fieldsToUpdate
+                .map((field, index) => `${field} = $${index + 2}`)
+                .join(', ');
+            const values = [jobId, ...fieldsToUpdate.map(f => data[f])];
+
+            const result = await client.query(
+                `UPDATE job_eligibility_criteria
+                 SET ${setClauses}
+                 WHERE job_id = $1
+                 RETURNING ${CRITERIA_RETURNING_COLUMNS}`,
+                values
+            );
+            newCriteria = result.rows[0];
+        }
+
+        // 4. Handle required_skills — DELETE existing + re-INSERT
+        if (hasSkillChanges) {
+            await client.query(`DELETE FROM job_required_skills WHERE job_id = $1`, [jobId]);
+            await insertAndFetchSkills(client, jobId, data.required_skills);
+        }
+
+        // Fetch current skills for response
+        requiredSkills = (await client.query(
+            `SELECT jrs.skill_id, sk.skill_name, sk.skill_category
+             FROM job_required_skills jrs
+             JOIN skills sk ON jrs.skill_id = sk.skill_id
+             WHERE jrs.job_id = $1 ORDER BY sk.skill_name ASC`,
+            [jobId]
+        )).rows;
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        handleSkillFkError(err);
+    } finally {
+        client.release();
+    }
 
     logger.info(`${LOG.AUTH} Eligibility criteria updated`, {
         jobId,
         updatedFields: fieldsToUpdate,
+        skillsChanged: hasSkillChanges,
         collegeId,
     });
 
+    // Audit trail — criteria update with diff
+    if (auditCtx) {
+        const auditOld = { ...oldCriteria, required_skills: oldSkills };
+        const auditNew = { ...newCriteria };
+        if (hasSkillChanges) {
+            auditNew.required_skills = requiredSkills;
+        }
+        const diff = computeAuditDiff(auditOld, auditNew);
+        logAudit(query, {
+            collegeId,
+            userId: auditCtx.userId,
+            userName: auditCtx.userName,
+            userRole: auditCtx.userRole,
+            action: AUDIT_ACTIONS.UPDATE,
+            resourceType: AUDIT_RESOURCE_TYPES.JOB_CRITERIA,
+            resourceId: jobId,
+            summary: `Updated eligibility criteria for job: ${job.job_title}`,
+            oldValue: diff.old,
+            newValue: diff.new,
+            metadata: { updatedFields: fieldsToUpdate, skillsChanged: hasSkillChanges },
+            ipAddress: auditCtx.ipAddress,
+        });
+    }
+
     return {
-        ...result.rows[0],
+        ...newCriteria,
+        required_skills: requiredSkills,
         job_title: job.job_title,
         company_name: job.company_name,
     };
@@ -205,6 +367,8 @@ function buildCriteriaConditions(criteria, conditions, params, paramIndex) {
         { field: 'min_tenth_percentage', sql: col => `COALESCE(acad.tenth_percentage, 0) >= $${col}` },
         { field: 'min_twelfth_percentage', sql: col => `(acad.twelfth_or_diploma != '12th' OR COALESCE(acad.twelfth_percentage, 0) >= $${col})` },
         { field: 'min_diploma_percentage', sql: col => `(acad.twelfth_or_diploma != 'Diploma' OR COALESCE(acad.diploma_percentage, 0) >= $${col})` },
+        { field: 'min_existing_package', sql: col => `COALESCE((SELECT MAX(pr.fulltime_package) FROM placement_results pr WHERE pr.student_id = s.student_id AND pr.placement_status IN ('accepted','joined') AND pr.fulltime_package IS NOT NULL), 0) >= $${col}` },
+        { field: 'max_existing_package', sql: col => `COALESCE((SELECT MAX(pr.fulltime_package) FROM placement_results pr WHERE pr.student_id = s.student_id AND pr.placement_status IN ('accepted','joined') AND pr.fulltime_package IS NOT NULL), 0) <= $${col}` },
     ];
 
     let idx = paramIndex;
@@ -231,13 +395,13 @@ function buildCriteriaConditions(criteria, conditions, params, paramIndex) {
         }
     }
 
-    // Exclude already placed
+    // Exclude already placed — query placement_results (consistent with student-side evaluateEligibility)
     if (criteria.exclude_already_placed === true) {
         conditions.push(
             `NOT EXISTS (
-                SELECT 1 FROM student_applications sa
-                WHERE sa.student_id = s.student_id
-                  AND sa.application_status = 'selected'
+                SELECT 1 FROM placement_results pr
+                WHERE pr.student_id = s.student_id
+                  AND pr.placement_status IN ('accepted', 'joined')
             )`
         );
     }
@@ -307,6 +471,17 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
 
     const criteria = criteriaResult.rows[0] || null;
 
+    // Fetch required skills for this job
+    const requiredSkillsResult = await query(
+        `SELECT jrs.skill_id, sk.skill_name, sk.skill_category
+         FROM job_required_skills jrs
+         JOIN skills sk ON jrs.skill_id = sk.skill_id
+         WHERE jrs.job_id = $1 ORDER BY sk.skill_name ASC`,
+        [jobId]
+    );
+    const requiredSkills = requiredSkillsResult.rows;
+    const hasSkillCriteria = requiredSkills.length > 0 && criteria?.min_skill_match_percentage != null;
+
     const { page, limit, offset } = getPagination(filters);
 
     // 3. Build dynamic eligibility query
@@ -321,6 +496,22 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
 
     // 4. Add criteria-based conditions
     paramIndex = buildCriteriaConditions(criteria, conditions, params, paramIndex);
+
+    // 4b. Add skill match condition if min_skill_match_percentage is set
+    if (hasSkillCriteria) {
+        conditions.push(
+            `(SELECT CASE WHEN (SELECT COUNT(*) FROM job_required_skills WHERE job_id = $${paramIndex}) = 0 THEN 100
+                ELSE ROUND(
+                    (SELECT COUNT(*) FROM job_required_skills jrs2
+                     JOIN student_skills ss2 ON jrs2.skill_id = ss2.skill_id AND ss2.student_id = s.student_id
+                     WHERE jrs2.job_id = $${paramIndex})::numeric * 100
+                    / GREATEST((SELECT COUNT(*) FROM job_required_skills WHERE job_id = $${paramIndex}), 1), 0
+                )::integer
+             END) >= $${paramIndex + 1}`
+        );
+        params.push(jobId, criteria.min_skill_match_percentage);
+        paramIndex += 2;
+    }
 
     // 5. Additional query-level filters (from frontend)
     paramIndex = applyQueryFilters(filters, conditions, params, paramIndex);
@@ -373,6 +564,29 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
     const eligibleCount = Number.parseInt(countResult.rows[0].total, 10);
     const totalStudents = Number.parseInt(totalStudentsResult.rows[0].total, 10);
 
+    // Post-process: compute skill_match_percentage per student if skill criteria active
+    let students = studentsResult.rows;
+    if (hasSkillCriteria && students.length > 0) {
+        const studentIds = students.map(s => s.student_id);
+        const skillMatchResult = await query(
+            `SELECT ss.student_id,
+                    COUNT(DISTINCT ss.skill_id) AS matched_count
+             FROM student_skills ss
+             JOIN job_required_skills jrs ON ss.skill_id = jrs.skill_id AND jrs.job_id = $1
+             WHERE ss.student_id = ANY($2)
+             GROUP BY ss.student_id`,
+            [jobId, studentIds]
+        );
+        const matchMap = new Map(skillMatchResult.rows.map(r => [r.student_id, Number.parseInt(r.matched_count, 10)]));
+        const totalRequired = requiredSkills.length;
+        students = students.map(s => ({
+            ...s,
+            skill_match_percentage: totalRequired > 0
+                ? Math.round(((matchMap.get(s.student_id) || 0) / totalRequired) * 100)
+                : 100,
+        }));
+    }
+
     return {
         job: {
             job_id: job.job_id,
@@ -380,16 +594,45 @@ async function getEligibleStudents(jobId, collegeId, filters = {}) {
             company_name: job.company_name,
             passout_years: job.passout_years,
         },
-        criteria,
+        criteria: criteria ? { ...criteria, required_skills: requiredSkills } : null,
         eligible_count: eligibleCount,
         total_students: totalStudents,
         eligibility_percentage: totalStudents > 0
             ? Math.round((eligibleCount / totalStudents) * 100)
             : 0,
-        students: studentsResult.rows,
+        students,
         page,
         limit,
     };
+}
+
+// ============================================================================
+// 4. GET CRITERIA CHANGE HISTORY
+// ============================================================================
+
+/**
+ * Retrieve audit trail for a job's eligibility criteria changes.
+ *
+ * @param {string} jobId
+ * @param {string} collegeId
+ * @returns {Array} History entries
+ */
+async function getCriteriaHistory(jobId, collegeId) {
+    // Verify job belongs to college
+    await verifyJob(jobId, collegeId);
+
+    const result = await query(
+        `SELECT user_name, user_role, action, old_value, new_value, summary, created_at
+         FROM audit_log
+         WHERE resource_type = 'job_criteria'
+           AND resource_id = $1
+           AND college_id = $2
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [jobId, collegeId]
+    );
+
+    return result.rows;
 }
 
 // ============================================================================
@@ -400,4 +643,5 @@ module.exports = {
     setCriteria,
     updateCriteria,
     getEligibleStudents,
+    getCriteriaHistory,
 };

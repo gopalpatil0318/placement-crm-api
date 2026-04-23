@@ -101,21 +101,19 @@ const addAchievementSchema = Joi.object({
         }),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 
     proof_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Proof URL must be a valid URL',
+            'string.max': 'Proof path cannot exceed 500 characters',
         }),
 
     is_featured: Joi.boolean()
@@ -219,21 +217,19 @@ const updateAchievementSchema = Joi.object({
         }),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Certificate URL must be a valid URL',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 
     proof_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Proof URL must be a valid URL',
+            'string.max': 'Proof path cannot exceed 500 characters',
         }),
 
     is_featured: Joi.boolean()

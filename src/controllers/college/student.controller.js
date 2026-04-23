@@ -80,7 +80,8 @@ async function bulkRegisterStudents(req, res) {
 async function getAllStudents(req, res) {
     const { students, total, page, limit } = await studentService.getAllStudents(
         req.user.college_id,
-        req.validated
+        req.validated,
+        req.deptScope
     );
 
     return sendPaginated(res, students, total, { page, limit }, SUCCESS_MESSAGES.STUDENTS_RETRIEVED);
@@ -93,7 +94,8 @@ async function getAllStudents(req, res) {
 async function getStudent(req, res) {
     const result = await studentService.getStudentById(
         req.params.studentId,
-        req.user.college_id
+        req.user.college_id,
+        req.deptScope
     );
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_RETRIEVED);
@@ -109,7 +111,8 @@ async function getStudentFullProfile(req, res) {
     const result = await studentService.getStudentFullProfile(
         req.params.studentId,
         req.user.college_id,
-        review
+        review,
+        req.deptScope
     );
 
     return sendSuccess(res, result, SUCCESS_MESSAGES.STUDENT_PROFILE_RETRIEVED);
@@ -123,7 +126,8 @@ async function updateStudent(req, res) {
     const result = await studentService.updateStudent(
         req.params.studentId,
         req.user.college_id,
-        req.validated
+        req.validated,
+        req.deptScope
     );
 
     logAudit(query, {
@@ -153,7 +157,8 @@ async function toggleStudentStatus(req, res) {
     const result = await studentService.toggleStudentStatus(
         req.params.studentId,
         req.user.college_id,
-        student_status
+        student_status,
+        req.deptScope
     );
 
     logAudit(query, {
@@ -186,7 +191,8 @@ async function approveStudentProfile(req, res) {
         req.user.college_id,
         req.user.id,
         action,
-        rejection_reason
+        rejection_reason,
+        req.deptScope
     );
 
     logAudit(query, {

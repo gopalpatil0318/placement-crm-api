@@ -23,11 +23,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/dashboard.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     passoutYearSchema,
@@ -36,8 +36,8 @@ const {
     yearComparisonSchema,
 } = require('../../validators/college/dashboard.validator');
 
-// All routes: authenticate + college admin/TPO + rate limit
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All routes: authenticate + dashboard permission + rate limit
+router.use(authenticate, requirePermission(PERMISSIONS.DASHBOARD_VIEW), apiLimiter);
 
 // #105a — Overview (on login)
 router.get('/dashboard_overview',
@@ -91,6 +91,11 @@ router.get('/dashboard_company_wise',
 router.get('/dashboard_year_comparison',
     validate(yearComparisonSchema, 'query'),
     asyncHandler(controller.getYearComparison)
+);
+
+// Subscription — Current subscription + quota info (E12)
+router.get('/subscription/current',
+    asyncHandler(controller.getSubscriptionCurrent)
 );
 
 module.exports = router;

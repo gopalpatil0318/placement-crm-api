@@ -17,12 +17,14 @@ const { query, getClient } = require('../../config/db');
 const chunkedQuery = require('../../utils/chunkedQuery');
 const { hashPassword } = require('../../utils/passwordHelper');
 const { getPagination } = require('../../utils/pagination');
+const { enforceRegistrationQuota, enforceRegistrationQuotaBulk } = require('../../utils/quotaHelper');
 const logger = require('../../config/logger');
 const {
     LOG,
     ERROR_MESSAGES,
     STATUS,
 } = require('../../config/constants');
+const { buildDeptFilter, assertInScope } = require('../../utils/deptScopeHelper');
 
 // ============================================================================
 // HELPER — Resolve dept_name → dept_id (college-scoped)
@@ -110,13 +112,22 @@ async function registerStudent(data, collegeId) {
         );
     }
 
-    // 3. Hash password
+    // 3. Quota + passout year enforcement (E12)
+    // Hash password before transaction to keep lock duration minimal
     const hashedPassword = await hashPassword(student_password);
 
-    // 4. Insert student (handle UNIQUE constraint race condition)
+    // 4. Transactional quota check + INSERT to prevent TOCTOU race condition.
+    //    FOR UPDATE on subscription row serializes concurrent registrations.
+    const client = await getClient();
     let result;
     try {
-        result = await query(
+        await client.query('BEGIN');
+
+        // Quota check with row lock (within transaction)
+        await enforceRegistrationQuota(collegeId, student_passout_year, client);
+
+        // 5. Insert student (handle UNIQUE constraint race condition)
+        result = await client.query(
             `INSERT INTO students
                (college_id, first_name, middle_name, last_name, student_email, student_password,
                 dept_id, student_passout_year, student_status)
@@ -130,7 +141,10 @@ async function registerStudent(data, collegeId) {
                 STATUS.STUDENT.ACTIVE,
             ]
         );
+
+        await client.query('COMMIT');
     } catch (err) {
+        await client.query('ROLLBACK');
         // Handle concurrent duplicate email (UNIQUE constraint violation)
         if (err.code === '23505') {
             throw Object.assign(
@@ -139,6 +153,8 @@ async function registerStudent(data, collegeId) {
             );
         }
         throw err;
+    } finally {
+        client.release();
     }
 
     const student = result.rows[0];
@@ -307,6 +323,10 @@ async function bulkRegisterStudents(students, collegeId) {
     );
     const existingEmails = new Set(existingEmailsResult.rows.map((r) => r.email));
 
+    // Quota + passout year pre-check (without lock — fast fail for obvious violations)
+    // Actual atomic check happens inside the transaction below
+    const uniquePassoutYears = [...new Set(students.map((s) => s.student_passout_year))];
+
     // Phase 1: Pre-validate all rows and collect valid students
     const validStudents = [];
     for (let i = 0; i < students.length; i++) {
@@ -318,10 +338,14 @@ async function bulkRegisterStudents(students, collegeId) {
     const hashedPasswords = await hashPasswordsBatch(validStudents);
 
     // Phase 3: Insert using a single connection + transaction with savepoints
+    // Quota check is inside the transaction with FOR UPDATE lock to prevent TOCTOU
     if (validStudents.length > 0) {
         const client = await getClient();
         try {
             await client.query('BEGIN');
+
+            // Atomic quota enforcement with row lock
+            await enforceRegistrationQuotaBulk(collegeId, validStudents.length, uniquePassoutYears, client);
 
             for (let i = 0; i < validStudents.length; i++) {
                 await insertBulkRow(client, collegeId, validStudents[i], hashedPasswords[i], `sp_${i}`, results);
@@ -357,12 +381,20 @@ async function bulkRegisterStudents(students, collegeId) {
  * @param {Object} filters
  * @returns {{ students, total, page, limit }}
  */
-async function getAllStudents(collegeId, filters = {}) {
+async function getAllStudents(collegeId, filters = {}, deptScope = null) {
     const { page, limit, offset } = getPagination(filters);
 
     const conditions = ['s.college_id = $1'];
     const params = [collegeId];
     let paramIndex = 2;
+
+    // Department scope enforcement
+    const scopeFilter = buildDeptFilter(deptScope, paramIndex, 's', 'dept_id');
+    if (scopeFilter.clause) {
+        conditions.push(scopeFilter.clause);
+        params.push(...scopeFilter.params);
+        paramIndex = scopeFilter.nextIndex;
+    }
 
     if (filters.student_status) {
         conditions.push(`s.student_status = $${paramIndex}`);
@@ -446,7 +478,7 @@ async function getAllStudents(collegeId, filters = {}) {
  * @param {string} collegeId
  * @returns {Object}
  */
-async function getStudentById(studentId, collegeId) {
+async function getStudentById(studentId, collegeId, deptScope = null) {
     const result = await query(
         `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
                 s.student_email, s.dept_id, s.student_passout_year,
@@ -462,6 +494,8 @@ async function getStudentById(studentId, collegeId) {
     if (!result.rows.length) {
         throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
     }
+
+    assertInScope(deptScope, result.rows[0].dept_id);
 
     return result.rows[0];
 }
@@ -479,7 +513,7 @@ async function getStudentById(studentId, collegeId) {
  * @param {boolean} review - If true, show all items with verification status. If false, only approved items.
  * @returns {Object} Full student profile
  */
-async function getStudentFullProfile(studentId, collegeId, review = false) {
+async function getStudentFullProfile(studentId, collegeId, review = false, deptScope = null) {
     // 1. Basic student info
     const studentResult = await query(
         `SELECT s.student_id, s.first_name, s.middle_name, s.last_name,
@@ -500,6 +534,7 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
     }
 
     const student = studentResult.rows[0];
+    assertInScope(deptScope, student.dept_id);
 
     // Build verification filter — only filter when not in review mode
     const verificationFilter = review ? '' : "AND verification_status = 'approved'";
@@ -727,10 +762,10 @@ async function getStudentFullProfile(studentId, collegeId, review = false) {
  * @param {Object} data
  * @returns {Object} Updated student
  */
-async function updateStudent(studentId, collegeId, data) {
+async function updateStudent(studentId, collegeId, data, deptScope = null) {
     // 1. Verify student exists
     const existing = await query(
-        `SELECT student_id FROM students
+        `SELECT student_id, dept_id FROM students
          WHERE student_id = $1 AND college_id = $2
          LIMIT 1`,
         [studentId, collegeId]
@@ -739,6 +774,8 @@ async function updateStudent(studentId, collegeId, data) {
     if (!existing.rows.length) {
         throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
     }
+
+    assertInScope(deptScope, existing.rows[0].dept_id);
 
     // 2. If dept_name provided, resolve to dept_id
     if (data.dept_name) {
@@ -804,10 +841,10 @@ async function updateStudent(studentId, collegeId, data) {
  * @param {string} newStatus
  * @returns {Object} Updated student
  */
-async function toggleStudentStatus(studentId, collegeId, newStatus) {
+async function toggleStudentStatus(studentId, collegeId, newStatus, deptScope = null) {
     // 1. Verify exists
     const existing = await query(
-        `SELECT student_id, student_status FROM students
+        `SELECT student_id, student_status, dept_id FROM students
          WHERE student_id = $1 AND college_id = $2
          LIMIT 1`,
         [studentId, collegeId]
@@ -816,6 +853,8 @@ async function toggleStudentStatus(studentId, collegeId, newStatus) {
     if (!existing.rows.length) {
         throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
     }
+
+    assertInScope(deptScope, existing.rows[0].dept_id);
 
     // 2. Already same status?
     if (existing.rows[0].student_status === newStatus) {
@@ -859,7 +898,7 @@ async function toggleStudentStatus(studentId, collegeId, newStatus) {
  * @param {string|null} rejectionReason
  * @returns {Object} Updated student
  */
-async function approveStudentProfile(studentId, collegeId, userId, action, rejectionReason) {
+async function approveStudentProfile(studentId, collegeId, userId, action, rejectionReason, deptScope = null) {
     const isApproved = action === STATUS.VERIFICATION.APPROVED;
 
     // Use transaction for all operations (approval + rejection)
@@ -869,7 +908,7 @@ async function approveStudentProfile(studentId, collegeId, userId, action, rejec
 
         // 1. Verify exists with row-level lock to prevent concurrent TPO race
         const existing = await client.query(
-            `SELECT student_id, profile_is_approved, profile_approval_status, profile_complete FROM students
+            `SELECT student_id, profile_is_approved, profile_approval_status, profile_complete, dept_id FROM students
              WHERE student_id = $1 AND college_id = $2
              LIMIT 1 FOR UPDATE`,
             [studentId, collegeId]
@@ -878,6 +917,8 @@ async function approveStudentProfile(studentId, collegeId, userId, action, rejec
         if (!existing.rows.length) {
             throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
         }
+
+        assertInScope(deptScope, existing.rows[0].dept_id);
 
         // 2. If approving, check profile is complete first
         if (isApproved && !existing.rows[0].profile_complete) {

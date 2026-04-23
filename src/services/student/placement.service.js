@@ -22,6 +22,8 @@ const { assertTransition } = require('../../utils/stateMachine');
 const { runAcceptanceCascade, sweepExpiredOffers, reactivatePositions } = require('../../utils/policyHelper');
 const { promoteFromWaitlist } = require('../../utils/waitlistPromoter');
 const { notifyOfferAccepted, notifyExpiringOffers } = require('../../utils/placementNotifier');
+const { BUCKETS, resolveFileUrl } = require('../../utils/storageHelper');
+const { cleanupOldFile } = require('../../utils/fileCleanupHelper');
 
 // ============================================================================
 // COLUMN CONSTANTS
@@ -223,6 +225,14 @@ async function getMyPlacements(studentId, collegeId, filters = {}) {
         position_id: row.position_id ?? null,
         position_name: row.position_name ?? null,
     }));
+
+    // Resolve storage paths to accessible URLs
+    const { resolveFileUrls } = require('../../utils/storageHelper');
+    await resolveFileUrls(placements, [
+        { field: 'offer_letter_url', bucket: BUCKETS.PRIVATE },
+        { field: 'joining_letter_url', bucket: BUCKETS.PRIVATE },
+        { field: 'company_logo', bucket: BUCKETS.PUBLIC },
+    ]);
 
     return { placements, total, page, limit, status_summary: statusSummary };
 }
@@ -438,89 +448,133 @@ async function declinePlacement(placementId, studentId, collegeId, reason) {
 // ============================================================================
 
 async function uploadDocuments(placementId, studentId, collegeId, data) {
-    const placement = await verifyStudentPlacement(placementId, studentId, collegeId);
-
-    // Guard: only allowed for non-terminal statuses
-    const ALLOWED = [STATUS.PLACEMENT.OFFERED, STATUS.PLACEMENT.ACCEPTED, STATUS.PLACEMENT.JOINED];
-    if (!ALLOWED.includes(placement.placement_status)) {
-        throw Object.assign(new Error(ERROR_MESSAGES.DOCUMENT_UPLOAD_NOT_ALLOWED), { status: 400 });
+    // Guard: at least one document must be provided
+    if (data.offer_letter_url === undefined && data.joining_letter_url === undefined) {
+        throw Object.assign(new Error('At least one document URL is required'), { status: 400 });
     }
 
-    // Guard: joining letter only for accepted/joined
-    if (data.joining_letter_url !== undefined) {
-        const JOINING_ALLOWED = [STATUS.PLACEMENT.ACCEPTED, STATUS.PLACEMENT.JOINED];
-        if (!JOINING_ALLOWED.includes(placement.placement_status)) {
-            throw Object.assign(new Error(ERROR_MESSAGES.JOINING_LETTER_NOT_ACCEPTED), { status: 400 });
+    const client = await getClient();
+
+    try {
+        await client.query('BEGIN');
+
+        // Lock the row to prevent concurrent upload races
+        const lockResult = await client.query(
+            `SELECT placement_id, placement_status,
+                    offer_letter_url, joining_letter_url
+             FROM placement_results
+             WHERE placement_id = $1 AND student_id = $2 AND college_id = $3
+             FOR UPDATE`,
+            [placementId, studentId, collegeId]
+        );
+
+        if (!lockResult.rows.length) {
+            throw Object.assign(new Error(ERROR_MESSAGES.PLACEMENT_NOT_FOUND), { status: 404 });
         }
-    }
 
-    // Build dynamic SET clause
-    const setClauses = ['updated_at = NOW()'];
-    const params = [];
-    let idx = 1;
+        const placement = lockResult.rows[0];
 
-    if (data.offer_letter_url !== undefined) {
-        setClauses.push(
-            `offer_letter_url = $${idx++}`,
-            `offer_letter_uploaded_by = $${idx++}`,
-            // Reset verification on re-upload
-            'offer_letter_verified = false',
-            'verified_by = NULL',
-            'verified_at = NULL',
-            'offer_letter_rejection_reason = NULL',
-            'offer_letter_rejected_at = NULL'
+        // Guard: only allowed for non-terminal statuses
+        const ALLOWED = [STATUS.PLACEMENT.OFFERED, STATUS.PLACEMENT.ACCEPTED, STATUS.PLACEMENT.JOINED];
+        if (!ALLOWED.includes(placement.placement_status)) {
+            throw Object.assign(new Error(ERROR_MESSAGES.DOCUMENT_UPLOAD_NOT_ALLOWED), { status: 400 });
+        }
+
+        // Guard: joining letter only for accepted/joined
+        if (data.joining_letter_url !== undefined) {
+            const JOINING_ALLOWED = [STATUS.PLACEMENT.ACCEPTED, STATUS.PLACEMENT.JOINED];
+            if (!JOINING_ALLOWED.includes(placement.placement_status)) {
+                throw Object.assign(new Error(ERROR_MESSAGES.JOINING_LETTER_NOT_ACCEPTED), { status: 400 });
+            }
+        }
+
+        // Capture old file paths for cleanup after commit
+        const oldOfferUrl = placement.offer_letter_url;
+        const oldJoiningUrl = placement.joining_letter_url;
+
+        // Build dynamic SET clause
+        const setClauses = ['updated_at = NOW()'];
+        const params = [];
+        let idx = 1;
+
+        if (data.offer_letter_url !== undefined) {
+            setClauses.push(
+                `offer_letter_url = $${idx++}`,
+                `offer_letter_uploaded_by = $${idx++}`,
+                // Reset verification on re-upload
+                'offer_letter_verified = false',
+                'verified_by = NULL',
+                'verified_at = NULL',
+                'offer_letter_rejection_reason = NULL',
+                'offer_letter_rejected_at = NULL'
+            );
+            params.push(data.offer_letter_url, 'student');
+        }
+
+        if (data.joining_letter_url !== undefined) {
+            setClauses.push(
+                `joining_letter_url = $${idx++}`,
+                `joining_letter_uploaded_by = $${idx++}`,
+                // Reset verification on re-upload
+                'joining_letter_verified = false',
+                'joining_letter_verified_by = NULL',
+                'joining_letter_verified_at = NULL',
+                'joining_letter_rejection_reason = NULL',
+                'joining_letter_rejected_at = NULL'
+            );
+            params.push(data.joining_letter_url, 'student');
+        }
+
+        params.push(placementId);
+
+        const result = await client.query(
+            `UPDATE placement_results
+             SET ${setClauses.join(', ')}
+             WHERE placement_id = $${idx}
+             RETURNING placement_id,
+                       offer_letter_url, offer_letter_verified, offer_letter_uploaded_by,
+                       offer_letter_rejection_reason, offer_letter_rejected_at,
+                       joining_letter_url, joining_letter_verified, joining_letter_uploaded_by,
+                       joining_letter_rejection_reason, joining_letter_rejected_at,
+                       updated_at`,
+            params
         );
-        params.push(data.offer_letter_url, 'student');
+
+        await client.query('COMMIT');
+
+        logger.info(`${LOG.AUTH} Student uploaded placement documents`, {
+            placementId, studentId, collegeId,
+            offer_letter: data.offer_letter_url !== undefined,
+            joining_letter: data.joining_letter_url !== undefined,
+        });
+
+        // Cleanup old files if replaced (fire-and-forget, after commit)
+        if (data.offer_letter_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldOfferUrl, data.offer_letter_url);
+        }
+        if (data.joining_letter_url !== undefined) {
+            cleanupOldFile(BUCKETS.PRIVATE, oldJoiningUrl, data.joining_letter_url);
+        }
+
+        const row = result.rows[0];
+        return {
+            placement_id: row.placement_id,
+            offer_letter_url: row.offer_letter_url ?? null,
+            offer_letter_verified: row.offer_letter_verified,
+            offer_letter_uploaded_by: row.offer_letter_uploaded_by ?? null,
+            offer_letter_rejection_reason: row.offer_letter_rejection_reason ?? null,
+            joining_letter_url: row.joining_letter_url ?? null,
+            joining_letter_verified: row.joining_letter_verified,
+            joining_letter_uploaded_by: row.joining_letter_uploaded_by ?? null,
+            joining_letter_rejection_reason: row.joining_letter_rejection_reason ?? null,
+            updated_at: row.updated_at,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
     }
-
-    if (data.joining_letter_url !== undefined) {
-        setClauses.push(
-            `joining_letter_url = $${idx++}`,
-            `joining_letter_uploaded_by = $${idx++}`,
-            // Reset verification on re-upload
-            'joining_letter_verified = false',
-            'joining_letter_verified_by = NULL',
-            'joining_letter_verified_at = NULL',
-            'joining_letter_rejection_reason = NULL',
-            'joining_letter_rejected_at = NULL'
-        );
-        params.push(data.joining_letter_url, 'student');
-    }
-
-    params.push(placementId);
-
-    const result = await query(
-        `UPDATE placement_results
-         SET ${setClauses.join(', ')}
-         WHERE placement_id = $${idx}
-         RETURNING placement_id,
-                   offer_letter_url, offer_letter_verified, offer_letter_uploaded_by,
-                   offer_letter_rejection_reason, offer_letter_rejected_at,
-                   joining_letter_url, joining_letter_verified, joining_letter_uploaded_by,
-                   joining_letter_rejection_reason, joining_letter_rejected_at,
-                   updated_at`,
-        params
-    );
-
-    logger.info(`${LOG.AUTH} Student uploaded placement documents`, {
-        placementId, studentId, collegeId,
-        offer_letter: data.offer_letter_url !== undefined,
-        joining_letter: data.joining_letter_url !== undefined,
-    });
-
-    const row = result.rows[0];
-    return {
-        placement_id: row.placement_id,
-        offer_letter_url: row.offer_letter_url ?? null,
-        offer_letter_verified: row.offer_letter_verified,
-        offer_letter_uploaded_by: row.offer_letter_uploaded_by ?? null,
-        offer_letter_rejection_reason: row.offer_letter_rejection_reason ?? null,
-        joining_letter_url: row.joining_letter_url ?? null,
-        joining_letter_verified: row.joining_letter_verified,
-        joining_letter_uploaded_by: row.joining_letter_uploaded_by ?? null,
-        joining_letter_rejection_reason: row.joining_letter_rejection_reason ?? null,
-        updated_at: row.updated_at,
-    };
 }
 
 // ============================================================================

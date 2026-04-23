@@ -476,13 +476,11 @@ const updateEnrollmentSchema = Joi.object({
         .optional(),
 
     certificate_url: Joi.string()
-        .uri()
         .max(500)
         .optional()
         .allow(null, '')
         .messages({
-            'string.uri': 'Please provide a valid certificate URL',
-            'string.max': 'Certificate URL cannot exceed 500 characters',
+            'string.max': 'Certificate path cannot exceed 500 characters',
         }),
 
     payment_status: Joi.string()
@@ -520,7 +518,7 @@ const bulkUpdateEnrollmentsSchema = Joi.object({
                 payment_status: Joi.string().valid(...PAYMENT_STATUSES).optional(),
                 amount_paid: Joi.number().min(0).optional(),
                 certificate_issued: Joi.boolean().optional(),
-                certificate_url: Joi.string().uri().max(500).optional().allow(null, ''),
+                certificate_url: Joi.string().max(500).optional().allow(null, ''),
             }).min(2) // enrollment_id + at least 1 field
         )
         .min(1)

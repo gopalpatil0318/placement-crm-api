@@ -17,6 +17,8 @@ const {
     LOG,
     ERROR_MESSAGES,
 } = require('../../config/constants');
+const { BUCKETS, resolveFileUrls } = require('../../utils/storageHelper');
+const { cleanupOldFile } = require('../../utils/fileCleanupHelper');
 
 // Columns that can be inserted/updated by the user
 const FIELDS = [
@@ -202,8 +204,14 @@ async function getAllCompanies(collegeId, filters = {}) {
     ]);
     const total = Number.parseInt(countResult.rows[0].total, 10);
 
+    // Resolve company_logo storage paths to public CDN URLs
+    const companies = companyResult.rows.map(formatCompany);
+    await resolveFileUrls(companies, [
+        { field: 'company_logo', bucket: BUCKETS.PUBLIC },
+    ]);
+
     return {
-        companies: companyResult.rows.map(formatCompany),
+        companies,
         total,
         page,
         limit,
@@ -246,6 +254,11 @@ async function getCompanyById(companyId, collegeId) {
 
     const company = formatCompany(companyResult.rows[0]);
 
+    // Resolve company_logo storage path to public CDN URL
+    await resolveFileUrls([company], [
+        { field: 'company_logo', bucket: BUCKETS.PUBLIC },
+    ]);
+
     return {
         ...company,
         contacts_count: contactsResult.rows.length,
@@ -267,9 +280,9 @@ async function getCompanyById(companyId, collegeId) {
  * @returns {Object} Updated company
  */
 async function updateCompany(companyId, collegeId, data) {
-    // 1. Verify company exists
+    // 1. Verify company exists and get old logo path
     const existing = await query(
-        `SELECT company_id, company_name FROM companies
+        `SELECT company_id, company_name, company_logo FROM companies
          WHERE company_id = $1 AND college_id = $2
          LIMIT 1`,
         [companyId, collegeId]
@@ -321,6 +334,11 @@ async function updateCompany(companyId, collegeId, data) {
         updatedFields: fieldsToUpdate,
         collegeId,
     });
+
+    // Cleanup old logo if replaced (fire-and-forget, after UPDATE)
+    if (data.company_logo !== undefined) {
+        cleanupOldFile(BUCKETS.PUBLIC, existing.rows[0].company_logo, data.company_logo);
+    }
 
     return formatCompany(result.rows[0]);
 }

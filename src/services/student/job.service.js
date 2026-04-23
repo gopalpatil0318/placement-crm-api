@@ -25,7 +25,7 @@ const {
     RECIPIENT_TYPE,
 } = require('../../config/constants');
 const { enforceDeadlines } = require('../../utils/deadlineHelper');
-const { checkApplyPolicy } = require('../../utils/policyHelper');
+const { checkApplyPolicy, checkMaxApplications } = require('../../utils/policyHelper');
 
 // Statuses that allow withdrawal by student
 const WITHDRAWABLE_STATUSES = [
@@ -52,7 +52,7 @@ const APPLICATION_VERIFY_COLUMNS = `a.application_id, a.job_id, a.position_id,
 
 const CRITERIA_SELECT_COLUMNS = `criteria_id, job_id, min_overall_cgpa, max_live_kts,
     min_tenth_percentage, min_twelfth_percentage, min_diploma_percentage,
-    min_existing_package, max_existing_package,
+    min_existing_package, max_existing_package, min_skill_match_percentage,
     allowed_genders, allowed_departments, allowed_gap_statuses,
     exclude_already_placed, created_at`;
 
@@ -128,7 +128,14 @@ async function getStudentProfile(studentId, collegeId) {
                 acad.tenth_percentage, acad.twelfth_or_diploma,
                 acad.twelfth_percentage, acad.diploma_percentage,
                 acad.any_gap_during_education,
-                pi.gender
+                pi.gender,
+                COALESCE((
+                    SELECT MAX(pr.fulltime_package)
+                    FROM placement_results pr
+                    WHERE pr.student_id = s.student_id
+                      AND pr.placement_status IN ('accepted', 'joined')
+                      AND pr.fulltime_package IS NOT NULL
+                ), 0) AS existing_package
          FROM students s
          JOIN departments d ON s.dept_id = d.dept_id
          LEFT JOIN student_academic_information acad ON s.student_id = acad.student_id
@@ -157,9 +164,15 @@ function checkNumericThreshold(studentValue, thresholdValue, label, suffix = '')
     return null;
 }
 
-function checkAcademicCriteria(criteria, student) {
-    const issues = [];
+function checkMaxThreshold(studentValue, thresholdValue, label, suffix = '') {
+    const parsed = Number.parseFloat(studentValue) || 0;
+    if (parsed > Number.parseFloat(thresholdValue)) {
+        return `Maximum ${label}: ${thresholdValue}${suffix}, yours: ${parsed}${suffix}`;
+    }
+    return null;
+}
 
+function collectAcademicChecks(criteria, student) {
     const checks = [
         { threshold: criteria.min_overall_cgpa, value: student.overall_cgpa, label: 'CGPA required', suffix: '' },
         { threshold: criteria.min_tenth_percentage, value: student.tenth_percentage, label: '10th percentage', suffix: '%' },
@@ -173,36 +186,51 @@ function checkAcademicCriteria(criteria, student) {
         checks.push({ threshold: criteria.min_diploma_percentage, value: student.diploma_percentage, label: 'diploma percentage', suffix: '%' });
     }
 
+    if (criteria.min_existing_package != null) {
+        checks.push({ threshold: criteria.min_existing_package, value: student.existing_package, label: 'existing package required', suffix: ' LPA' });
+    }
+
+    return checks;
+}
+
+function checkAcademicCriteria(criteria, student) {
+    const issues = [];
+    const checks = collectAcademicChecks(criteria, student);
+
     for (const { threshold, value, label, suffix } of checks) {
         if (threshold == null) continue;
         const issue = checkNumericThreshold(value, threshold, label, suffix);
         if (issue) issues.push(issue);
     }
 
+    // Max thresholds
     if (criteria.max_live_kts != null) {
-        const studentKTs = student.total_live_kts || 0;
-        if (studentKTs > criteria.max_live_kts) {
-            issues.push(`Maximum live backlogs allowed: ${criteria.max_live_kts}, yours: ${studentKTs}`);
-        }
+        const issue = checkMaxThreshold(student.total_live_kts, criteria.max_live_kts, 'live backlogs allowed');
+        if (issue) issues.push(issue);
+    }
+
+    if (criteria.max_existing_package != null) {
+        const issue = checkMaxThreshold(student.existing_package, criteria.max_existing_package, 'existing package allowed', ' LPA');
+        if (issue) issues.push(issue);
     }
 
     return issues;
 }
 
+function checkArrayCriterion(allowed, studentValue, label) {
+    if (!Array.isArray(allowed) || allowed.length === 0) return null;
+    if (studentValue && allowed.includes(studentValue)) return null;
+    return `Allowed ${label}: ${allowed.join(', ')}. Your ${label.toLowerCase()}: ${studentValue || 'Not set'}`;
+}
+
 function checkDemographicCriteria(criteria, student) {
     const issues = [];
 
-    if (criteria.allowed_genders && criteria.allowed_genders.length > 0) {
-        if (!student.gender || !criteria.allowed_genders.includes(student.gender)) {
-            issues.push(`Allowed genders: ${criteria.allowed_genders.join(', ')}. Your gender: ${student.gender || 'Not set'}`);
-        }
-    }
+    const genderIssue = checkArrayCriterion(criteria.allowed_genders, student.gender, 'genders');
+    if (genderIssue) issues.push(genderIssue);
 
-    if (criteria.allowed_departments && criteria.allowed_departments.length > 0) {
-        if (!criteria.allowed_departments.includes(student.dept_name)) {
-            issues.push(`Allowed departments: ${criteria.allowed_departments.join(', ')}. Your department: ${student.dept_name}`);
-        }
-    }
+    const deptIssue = checkArrayCriterion(criteria.allowed_departments, student.dept_name, 'departments');
+    if (deptIssue) issues.push(deptIssue);
 
     if (criteria.allowed_gap_statuses && criteria.allowed_gap_statuses.length > 0) {
         const gapStatus = student.any_gap_during_education ? 'gap' : 'no_gap';
@@ -216,6 +244,47 @@ function checkDemographicCriteria(criteria, student) {
     return issues;
 }
 
+/**
+ * Check skill-based eligibility for a job.
+ * Queries job_required_skills LEFT JOIN student_skills, calculates match %.
+ *
+ * @returns {{ skill_match_percentage, skill_details, issue }}
+ */
+async function checkSkillCriteria(jobId, studentId, minMatchPct) {
+    const result = await query(
+        `SELECT sk.skill_id, sk.skill_name, sk.skill_category,
+                CASE WHEN ss.student_skill_id IS NOT NULL THEN true ELSE false END AS matched
+         FROM job_required_skills jrs
+         JOIN skills sk ON jrs.skill_id = sk.skill_id
+         LEFT JOIN student_skills ss ON ss.skill_id = jrs.skill_id AND ss.student_id = $2
+         WHERE jrs.job_id = $1
+         ORDER BY sk.skill_name ASC`,
+        [jobId, studentId]
+    );
+
+    const totalRequired = result.rows.length;
+    if (totalRequired === 0) {
+        return { skill_match_percentage: 100, skill_details: [], issue: null };
+    }
+
+    const matchedCount = result.rows.filter(r => r.matched === true || r.matched === 't').length;
+    const matchPct = Math.round((matchedCount / totalRequired) * 100);
+
+    const issue = matchPct < minMatchPct
+        ? `Minimum skill match required: ${minMatchPct}%, yours: ${matchPct}% (${matchedCount}/${totalRequired} skills)`
+        : null;
+
+    return {
+        skill_match_percentage: matchPct,
+        skill_details: result.rows.map(r => ({
+            skill_name: r.skill_name,
+            skill_category: r.skill_category,
+            matched: r.matched === true || r.matched === 't',
+        })),
+        issue,
+    };
+}
+
 function formatCriteriaResponse(criteria) {
     return {
         min_overall_cgpa: criteria.min_overall_cgpa == null ? null : Number.parseFloat(criteria.min_overall_cgpa),
@@ -223,6 +292,9 @@ function formatCriteriaResponse(criteria) {
         min_tenth_percentage: criteria.min_tenth_percentage == null ? null : Number.parseFloat(criteria.min_tenth_percentage),
         min_twelfth_percentage: criteria.min_twelfth_percentage == null ? null : Number.parseFloat(criteria.min_twelfth_percentage),
         min_diploma_percentage: criteria.min_diploma_percentage == null ? null : Number.parseFloat(criteria.min_diploma_percentage),
+        min_existing_package: criteria.min_existing_package == null ? null : Number.parseFloat(criteria.min_existing_package),
+        max_existing_package: criteria.max_existing_package == null ? null : Number.parseFloat(criteria.max_existing_package),
+        min_skill_match_percentage: criteria.min_skill_match_percentage ?? null,
         allowed_genders: criteria.allowed_genders ?? null,
         allowed_departments: criteria.allowed_departments ?? null,
         allowed_gap_statuses: criteria.allowed_gap_statuses ?? null,
@@ -241,13 +313,22 @@ async function evaluateEligibility(jobId, student) {
     const criteria = criteriaResult.rows[0] || null;
 
     if (!criteria) {
-        return { is_eligible: true, issues: [], criteria: null };
+        return { is_eligible: true, issues: [], criteria: null, skill_match: null };
     }
 
     const issues = [
         ...checkAcademicCriteria(criteria, student),
         ...checkDemographicCriteria(criteria, student),
     ];
+
+    // Skill-based eligibility check
+    let skillMatch = null;
+    if (criteria.min_skill_match_percentage != null) {
+        skillMatch = await checkSkillCriteria(jobId, student.student_id, criteria.min_skill_match_percentage);
+        if (skillMatch.issue) {
+            issues.push(skillMatch.issue);
+        }
+    }
 
     // Exclude already placed
     if (criteria.exclude_already_placed === true) {
@@ -267,12 +348,29 @@ async function evaluateEligibility(jobId, student) {
         is_eligible: issues.length === 0,
         issues,
         criteria: formatCriteriaResponse(criteria),
+        skill_match: skillMatch ? {
+            skill_match_percentage: skillMatch.skill_match_percentage,
+            skill_details: skillMatch.skill_details,
+        } : null,
     };
 }
 
 // ============================================================================
 // HELPER — Check pre-application blockers (restrictions, profile, etc.)
 // ============================================================================
+
+/**
+ * B18: Push ALREADY_APPLIED blocker unless the app was withdrawn and reapply is allowed.
+ */
+function pushExistingAppBlocker(blockers, existingApp, reapplySettings) {
+    if (existingApp.rows.length === 0) return;
+    const appStatus = existingApp.rows[0].application_status;
+    const isWithdrawn = appStatus === STATUS.APPLICATION.WITHDRAWN || appStatus === STATUS.APPLICATION.AUTO_WITHDRAWN;
+    const allowReapply = reapplySettings.rows[0]?.allow_reapply_after_withdrawal === true;
+    if (!(isWithdrawn && allowReapply)) {
+        blockers.push(ERROR_MESSAGES.ALREADY_APPLIED);
+    }
+}
 
 async function checkApplicationBlockers(studentId, student, job) {
     const blockers = [];
@@ -310,7 +408,7 @@ async function checkApplicationBlockers(studentId, student, job) {
 
     // 6-8. Run independent DB checks in parallel
     // B18: Check placement_settings for allow_reapply_after_withdrawal
-    const [existingApp, existingDenial, restrictions, reapplySettings] = await Promise.all([
+    const [existingApp, existingDenial, restrictions, companyRestriction, reapplySettings] = await Promise.all([
         query(
             `SELECT application_status FROM student_applications
              WHERE student_id = $1 AND job_id = $2 LIMIT 1`,
@@ -329,6 +427,16 @@ async function checkApplicationBlockers(studentId, student, job) {
              LIMIT 1`,
             [studentId]
         ),
+        // CF1: Check bar_from_company for the specific company
+        query(
+            `SELECT restriction_type, reason FROM student_restrictions
+             WHERE student_id = $1 AND is_active = true
+               AND restriction_type = 'bar_from_company'
+               AND company_id = $2
+               AND (valid_until IS NULL OR valid_until >= CURRENT_DATE)
+             LIMIT 1`,
+            [studentId, job.company_id]
+        ),
         query(
             `SELECT allow_reapply_after_withdrawal FROM placement_settings
              WHERE college_id = $1 AND passout_year = $2 LIMIT 1`,
@@ -336,56 +444,58 @@ async function checkApplicationBlockers(studentId, student, job) {
         ),
     ]);
 
-    if (existingApp.rows.length > 0) {
-        const appStatus = existingApp.rows[0].application_status;
-        const isWithdrawn = appStatus === STATUS.APPLICATION.WITHDRAWN || appStatus === STATUS.APPLICATION.AUTO_WITHDRAWN;
-        const reapplyRow = reapplySettings.rows[0] || { allow_reapply_after_withdrawal: false };
-        const allowReapply = reapplyRow.allow_reapply_after_withdrawal === true;
+    // Check existing application (with B18 reapply-after-withdrawal logic)
+    pushExistingAppBlocker(blockers, existingApp, reapplySettings);
 
-        // B18: Skip ALREADY_APPLIED blocker if the app was withdrawn and reapply is allowed
-        if (!(isWithdrawn && allowReapply)) {
-            blockers.push(ERROR_MESSAGES.ALREADY_APPLIED);
-        }
-    }
-    if (existingDenial.rows.length > 0) {
-        blockers.push(ERROR_MESSAGES.ALREADY_OPTED_OUT);
-    }
-    if (restrictions.rows.length > 0) {
-        blockers.push(ERROR_MESSAGES.STUDENT_RESTRICTED);
-    }
+    // Simple row-exists checks
+    if (existingDenial.rows.length > 0) blockers.push(ERROR_MESSAGES.ALREADY_OPTED_OUT);
+    if (restrictions.rows.length > 0) blockers.push(ERROR_MESSAGES.STUDENT_RESTRICTED);
+    if (companyRestriction.rows.length > 0) blockers.push(ERROR_MESSAGES.STUDENT_RESTRICTED_COMPANY);
 
     // 9. Tier-based placement policy check
     const policyResult = await checkApplyPolicy(studentId, student.college_id, job.job_id, student.student_passout_year);
-    if (!policyResult.allowed) {
-        blockers.push(policyResult.reason);
-    }
+    if (!policyResult.allowed) blockers.push(policyResult.reason);
+
+    // 10. CF1: Max active applications limit
+    const maxAppsResult = await checkMaxApplications(studentId, student.college_id, student.student_passout_year);
+    if (!maxAppsResult.allowed) blockers.push(maxAppsResult.reason);
 
     return blockers;
+}
+
+/**
+ * Evaluate inline eligibility for a single job row (used in getAvailableJobs list).
+ */
+function evaluateInlineEligibility(row, studentProfile, isPlaced, skillMatchMap) {
+    if (row.criteria_id == null) return { is_eligible: true, issues: [], skill_match_percentage: null };
+
+    const issues = [
+        ...checkAcademicCriteria(row, studentProfile),
+        ...checkDemographicCriteria(row, studentProfile),
+    ];
+    if (row.exclude_already_placed && isPlaced) {
+        issues.push('Already placed');
+    }
+    let skill_match_percentage = null;
+    if (row.min_skill_match_percentage != null) {
+        const matchPct = skillMatchMap.get(row.job_id) ?? 0;
+        skill_match_percentage = matchPct;
+        if (matchPct < row.min_skill_match_percentage) {
+            issues.push(`Skill match: ${matchPct}% (required: ${row.min_skill_match_percentage}%)`);
+        }
+    }
+    return { is_eligible: issues.length === 0, issues: issues.slice(0, 3), skill_match_percentage };
 }
 
 // ============================================================================
 // 1. GET AVAILABLE JOBS (published, within deadline, matching passout year)
 // ============================================================================
 
-async function getAvailableJobs(studentId, collegeId, filters = {}) {
-    // Auto-close applications past deadline (check-on-access)
-    await enforceDeadlines(collegeId);
-
-    // Get student's passout year
-    const studentResult = await query(
-        `SELECT student_passout_year FROM students
-         WHERE student_id = $1 AND college_id = $2 LIMIT 1`,
-        [studentId, collegeId]
-    );
-
-    if (!studentResult.rows.length) {
-        throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
-    }
-
-    const passoutYear = studentResult.rows[0].student_passout_year;
-    const { page, limit, offset } = getPagination(filters);
-
-    // Build WHERE conditions
+/**
+ * Build WHERE conditions for available jobs query from filters.
+ * @returns {{ conditions: string[], params: any[], paramIndex: number }}
+ */
+function buildJobFilterConditions(collegeId, passoutYear, filters) {
     const conditions = [
         'j.college_id = $1',
         'j.job_status = $2',
@@ -421,7 +531,64 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         paramIndex++;
     }
 
+    return { conditions, params, paramIndex, eligibleOnly: filters.eligible_only };
+}
+
+/**
+ * Batch-compute skill match percentages for jobs with min_skill_match_percentage.
+ * @returns {Map<string, number>} jobId → match percentage
+ */
+async function batchSkillMatch(studentId, jobRows) {
+    const skillJobs = jobRows.filter(r => r.min_skill_match_percentage != null);
+    const skillMatchMap = new Map();
+    if (skillJobs.length === 0) return skillMatchMap;
+
+    const skillJobIds = skillJobs.map(r => r.job_id);
+    const skillResult = await query(
+        `SELECT jrs.job_id,
+                COUNT(DISTINCT jrs.skill_id) AS total_required,
+                COUNT(DISTINCT ss.skill_id) AS matched_count
+         FROM job_required_skills jrs
+         LEFT JOIN student_skills ss ON ss.skill_id = jrs.skill_id AND ss.student_id = $1
+         WHERE jrs.job_id = ANY($2)
+         GROUP BY jrs.job_id`,
+        [studentId, skillJobIds]
+    );
+    for (const row of skillResult.rows) {
+        const total = Number.parseInt(row.total_required, 10);
+        const matched = Number.parseInt(row.matched_count, 10);
+        skillMatchMap.set(row.job_id, total > 0 ? Math.round((matched / total) * 100) : 100);
+    }
+    // Jobs with min_skill_match_percentage but zero required skills → 100% match
+    for (const sj of skillJobs) {
+        if (!skillMatchMap.has(sj.job_id)) {
+            skillMatchMap.set(sj.job_id, 100);
+        }
+    }
+    return skillMatchMap;
+}
+
+async function getAvailableJobs(studentId, collegeId, filters = {}) {
+    // Auto-close applications past deadline (check-on-access)
+    await enforceDeadlines(collegeId);
+
+    // Get student's passout year
+    const studentResult = await query(
+        `SELECT student_passout_year FROM students
+         WHERE student_id = $1 AND college_id = $2 LIMIT 1`,
+        [studentId, collegeId]
+    );
+
+    if (!studentResult.rows.length) {
+        throw Object.assign(new Error(ERROR_MESSAGES.STUDENT_NOT_FOUND), { status: 404 });
+    }
+
+    const passoutYear = studentResult.rows[0].student_passout_year;
+    const { page, limit, offset } = getPagination(filters);
+
+    const { conditions, params, paramIndex, eligibleOnly } = buildJobFilterConditions(collegeId, passoutYear, filters);
     const whereClause = conditions.join(' AND ');
+    const needsEligibilityFilter = eligibleOnly != null;
 
     // Sortable columns whitelist
     const SORTABLE = {
@@ -434,16 +601,27 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
     const sortCol = SORTABLE[filters.sort_by] || SORTABLE.application_deadline;
     const sortOrd = filters.sort_order === 'desc' ? 'DESC' : 'ASC';
 
+    // When eligibility filtering is on, fetch all rows (no LIMIT/OFFSET) because
+    // eligibility is computed in JS. We paginate the filtered result below.
+    const paginationClause = needsEligibilityFilter
+        ? ''
+        : `LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}`;
+    const jobQueryParams = needsEligibilityFilter
+        ? [...params, studentId]
+        : [...params, studentId, limit, offset];
+
     // Count + fetch in parallel (independent queries)
     // Also fetch student profile for eligibility evaluation
     const [countResult, jobsResult, studentProfile] = await Promise.all([
-        query(
-            `SELECT COUNT(*) AS total
-             FROM job_postings j
-             JOIN companies c ON j.company_id = c.company_id
-             WHERE ${whereClause}`,
-            params
-        ),
+        needsEligibilityFilter
+            ? Promise.resolve({ rows: [{ total: '0' }] }) // will be recomputed after filter
+            : query(
+                `SELECT COUNT(*) AS total
+                 FROM job_postings j
+                 JOIN companies c ON j.company_id = c.company_id
+                 WHERE ${whereClause}`,
+                params
+            ),
         query(
         `SELECT j.job_id, j.job_title, j.job_description, j.job_location,
                 j.salary_package, j.salary_min, j.salary_max,
@@ -462,9 +640,12 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
                 COALESCE(pc.position_count, 0) AS position_count,
                 COALESCE(ac.total_applications, 0) AS total_applications,
                 -- Eligibility criteria for inline evaluation
+                ec.criteria_id,
                 ec.min_overall_cgpa, ec.max_live_kts,
                 ec.min_tenth_percentage, ec.min_twelfth_percentage, ec.min_diploma_percentage,
                 ec.allowed_genders, ec.allowed_departments, ec.allowed_gap_statuses,
+                ec.min_existing_package, ec.max_existing_package,
+                ec.min_skill_match_percentage,
                 ec.exclude_already_placed
          FROM job_postings j
          JOIN companies c ON j.company_id = c.company_id
@@ -484,8 +665,8 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
          ) ac ON ac.job_id = j.job_id
          WHERE ${whereClause}
          ORDER BY ${sortCol} ${sortOrd}, j.job_title ASC
-         LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}`,
-        [...params, studentId, limit, offset]
+         ${paginationClause}`,
+        jobQueryParams
         ),
         getStudentProfile(studentId, collegeId),
     ]);
@@ -530,20 +711,11 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         isPlaced = placedCheck.rows.length > 0;
     }
 
+    // Batch skill match check for jobs that have min_skill_match_percentage
+    const skillMatchMap = await batchSkillMatch(studentId, jobsResult.rows);
+
     const jobs = jobsResult.rows.map(row => {
-        // Inline eligibility evaluation using criteria from LEFT JOIN
-        let is_eligible = true;
-        if (row.min_overall_cgpa != null || row.max_live_kts != null || row.allowed_genders != null) {
-            // Has criteria — evaluate against student profile
-            const issues = [
-                ...checkAcademicCriteria(row, studentProfile),
-                ...checkDemographicCriteria(row, studentProfile),
-            ];
-            if (row.exclude_already_placed && isPlaced) {
-                issues.push('Already placed');
-            }
-            is_eligible = issues.length === 0;
-        }
+        const eligResult = evaluateInlineEligibility(row, studentProfile, isPlaced, skillMatchMap);
 
         return {
         job_id: row.job_id,
@@ -574,9 +746,24 @@ async function getAvailableJobs(studentId, collegeId, filters = {}) {
         has_applied: row.application_id != null,
         has_denied: row.denial_id != null,
         // Eligibility
-        is_eligible,
+        is_eligible: eligResult.is_eligible,
+        eligibility_issues: eligResult.issues.length > 0 ? eligResult.issues : null,
+        skill_match_percentage: eligResult.skill_match_percentage,
+        // Tier
+        tier_id: row.tier_id ?? null,
+        tier_name: row.tier_name ?? null,
+        tier_level: row.tier_level ?? null,
     };
     });
+
+    // Post-filter by eligibility if requested, then paginate the filtered set
+    if (needsEligibilityFilter) {
+        const wantEligible = eligibleOnly === 'true';
+        const filteredJobs = jobs.filter(j => wantEligible ? j.is_eligible : !j.is_eligible);
+        const filteredTotal = filteredJobs.length;
+        const paginatedJobs = filteredJobs.slice(offset, offset + limit);
+        return { jobs: paginatedJobs, total: filteredTotal, page, limit, placement_context: placementContext };
+    }
 
     return { jobs, total, page, limit, placement_context: placementContext };
 }
@@ -594,7 +781,7 @@ async function getJobDetails(jobId, studentId, collegeId) {
     }
 
     // 2. Fetch all supplementary data — chunked to max 3 connections at a time
-    const [positionsResult, criteriaResult, roundsResult, questionsResult, appResult, denialResult, appCountResult] = await chunkedQuery([
+    const [positionsResult, criteriaResult, roundsResult, questionsResult, appResult, denialResult, appCountResult, requiredSkillsResult] = await chunkedQuery([
         // Positions
         {
             text: `SELECT position_id, position_name, position_description, vacancies, position_status
@@ -648,6 +835,15 @@ async function getJobDetails(jobId, studentId, collegeId) {
              WHERE job_id = $1`,
             params: [jobId],
         },
+        // Required skills for skill-based matching
+        {
+            text: `SELECT jrs.skill_id, sk.skill_name, sk.skill_category
+             FROM job_required_skills jrs
+             JOIN skills sk ON jrs.skill_id = sk.skill_id
+             WHERE jrs.job_id = $1
+             ORDER BY sk.skill_name ASC`,
+            params: [jobId],
+        },
     ], 3);
 
     const criteria = criteriaResult.rows[0] || null;
@@ -686,17 +882,7 @@ async function getJobDetails(jobId, studentId, collegeId) {
             vacancies: row.vacancies,
         })),
         eligibility_criteria: criteria
-            ? {
-                min_overall_cgpa: criteria.min_overall_cgpa == null ? null : Number.parseFloat(criteria.min_overall_cgpa),
-                max_live_kts: criteria.max_live_kts,
-                min_tenth_percentage: criteria.min_tenth_percentage == null ? null : Number.parseFloat(criteria.min_tenth_percentage),
-                min_twelfth_percentage: criteria.min_twelfth_percentage == null ? null : Number.parseFloat(criteria.min_twelfth_percentage),
-                min_diploma_percentage: criteria.min_diploma_percentage == null ? null : Number.parseFloat(criteria.min_diploma_percentage),
-                allowed_genders: criteria.allowed_genders ?? null,
-                allowed_departments: criteria.allowed_departments ?? null,
-                allowed_gap_statuses: criteria.allowed_gap_statuses ?? null,
-                exclude_already_placed: criteria.exclude_already_placed ?? false,
-            }
+            ? { ...formatCriteriaResponse(criteria), required_skills: requiredSkillsResult.rows }
             : null,
         rounds: roundsResult.rows.map(row => ({
             round_id: row.round_id,
@@ -738,10 +924,15 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
         getStudentProfile(studentId, collegeId),
     ]);
 
-    // Run eligibility + blocker checks in parallel
-    const [eligibility, blockers] = await Promise.all([
+    // Run eligibility + blocker checks + placement check in parallel
+    const [eligibility, blockers, placedCheck] = await Promise.all([
         evaluateEligibility(jobId, student),
         checkApplicationBlockers(studentId, student, job),
+        query(
+            `SELECT 1 FROM placement_results
+             WHERE student_id = $1 AND placement_status IN ('accepted', 'joined') LIMIT 1`,
+            [studentId]
+        ),
     ]);
 
     // Fetch policy info for frontend (tier-based placement status)
@@ -760,6 +951,7 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
             is_eligible: eligibility.is_eligible,
             issues: eligibility.issues,
             criteria: eligibility.criteria,
+            skill_match: eligibility.skill_match,
         },
         student_snapshot: {
             overall_cgpa: student.overall_cgpa == null ? null : Number.parseFloat(student.overall_cgpa),
@@ -771,6 +963,8 @@ async function checkJobEligibility(jobId, studentId, collegeId) {
             gender: student.gender ?? null,
             dept_name: student.dept_name,
             gap_status: student.any_gap_during_education ? 'gap' : 'no_gap',
+            existing_package: student.existing_package == null ? 0 : Number.parseFloat(student.existing_package),
+            is_placed: placedCheck.rows.length > 0,
             profile_is_approved: student.profile_is_approved,
         },
         blockers,
@@ -1042,11 +1236,11 @@ async function applyForJob(jobId, studentId, collegeId, data) {
 
     await validateAnswers(jobId, data);
 
-    const client = await getClient();
     let retries = 0;
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
+        const client = await getClient();
         try {
             await client.query('BEGIN');
 
@@ -1199,6 +1393,7 @@ async function denyJob(jobId, studentId, collegeId, data) {
         `INSERT INTO application_denials
             (student_id, job_id, college_id, denial_reason, additional_comments)
          VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (student_id, job_id) DO NOTHING
          RETURNING ${DENIAL_RETURNING_COLUMNS}`,
         [
             studentId,
@@ -1208,6 +1403,13 @@ async function denyJob(jobId, studentId, collegeId, data) {
             data.additional_comments || null,
         ]
     );
+
+    if (result.rows.length === 0) {
+        throw Object.assign(
+            new Error(ERROR_MESSAGES.ALREADY_OPTED_OUT),
+            { status: 409 }
+        );
+    }
 
     const denial = result.rows[0];
 

@@ -26,6 +26,14 @@ const recordExternalPlacementSchema = Joi.object({
             'any.required': 'Company is required',
         }),
 
+    job_id: Joi.string()
+        .uuid()
+        .optional()
+        .allow(null)
+        .messages({
+            'string.guid': 'Invalid job ID format',
+        }),
+
     job_title: Joi.string()
         .min(3)
         .max(300)
@@ -96,13 +104,11 @@ const recordExternalPlacementSchema = Joi.object({
         .allow(null),
 
     offer_letter_url: Joi.string()
-        .uri({ scheme: ['http', 'https'] })
         .max(2048)
         .optional()
         .allow(null, ''),
 
     joining_letter_url: Joi.string()
-        .uri({ scheme: ['http', 'https'] })
         .max(2048)
         .optional()
         .allow(null, ''),

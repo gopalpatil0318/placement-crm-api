@@ -24,11 +24,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/user.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { authLimiter, apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     collegeLoginSchema,
@@ -88,7 +88,7 @@ router.post(
 router.post(
     '/create_user',
     authenticate,
-    requireRole(ROLES.COLLEGEADMIN),
+    requirePermission(PERMISSIONS.USERS_MANAGE),
     apiLimiter,
     validate(createUserSchema),
     asyncHandler(controller.createUser)
@@ -97,7 +97,7 @@ router.post(
 router.get(
     '/get_all_users',
     authenticate,
-    requireRole(ROLES.COLLEGEADMIN),
+    requirePermission(PERMISSIONS.USERS_VIEW),
     apiLimiter,
     validate(listUsersSchema, 'query'),
     asyncHandler(controller.getAllUsers)
@@ -106,7 +106,7 @@ router.get(
 router.get(
     '/get_user/:userId',
     authenticate,
-    requireRole(ROLES.COLLEGEADMIN),
+    requirePermission(PERMISSIONS.USERS_VIEW),
     apiLimiter,
     validate(userIdParamSchema, 'params'),
     asyncHandler(controller.getUser)
@@ -115,7 +115,7 @@ router.get(
 router.put(
     '/update_user/:userId',
     authenticate,
-    requireRole(ROLES.COLLEGEADMIN),
+    requirePermission(PERMISSIONS.USERS_MANAGE),
     apiLimiter,
     validate(userIdParamSchema, 'params'),
     validate(updateUserSchema),
@@ -125,7 +125,7 @@ router.put(
 router.patch(
     '/toggle_user_status/:userId',
     authenticate,
-    requireRole(ROLES.COLLEGEADMIN),
+    requirePermission(PERMISSIONS.USERS_MANAGE),
     apiLimiter,
     validate(userIdParamSchema, 'params'),
     validate(toggleUserStatusSchema),

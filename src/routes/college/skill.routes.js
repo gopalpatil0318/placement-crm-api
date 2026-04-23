@@ -15,11 +15,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/skill.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     createSkillSchema,
@@ -28,12 +28,13 @@ const {
     updateSkillSchema,
 } = require('../../validators/college/skill.validator');
 
-// All routes: authenticate + college admin/TPO + rate limit
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All routes: authenticate + rate limit
+router.use(authenticate, apiLimiter);
 
 // #103 — Create skill
 router.post(
     '/create_skill',
+    requirePermission(PERMISSIONS.SKILLS_MANAGE),
     validate(createSkillSchema),
     asyncHandler(controller.createSkill)
 );
@@ -41,6 +42,7 @@ router.post(
 // #104 — Get all skills
 router.get(
     '/get_all_skills',
+    requirePermission(PERMISSIONS.SKILLS_VIEW),
     validate(listSkillsSchema, 'query'),
     asyncHandler(controller.getAllSkills)
 );
@@ -48,6 +50,7 @@ router.get(
 // #105 — Delete skill
 router.delete(
     '/delete_skill/:skillId',
+    requirePermission(PERMISSIONS.SKILLS_MANAGE),
     validate(skillIdParamSchema, 'params'),
     asyncHandler(controller.deleteSkill)
 );
@@ -55,6 +58,7 @@ router.delete(
 // #106 — Update skill
 router.put(
     '/update_skill/:skillId',
+    requirePermission(PERMISSIONS.SKILLS_MANAGE),
     validate(skillIdParamSchema, 'params'),
     validate(updateSkillSchema),
     asyncHandler(controller.updateSkill)

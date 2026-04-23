@@ -15,11 +15,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/jobPosition.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     addPositionSchema,
@@ -29,8 +29,8 @@ const {
     positionIdParamSchema,
 } = require('../../validators/college/jobPosition.validator');
 
-// All position routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter);
+// All position routes require authentication
+router.use(authenticate, apiLimiter);
 
 // ============================================================================
 // ROUTES
@@ -38,6 +38,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO), apiLimiter)
 
 router.post(
     '/add_job_position/:jobId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(jobIdParamSchema, 'params'),
     validate(addPositionSchema),
     asyncHandler(controller.addPosition)
@@ -45,6 +46,7 @@ router.post(
 
 router.put(
     '/update_position/:positionId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(positionIdParamSchema, 'params'),
     validate(updatePositionSchema),
     asyncHandler(controller.updatePosition)
@@ -52,6 +54,7 @@ router.put(
 
 router.patch(
     '/update_position_status/:positionId',
+    requirePermission(PERMISSIONS.JOBS_UPDATE),
     validate(positionIdParamSchema, 'params'),
     validate(updatePositionStatusSchema),
     asyncHandler(controller.updatePositionStatus)

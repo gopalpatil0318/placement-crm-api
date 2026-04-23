@@ -16,11 +16,11 @@ const express = require('express');
 const router = express.Router();
 
 const controller = require('../../controllers/college/application.controller');
-const { authenticate, requireRole } = require('../../middleware/authMiddleware');
+const { authenticate, requirePermission } = require('../../middleware/authMiddleware');
 const validate = require('../../middleware/validateRequest');
 const asyncHandler = require('../../utils/asyncHandler');
 const { apiLimiter } = require('../../config/rateLimiter');
-const { ROLES } = require('../../config/constants');
+const { PERMISSIONS } = require('../../config/constants');
 
 const {
     listApplicationsSchema,
@@ -31,8 +31,8 @@ const {
     applicationIdParamSchema,
 } = require('../../validators/college/application.validator');
 
-// All application routes require COLLEGEADMIN or TPO
-router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
+// All application routes require authentication
+router.use(authenticate);
 
 // ============================================================================
 // ROUTES
@@ -40,6 +40,7 @@ router.use(authenticate, requireRole(ROLES.COLLEGEADMIN, ROLES.TPO));
 
 router.get(
     '/get_job_applications/:jobId',
+    requirePermission(PERMISSIONS.APPLICATIONS_VIEW),
     validate(jobIdParamSchema, 'params'),
     validate(listApplicationsSchema, 'query'),
     asyncHandler(controller.getJobApplications)
@@ -47,12 +48,14 @@ router.get(
 
 router.get(
     '/get_application/:applicationId',
+    requirePermission(PERMISSIONS.APPLICATIONS_VIEW),
     validate(applicationIdParamSchema, 'params'),
     asyncHandler(controller.getApplication)
 );
 
 router.patch(
     '/update_application_status/:applicationId',
+    requirePermission(PERMISSIONS.APPLICATIONS_MANAGE),
     apiLimiter,
     validate(applicationIdParamSchema, 'params'),
     validate(updateAppStatusSchema),
@@ -61,6 +64,7 @@ router.patch(
 
 router.post(
     '/bulk_update_application_status',
+    requirePermission(PERMISSIONS.APPLICATIONS_MANAGE),
     apiLimiter,
     validate(bulkUpdateAppStatusSchema),
     asyncHandler(controller.bulkUpdateApplicationStatus)
@@ -70,6 +74,7 @@ router.post(
 
 router.post(
     '/set_waitlist/:jobId',
+    requirePermission(PERMISSIONS.APPLICATIONS_MANAGE),
     apiLimiter,
     validate(jobIdParamSchema, 'params'),
     validate(setWaitlistSchema),
@@ -78,12 +83,14 @@ router.post(
 
 router.get(
     '/get_waitlisted/:jobId',
+    requirePermission(PERMISSIONS.APPLICATIONS_VIEW),
     validate(jobIdParamSchema, 'params'),
     asyncHandler(controller.getWaitlistedApplications)
 );
 
 router.post(
     '/promote_waitlist/:jobId',
+    requirePermission(PERMISSIONS.APPLICATIONS_MANAGE),
     apiLimiter,
     validate(jobIdParamSchema, 'params'),
     asyncHandler(controller.manualPromoteWaitlist)

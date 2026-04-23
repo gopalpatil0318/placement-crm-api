@@ -84,9 +84,8 @@ const createCollegeSchema = Joi.object({
         'string.pattern.base': 'Pincode must contain only digits',
     }),
 
-    college_logo_url: Joi.string().trim().uri().max(2000).optional().allow('').messages({
-        'string.uri': 'Logo URL must be a valid URL',
-        'string.max': 'Logo URL cannot exceed 2000 characters',
+    college_logo_url: Joi.string().trim().max(2000).optional().allow('').messages({
+        'string.max': 'Logo path cannot exceed 2000 characters',
     }),
     college_website: Joi.string().trim().uri().max(500).optional().allow('').messages({
         'string.uri': 'Website must be a valid URL',
@@ -165,7 +164,7 @@ const updateCollegeSchema = Joi.object({
     college_district: Joi.string().trim().max(100).optional().allow(''),
     college_state: Joi.string().trim().max(100).optional().allow(''),
     college_pincode: Joi.string().length(VALIDATION.PINCODE_LENGTH).pattern(/^\d+$/).optional().allow(''),
-    college_logo_url: Joi.string().trim().uri().max(2000).optional().allow(''),
+    college_logo_url: Joi.string().trim().max(2000).optional().allow(''),
     college_website: Joi.string().trim().uri().max(500).optional().allow(''),
     college_affiliation: Joi.string().trim().max(200).optional().allow(''),
     college_established_year: Joi.number().integer().min(1800).max(new Date().getFullYear()).optional().allow(null),

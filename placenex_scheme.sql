@@ -45,7 +45,7 @@ CREATE TABLE public.audit_log (
   user_name text NOT NULL,
   user_role text NOT NULL,
   action text NOT NULL CHECK (action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'status_change'::text, 'bulk_import'::text, 'bulk_update'::text])),
-  resource_type text NOT NULL CHECK (resource_type = ANY (ARRAY['application'::text, 'placement'::text, 'restriction'::text, 'policy'::text, 'override'::text, 'job'::text, 'student'::text, 'user'::text, 'training'::text, 'company'::text, 'department'::text, 'skill'::text, 'company_tier'::text, 'placement_setting'::text])),
+  resource_type text NOT NULL CHECK (resource_type = ANY (ARRAY['application'::text, 'placement'::text, 'restriction'::text, 'policy'::text, 'override'::text, 'job'::text, 'student'::text, 'user'::text, 'training'::text, 'company'::text, 'department'::text, 'skill'::text, 'company_tier'::text, 'placement_setting'::text, 'self_report'::text, 'job_criteria'::text, 'role_permission'::text, 'job_round'::text, 'subscription'::text])),
   resource_id uuid,
   summary text,
   old_value jsonb,
@@ -96,6 +96,7 @@ CREATE TABLE public.colleges (
   college_established_year integer,
   college_description text,
   verification_settings jsonb DEFAULT '{"bypass": {"profiles": false, "experience": false, "achievements": false, "certificates": false}, "re_verify_on_edit": {"experience": false, "achievements": false, "certificates": false, "academic_info": false, "personal_info": false, "semester_grades": false}, "auto_approve_profile_on_complete": false, "require_profile_approval_for_jobs": true}'::jsonb,
+  subscription_status text NOT NULL DEFAULT 'none' CHECK (subscription_status IN ('none', 'trial', 'active', 'expired', 'suspended')),
   CONSTRAINT colleges_pkey PRIMARY KEY (college_id)
 );
 CREATE TABLE public.companies (
@@ -212,8 +213,10 @@ CREATE TABLE public.job_eligibility_criteria (
   exclude_already_placed boolean DEFAULT false,
   created_at timestamp without time zone DEFAULT now(),
   passout_years ARRAY,
+  min_skill_match_percentage integer DEFAULT NULL,
   CONSTRAINT job_eligibility_criteria_pkey PRIMARY KEY (criteria_id),
-  CONSTRAINT job_criteria_job_fkey FOREIGN KEY (job_id) REFERENCES public.job_postings(job_id)
+  CONSTRAINT job_criteria_job_fkey FOREIGN KEY (job_id) REFERENCES public.job_postings(job_id),
+  CONSTRAINT job_eligibility_criteria_skill_match_pct_check CHECK (min_skill_match_percentage >= 0 AND min_skill_match_percentage <= 100)
 );
 CREATE TABLE public.job_eligibility_override_requests (
   override_id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -306,7 +309,7 @@ CREATE TABLE public.notifications (
   recipient_id uuid NOT NULL,
   title text NOT NULL,
   body text,
-  notification_type text NOT NULL CHECK (notification_type = ANY (ARRAY['new_job_posted'::text, 'application_received'::text, 'application_status_changed'::text, 'round_scheduled'::text, 'round_result'::text, 'offer_received'::text, 'deadline_reminder'::text, 'restriction_applied'::text, 'restriction_removed'::text, 'training_enrollment'::text, 'training_completed'::text, 'profile_incomplete'::text, 'profile_approved'::text, 'profile_rejected'::text, 'item_verified'::text, 'item_rejected'::text, 'eligibility_override_requested'::text, 'eligibility_override_approved'::text, 'eligibility_override_rejected'::text, 'general'::text, 'offer_expiring'::text, 'offer_expired'::text, 'offer_declined'::text, 'offer_revoked'::text, 'offer_accepted'::text, 'auto_withdrawn'::text, 'waitlist_promoted'::text, 'round_processing_complete'::text])),
+  notification_type text NOT NULL CHECK (notification_type = ANY (ARRAY['new_job_posted'::text, 'application_received'::text, 'application_status_changed'::text, 'round_scheduled'::text, 'round_result'::text, 'offer_received'::text, 'deadline_reminder'::text, 'restriction_applied'::text, 'restriction_removed'::text, 'training_enrollment'::text, 'training_completed'::text, 'profile_incomplete'::text, 'profile_approved'::text, 'profile_rejected'::text, 'item_verified'::text, 'item_rejected'::text, 'eligibility_override_requested'::text, 'eligibility_override_approved'::text, 'eligibility_override_rejected'::text, 'general'::text, 'offer_expiring'::text, 'offer_expired'::text, 'offer_declined'::text, 'offer_revoked'::text, 'offer_accepted'::text, 'auto_withdrawn'::text, 'waitlist_promoted'::text, 'round_processing_complete'::text, 'self_report_submitted'::text, 'self_report_approved'::text, 'self_report_rejected'::text])),
   related_entity_type text,
   related_entity_id uuid,
   is_read boolean DEFAULT false,
@@ -369,11 +372,13 @@ CREATE TABLE public.placement_settings (
   created_by uuid,
   created_at timestamp without time zone DEFAULT now(),
   updated_at timestamp without time zone DEFAULT now(),
+  max_active_applications integer DEFAULT NULL,
   CONSTRAINT placement_settings_pkey PRIMARY KEY (setting_id),
   CONSTRAINT placement_settings_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id),
   CONSTRAINT placement_settings_creator_fkey FOREIGN KEY (created_by) REFERENCES public.users(user_id),
   CONSTRAINT placement_settings_max_offers_positive CHECK (max_active_offers >= 1),
-  CONSTRAINT placement_settings_offer_days_positive CHECK (default_offer_days >= 1)
+  CONSTRAINT placement_settings_offer_days_positive CHECK (default_offer_days >= 1),
+  CONSTRAINT placement_settings_max_apps_positive CHECK (max_active_applications IS NULL OR max_active_applications >= 1)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_placement_settings_college_year ON public.placement_settings (college_id, passout_year);
 CREATE TABLE public.placement_results (
@@ -733,9 +738,17 @@ CREATE TABLE public.student_restrictions (
   CONSTRAINT student_restrictions_pkey PRIMARY KEY (restriction_id),
   CONSTRAINT student_restrictions_student_fkey FOREIGN KEY (student_id) REFERENCES public.students(student_id),
   CONSTRAINT student_restrictions_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id),
+  company_id uuid,
+  CONSTRAINT student_restrictions_pkey PRIMARY KEY (restriction_id),
+  CONSTRAINT student_restrictions_student_fkey FOREIGN KEY (student_id) REFERENCES public.students(student_id),
+  CONSTRAINT student_restrictions_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id),
   CONSTRAINT student_restrictions_restricted_by_fkey FOREIGN KEY (restricted_by) REFERENCES public.users(user_id),
-  CONSTRAINT student_restrictions_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public.users(user_id)
+  CONSTRAINT student_restrictions_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public.users(user_id),
+  CONSTRAINT student_restrictions_company_fkey FOREIGN KEY (company_id) REFERENCES public.companies(company_id)
 );
+CREATE INDEX IF NOT EXISTS idx_restrictions_company
+    ON public.student_restrictions (student_id, company_id)
+    WHERE restriction_type = 'bar_from_company' AND is_active = true;
 CREATE TABLE public.student_round_results (
   result_id uuid NOT NULL DEFAULT gen_random_uuid(),
   application_id uuid NOT NULL,
@@ -787,6 +800,9 @@ CREATE TABLE public.student_skills (
   CONSTRAINT student_skills_skill_fkey FOREIGN KEY (skill_id) REFERENCES public.skills(skill_id),
   CONSTRAINT student_skills_student_fkey FOREIGN KEY (student_id) REFERENCES public.students(student_id)
 );
+CREATE INDEX IF NOT EXISTS idx_student_skills_student ON public.student_skills (student_id, college_id);
+CREATE INDEX IF NOT EXISTS idx_student_skills_skill ON public.student_skills (skill_id, college_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_student_skills_unique ON public.student_skills (student_id, skill_id);
 CREATE TABLE public.students (
   student_id uuid NOT NULL DEFAULT gen_random_uuid(),
   college_id uuid NOT NULL,
@@ -876,6 +892,7 @@ CREATE TABLE public.users (
   user_role text NOT NULL CHECK (user_role = ANY (ARRAY['sysadmin'::text, 'collegeadmin'::text, 'teacher'::text, 'hod'::text, 'tpo'::text, 'tpc'::text])),
   user_status text NOT NULL DEFAULT 'active'::text CHECK (user_status = ANY (ARRAY['active'::text, 'inactive'::text])),
   phone_number character varying,
+  profile_picture_url text,
   created_at timestamp without time zone DEFAULT now(),
   updated_at timestamp without time zone DEFAULT now(),
   CONSTRAINT users_pkey PRIMARY KEY (user_id),
@@ -917,3 +934,146 @@ CREATE TABLE public.training_session_attendance (
 );
 CREATE INDEX idx_training_session_attendance_session ON public.training_session_attendance (session_id);
 CREATE INDEX idx_training_session_attendance_enrollment ON public.training_session_attendance (enrollment_id);
+
+-- ============================================================================
+-- E12: College Subscription & Student Quota Management
+-- ============================================================================
+
+-- ALTER: colleges table — denormalized subscription status for fast auth middleware check
+-- ALTER TABLE public.colleges ADD COLUMN subscription_status text NOT NULL DEFAULT 'none'
+--   CHECK (subscription_status IN ('none', 'trial', 'active', 'expired', 'suspended'));
+
+CREATE TABLE public.college_subscriptions (
+  subscription_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  college_id uuid NOT NULL,
+  subscription_status text NOT NULL DEFAULT 'trial'::text CHECK (subscription_status IN ('trial', 'active', 'expired', 'suspended')),
+  student_quota integer NOT NULL DEFAULT 50,
+  price_per_student numeric(10,2) NOT NULL DEFAULT 0,
+  total_amount numeric(12,2) NOT NULL DEFAULT 0,
+  amount_paid numeric(12,2) NOT NULL DEFAULT 0,
+  trial_ends_at timestamp with time zone,
+  valid_from date NOT NULL,
+  valid_to date NOT NULL,
+  grace_period_days integer NOT NULL DEFAULT 7,
+  allowed_passout_years integer[],
+  notes text,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT college_subscriptions_pkey PRIMARY KEY (subscription_id),
+  CONSTRAINT college_subscriptions_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id),
+  CONSTRAINT college_subscriptions_college_valid_from_uq UNIQUE (college_id, valid_from)
+);
+CREATE TABLE public.subscription_payments (
+  payment_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  subscription_id uuid NOT NULL,
+  college_id uuid NOT NULL,
+  amount numeric(12,2) NOT NULL CHECK (amount > 0),
+  payment_date date NOT NULL,
+  payment_method text NOT NULL DEFAULT 'bank_transfer'::text CHECK (payment_method IN ('bank_transfer', 'cheque', 'upi', 'cash', 'other')),
+  transaction_reference text,
+  receipt_number text,
+  notes text,
+  recorded_by uuid,
+  recorded_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT subscription_payments_pkey PRIMARY KEY (payment_id),
+  CONSTRAINT subscription_payments_subscription_fkey FOREIGN KEY (subscription_id) REFERENCES public.college_subscriptions(subscription_id),
+  CONSTRAINT subscription_payments_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id)
+);
+CREATE INDEX idx_students_college_active ON public.students (college_id) WHERE student_status != 'dropout';
+CREATE INDEX idx_subscriptions_college_status ON public.college_subscriptions (college_id, subscription_status);
+CREATE INDEX idx_payments_subscription ON public.subscription_payments (subscription_id);
+
+-- ============================================================================
+-- Migration 016: Off-Campus Placement Self-Reporting
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE public.self_reported_placements (
+    report_id           uuid            NOT NULL DEFAULT gen_random_uuid(),
+    student_id          uuid            NOT NULL,
+    college_id          uuid            NOT NULL,
+    form_data           jsonb           NOT NULL DEFAULT '{}'::jsonb,
+    offer_letter_url    text,
+    passout_year        integer         NOT NULL,
+    verification_status text            NOT NULL DEFAULT 'pending' CHECK (verification_status IN ('pending', 'approved', 'rejected')),
+    rejection_reason    text,
+    reviewed_by         uuid,
+    reviewed_at         timestamp with time zone,
+    resulting_placement_id uuid,
+    created_at          timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at          timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT self_reported_placements_pkey PRIMARY KEY (report_id),
+    CONSTRAINT self_reported_placements_student_fkey FOREIGN KEY (student_id) REFERENCES public.students(student_id) ON DELETE CASCADE,
+    CONSTRAINT self_reported_placements_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id) ON DELETE CASCADE,
+    CONSTRAINT self_reported_placements_reviewer_fkey FOREIGN KEY (reviewed_by) REFERENCES public.users(user_id) ON DELETE SET NULL,
+    CONSTRAINT self_reported_placements_placement_fkey FOREIGN KEY (resulting_placement_id) REFERENCES public.placement_results(placement_id) ON DELETE SET NULL,
+    CONSTRAINT self_reported_reject_reason_check CHECK (verification_status != 'rejected' OR (rejection_reason IS NOT NULL AND length(trim(rejection_reason)) >= 5)),
+    CONSTRAINT self_reported_review_fields_check CHECK ((reviewed_by IS NULL AND reviewed_at IS NULL) OR (reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL)),
+    CONSTRAINT self_reported_placement_link_check CHECK (resulting_placement_id IS NULL OR verification_status = 'approved'),
+    CONSTRAINT self_reported_form_data_check CHECK (form_data ? 'company_name' AND form_data ? 'job_title' AND form_data ? 'placement_type' AND length(form_data->>'company_name') >= 2 AND length(form_data->>'job_title') >= 3)
+);
+CREATE INDEX IF NOT EXISTS idx_self_report_college_status ON public.self_reported_placements (college_id, verification_status) WHERE verification_status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_self_report_college_status_all ON public.self_reported_placements (college_id, verification_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_self_report_student ON public.self_reported_placements (student_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_self_report_college_year ON public.self_reported_placements (college_id, passout_year);
+CREATE INDEX IF NOT EXISTS idx_self_report_form_data ON public.self_reported_placements USING gin (form_data jsonb_path_ops);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_self_report_no_duplicate ON public.self_reported_placements (student_id, college_id, (form_data->>'company_name'), (form_data->>'job_title')) WHERE verification_status != 'rejected';
+
+-- ============================================================================
+-- Migration 017: Skill-Based Job Matching
+-- ============================================================================
+
+CREATE TABLE public.job_required_skills (
+    job_skill_id    uuid            NOT NULL DEFAULT gen_random_uuid(),
+    job_id          uuid            NOT NULL,
+    skill_id        uuid            NOT NULL,
+    created_at      timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT job_required_skills_pkey PRIMARY KEY (job_skill_id),
+    CONSTRAINT job_required_skills_job_fkey FOREIGN KEY (job_id) REFERENCES public.job_postings(job_id) ON DELETE CASCADE,
+    CONSTRAINT job_required_skills_skill_fkey FOREIGN KEY (skill_id) REFERENCES public.skills(skill_id) ON DELETE CASCADE,
+    CONSTRAINT job_required_skills_job_skill_unique UNIQUE (job_id, skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_required_skills_job ON public.job_required_skills (job_id);
+
+-- ============================================================================
+-- Migration 018: Dynamic Role-Based Permissions + Multi-Department Users
+-- ============================================================================
+
+CREATE TABLE public.college_role_permissions (
+    id              uuid            NOT NULL DEFAULT gen_random_uuid(),
+    college_id      uuid            NOT NULL,
+    role            text            NOT NULL,
+    permissions     jsonb           NOT NULL DEFAULT '[]'::jsonb,
+    dept_scoped     boolean         NOT NULL DEFAULT false,
+    created_at      timestamptz     NOT NULL DEFAULT now(),
+    updated_at      timestamptz     NOT NULL DEFAULT now(),
+    CONSTRAINT college_role_permissions_pkey PRIMARY KEY (id),
+    CONSTRAINT college_role_permissions_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id) ON DELETE CASCADE,
+    CONSTRAINT college_role_permissions_role_check CHECK (role IN ('tpo', 'tpc', 'hod', 'teacher')),
+    CONSTRAINT college_role_permissions_college_role_uq UNIQUE (college_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_college_role_permissions_lookup ON public.college_role_permissions (college_id, role);
+
+CREATE TABLE public.user_departments (
+    id              uuid            NOT NULL DEFAULT gen_random_uuid(),
+    user_id         uuid            NOT NULL,
+    dept_id         uuid            NOT NULL,
+    college_id      uuid            NOT NULL,
+    assigned_at     timestamptz     NOT NULL DEFAULT now(),
+    CONSTRAINT user_departments_pkey PRIMARY KEY (id),
+    CONSTRAINT user_departments_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE,
+    CONSTRAINT user_departments_dept_fkey FOREIGN KEY (dept_id) REFERENCES public.departments(dept_id) ON DELETE CASCADE,
+    CONSTRAINT user_departments_college_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(college_id) ON DELETE CASCADE,
+    CONSTRAINT user_departments_user_dept_uq UNIQUE (user_id, dept_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_departments_user ON public.user_departments (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_departments_dept ON public.user_departments (dept_id, college_id);
+CREATE INDEX IF NOT EXISTS idx_user_departments_college ON public.user_departments (college_id);

@@ -69,8 +69,8 @@ const placementIdParamSchema = Joi.object({
 // ============================================================================
 
 const uploadDocumentsSchema = Joi.object({
-    offer_letter_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).optional().allow(null, ''),
-    joining_letter_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).optional().allow(null, ''),
+    offer_letter_url: Joi.string().max(2000).optional().allow(null, ''),
+    joining_letter_url: Joi.string().max(2000).optional().allow(null, ''),
 }).or('offer_letter_url', 'joining_letter_url').messages({
     'object.missing': 'Provide at least one document URL (offer_letter_url or joining_letter_url)',
 });

@@ -24,21 +24,13 @@ const {
 
 const stripHtml = (v) => (typeof v === 'string' ? v.replaceAll(/<[^>]*>/g, '') : v);
 
-const safeUrlField = () =>
+const safeFileField = () =>
     Joi.string()
-        .uri()
         .max(2000)
         .optional()
         .allow(null, '')
-        .custom((value, helpers) => {
-            if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
-                return helpers.error('string.uri');
-            }
-            return value;
-        })
         .messages({
-            'string.uri': 'URL must be a valid http or https URL',
-            'string.max': 'URL cannot exceed 2000 characters',
+            'string.max': 'File path cannot exceed 2000 characters',
         });
 
 // ============================================================================
@@ -115,10 +107,10 @@ const createPlacementSchema = Joi.object({
         }),
 
     // Offer letter
-    offer_letter_url: safeUrlField(),
+    offer_letter_url: safeFileField(),
 
     // Joining letter
-    joining_letter_url: safeUrlField(),
+    joining_letter_url: safeFileField(),
 })
     .custom((value, helpers) => {
         const type = value.placement_type;
@@ -232,9 +224,9 @@ const updatePlacementSchema = Joi.object({
         .optional()
         .allow(null),
 
-    offer_letter_url: safeUrlField(),
+    offer_letter_url: safeFileField(),
 
-    joining_letter_url: safeUrlField(),
+    joining_letter_url: safeFileField(),
 }).min(1).messages({
     'object.min': 'At least one field must be provided to update',
 });
@@ -365,8 +357,8 @@ const bulkCreatePlacementsSchema = Joi.object({
                 internship_stipend: Joi.number().precision(2).min(0).optional().allow(null),
                 internship_duration: Joi.string().max(100).optional().allow(null, ''),
                 internship_start_date: Joi.date().iso().optional().allow(null),
-                offer_letter_url: safeUrlField(),
-                joining_letter_url: safeUrlField(),
+                offer_letter_url: safeFileField(),
+                joining_letter_url: safeFileField(),
             })
                 .custom((value, helpers) => {
                     const type = value.placement_type;
